@@ -43,8 +43,12 @@ static PyObject* _custom_eval_frame(
     PyObject* frame = Py_NewRef(_frame);
     PyObject* preprocess = PyTuple_GetItem(callback, 0);
     PyObject* postprocess = PyTuple_GetItem(callback, 1);
+    PyObject* trace_func = PyTuple_GetItem(callback, 2);
     PyObject* result_preprocess = PyObject_CallFunction(preprocess, "O", (PyObject*) frame);
+    _frame->f_trace = trace_func;
+    _frame->f_trace_opcodes = 1;
     PyObject* result = _PyEval_EvalFrameDefault(tstate, _frame, throw_flag);
+    _frame->f_trace = NULL;
     PyObject* result_postprocess = PyObject_CallFunction(postprocess, "O", (PyObject*) frame);
     Py_DECREF(frame);
     set_eval_frame_callback(callback);
@@ -110,10 +114,8 @@ static PyObject* set_eval_frame(PyObject* self, PyObject* args) {
         return NULL;
     }
     if (new_callback != Py_None) {
-        PyObject* preprocess = PyTuple_GetItem(new_callback, 0);
-        PyObject* postprocess = PyTuple_GetItem(new_callback, 1);
-        if (!PyTuple_Check(new_callback) || PyTuple_Size(new_callback) != 2 || PyCallable_Check(PyTuple_GetItem(new_callback, 0)) != 1 || PyCallable_Check(PyTuple_GetItem(new_callback, 1)) != 1) {
-            PyErr_SetString(PyExc_TypeError, "should be two callables");
+        if (!PyTuple_Check(new_callback) || PyTuple_Size(new_callback) != 3 || PyCallable_Check(PyTuple_GetItem(new_callback, 0)) != 1 || PyCallable_Check(PyTuple_GetItem(new_callback, 1)) != 1 || PyCallable_Check(PyTuple_GetItem(new_callback, 2)) != 1) {
+            PyErr_SetString(PyExc_TypeError, "should be callables");
             return NULL;
         }
     }
