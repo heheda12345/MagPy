@@ -13,7 +13,7 @@
     } else {                                                                \
     }
 
-static PyObject *skip_files = NULL;
+static PyObject *skip_files = Py_None;
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 static int active_working_threads = 0;
 static PyObject *(*previous_eval_frame)(PyThreadState *tstate,
@@ -58,6 +58,7 @@ static PyObject* custom_eval_frame_shim(
         return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
     }
     printf("co_filename %s\n", _PyUnicode_AsString(frame->f_code->co_filename));
+    assert(PyObject_IsInstance(skip_files, (PyObject*)&PySet_Type));
     if(PySet_Contains(skip_files, frame->f_code->co_filename)) {
         return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
     }
@@ -125,10 +126,16 @@ static PyObject* set_eval_frame(PyObject* self, PyObject* args) {
     return old_callback;
 }
 
+
+// TODO: in a more elegant way
 static PyObject* set_skip_files(PyObject* self, PyObject* args) {
+    if (skip_files != Py_None) {
+        Py_DECREF(skip_files);
+    }
     if (!PyArg_ParseTuple(args, "O", &skip_files)) {
         PyErr_SetString(PyExc_TypeError, "invalid parameter");
     }
+    Py_INCREF(skip_files);
     Py_RETURN_NONE;
 }
 
