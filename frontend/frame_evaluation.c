@@ -41,7 +41,11 @@ static PyObject* _custom_eval_frame(
         PyObject* callback){
     set_eval_frame_callback(Py_None);
     PyObject* frame = Py_NewRef(_frame);
-    PyObject* result = PyObject_CallFunction(callback, "O", (PyObject*) frame);
+    PyObject* preprocess = PyTuple_GetItem(callback, 0);
+    PyObject* postprocess = PyTuple_GetItem(callback, 1);
+    PyObject* result_preprocess = PyObject_CallFunction(preprocess, "O", (PyObject*) frame);
+    PyObject* result = _PyEval_EvalFrameDefault(tstate, _frame, throw_flag);
+    PyObject* result_postprocess = PyObject_CallFunction(postprocess, "O", (PyObject*) frame);
     Py_DECREF(frame);
     set_eval_frame_callback(callback);
     return result;
@@ -105,9 +109,13 @@ static PyObject* set_eval_frame(PyObject* self, PyObject* args) {
         PyErr_SetString(PyExc_TypeError, "invalid parameter");
         return NULL;
     }
-    if (new_callback != Py_None && !PyCallable_Check(new_callback)) {
-        PyErr_SetString(PyExc_TypeError, "parameter must be callable");
-        return NULL;
+    if (new_callback != Py_None) {
+        PyObject* preprocess = PyTuple_GetItem(new_callback, 0);
+        PyObject* postprocess = PyTuple_GetItem(new_callback, 1);
+        if (!PyTuple_Check(new_callback) || PyTuple_Size(new_callback) != 2 || PyCallable_Check(PyTuple_GetItem(new_callback, 0)) != 1 || PyCallable_Check(PyTuple_GetItem(new_callback, 1)) != 1) {
+            PyErr_SetString(PyExc_TypeError, "should be two callables");
+            return NULL;
+        }
     }
     PyThreadState* tstate = PyThreadState_GET();
     PyObject* old_callback = get_current_eval_frame_callback();

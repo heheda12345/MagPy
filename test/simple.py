@@ -3,6 +3,7 @@ from frontend.compile import compile
 
 a = 1
 def f(b):
+    print("=============runnning f==============")
     return a + b
 
 compiled_f = compile(f)
