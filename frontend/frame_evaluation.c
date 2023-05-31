@@ -40,17 +40,17 @@ static PyObject* _custom_eval_frame(
         int throw_flag,
         PyObject* callback){
     set_eval_frame_callback(Py_None);
-    PyObject* frame = Py_NewRef(_frame);
+    Py_INCREF(_frame);
     PyObject* preprocess = PyTuple_GetItem(callback, 0);
     PyObject* postprocess = PyTuple_GetItem(callback, 1);
     PyObject* trace_func = PyTuple_GetItem(callback, 2);
-    PyObject* result_preprocess = PyObject_CallFunction(preprocess, "O", (PyObject*) frame);
+    PyObject* result_preprocess = PyObject_CallFunction(preprocess, "O", (PyObject*) _frame);
     _frame->f_trace = trace_func;
     _frame->f_trace_opcodes = 1;
     PyObject* result = _PyEval_EvalFrameDefault(tstate, _frame, throw_flag);
     _frame->f_trace = NULL;
-    PyObject* result_postprocess = PyObject_CallFunction(postprocess, "O", (PyObject*) frame);
-    Py_DECREF(frame);
+    PyObject* result_postprocess = PyObject_CallFunction(postprocess, "O", (PyObject*) _frame);
+    Py_DECREF(_frame);
     set_eval_frame_callback(callback);
     return result;
 }
@@ -149,9 +149,22 @@ static PyObject* set_skip_files(PyObject* self, PyObject* args) {
     Py_RETURN_NONE;
 }
 
+static PyObject* get_value_stack_from_top(PyObject* self, PyObject* args) {
+    PyFrameObject* frame = NULL;
+    int index = 0;
+    if (!PyArg_ParseTuple(args, "Oi", &frame, &index)) {
+        PyErr_SetString(PyExc_TypeError, "invalid parameter");
+        return NULL;
+    }
+    PyObject* value = frame->f_stacktop[-index - 1];
+    Py_INCREF(value);
+    return value;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame, METH_VARARGS, NULL},
     {"set_skip_files", set_skip_files, METH_VARARGS, NULL},
+    {"get_value_stack_from_top", get_value_stack_from_top, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}
 };
 
