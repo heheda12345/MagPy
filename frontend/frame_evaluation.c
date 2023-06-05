@@ -3,6 +3,8 @@
 #include <pythread.h>
 #include <frameobject.h>
 
+#include <stdbool.h>
+
 #define unlikely(x) __builtin_expect((x), 0)
 
 
@@ -12,6 +14,16 @@
         abort();                                                            \
     } else {                                                                \
     }
+
+
+#define NULL_CHECK(val)                                             \
+    if (unlikely((val) == NULL)) {                                  \
+        fprintf(stderr, "NULL ERROR: %s:%d\n", __FILE__, __LINE__); \
+        PyErr_Print();                                              \
+        abort();                                                    \
+    } else {                                                        \
+    }
+
 
 static PyObject *skip_files = Py_None;
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
@@ -33,6 +45,65 @@ inline static void set_eval_frame_callback(PyObject* obj) {
     PyThread_tss_set(&eval_frame_callback_key, obj);
 }
 
+inline static PyObject* eval_frame_default(
+        PyThreadState* tstate,
+        PyFrameObject* frame,
+        int throw_flag) {
+    if (tstate == NULL) {
+        tstate = PyThreadState_GET();
+    }
+    if (previous_eval_frame) {
+        return previous_eval_frame(tstate, frame, throw_flag);
+    }
+    else {
+        return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
+    }
+}
+
+inline static PyObject* eval_custom_code(
+        PyThreadState* tstate,
+        PyFrameObject* frame,
+        PyCodeObject* code,
+        int throw_flag) {
+    Py_ssize_t ncells = 0;
+    Py_ssize_t nfrees = 0;
+    Py_ssize_t nlocals_new = code->co_nlocals;
+    Py_ssize_t nlocals_old = frame->f_code->co_nlocals;
+
+    ncells = PyTuple_GET_SIZE(code->co_cellvars);
+    nfrees = PyTuple_GET_SIZE(code->co_freevars);
+
+    NULL_CHECK(tstate);
+    NULL_CHECK(frame);
+    NULL_CHECK(code);
+    CHECK(nlocals_new >= nlocals_old);
+    CHECK(ncells == PyTuple_GET_SIZE(frame->f_code->co_cellvars));
+    CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
+
+    PyFrameObject* shadow = PyFrame_New(tstate, code, frame->f_globals, NULL);
+    if (shadow == NULL) {
+        return NULL;
+    }
+
+    PyObject** fastlocals_old = frame->f_localsplus;
+    PyObject** fastlocals_new = shadow->f_localsplus;
+
+    for (Py_ssize_t i = 0; i < nlocals_old; i++) {
+        Py_XINCREF(fastlocals_old[i]);
+        fastlocals_new[i] = fastlocals_old[i];
+    }
+
+    for (Py_ssize_t i = 0; i < ncells + nfrees; i++) {
+        Py_XINCREF(fastlocals_old[nlocals_old + i]);
+        fastlocals_new[nlocals_new + i] = fastlocals_old[nlocals_old + i];
+    }
+
+    PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
+
+    Py_DECREF(shadow);
+    return result;
+}
+
 // run the callback
 static PyObject* _custom_eval_frame(
         PyThreadState* tstate,
@@ -45,10 +116,13 @@ static PyObject* _custom_eval_frame(
     PyObject* postprocess = PyTuple_GetItem(callback, 1);
     PyObject* trace_func = PyTuple_GetItem(callback, 2);
     PyObject* result_preprocess = PyObject_CallFunction(preprocess, "O", (PyObject*) _frame);
+    PyObject* result = eval_custom_code(tstate, _frame, result_preprocess, false);
+    /*
     _frame->f_trace = trace_func;
     _frame->f_trace_opcodes = 1;
     PyObject* result = _PyEval_EvalFrameDefault(tstate, _frame, throw_flag);
     _frame->f_trace = NULL;
+    */
     PyObject* result_postprocess = PyObject_CallFunction(postprocess, "O", (PyObject*) _frame);
     Py_DECREF(_frame);
     set_eval_frame_callback(callback);
@@ -65,7 +139,6 @@ static PyObject* custom_eval_frame_shim(
     if (callback == Py_None) {
         return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
     }
-    printf("co_filename %s\n", _PyUnicode_AsString(frame->f_code->co_filename));
     assert(PyObject_IsInstance(skip_files, (PyObject*)&PySet_Type));
     if(PySet_Contains(skip_files, frame->f_code->co_filename)) {
         return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);

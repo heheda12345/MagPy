@@ -1,6 +1,6 @@
 import dataclasses
 from typing import Any, Dict, List, Optional, Tuple
-from bytecode_analysis import stacksize_analysis
+from frontend.bytecode_analysis import stacksize_analysis
 import dis
 import types
 import sys
@@ -305,35 +305,58 @@ def get_instructions(code: types.CodeType) -> List[Instruction]:
 
 # test code
 
-import inspect
-
-def test():
-    test_func_frame = inspect.currentframe().f_back
-    code = test_func_frame.f_code
-    insts = get_instructions(code)
-    for inst in insts:
-        print(inst)
-    print("=====================")
-    insts.insert(3, Instruction(116, 'LOAD_GLOBAL', 0, 'print'))
-    insts.insert(4, Instruction(100, 'LOAD_CONST', 2, 888))
-    insts.insert(5, Instruction(131, 'CALL_FUNCTION', 1, 1))
-    insts.insert(6, Instruction(100, 'LOAD_CONST', 0, None))
-    insts.insert(7, Instruction(1, 'POP_TOP', None, None))
-    insts.insert(8, Instruction(83, 'RETURN_VALUE', None, None))
-    for inst in insts:
-        print(inst)
+def add_print_to_return(code: types.CodeType) -> List[Instruction]:
+    instructions = get_instructions(code)
+    old_const_count = len(code.co_consts)
+    for i, inst in enumerate(instructions):
+        if inst.opcode == dis.opmap["RETURN_VALUE"]:
+            new_insts = [
+                create_instruction("DUP_TOP"),
+                create_instruction("LOAD_GLOBAL", "print"),
+                create_instruction("ROT_TWO"),
+                create_instruction("LOAD_CONST", old_const_count, "print: return value is"),
+                create_instruction("ROT_TWO"),
+                create_instruction("CALL_FUNCTION", 2),
+                create_instruction("POP_TOP")
+            ]
+            for j, new_inst in enumerate(new_insts):
+                instructions.insert(i + j, new_inst)
+            break
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
-    code_options["co_consts"] = (None, 666, 888)
-    assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
-    new_code = assemble_instructions(insts, code_options)[1]
-    exec(new_code, {}, {})
+    code_options["co_consts"] = (*code.co_consts, "return value is")
+    new_code = assemble_instructions(instructions, code_options)[1]
+    return new_code
 
-
-def test_func():
-    print(666)
-    test()
-        
+import inspect
 
 if __name__ == '__main__':
+    def test():
+        test_func_frame = inspect.currentframe().f_back
+        code = test_func_frame.f_code
+        insts = get_instructions(code)
+        for inst in insts:
+            print(inst)
+        print("=====================")
+        insts.insert(3, Instruction(116, 'LOAD_GLOBAL', 0, 'print'))
+        insts.insert(4, Instruction(100, 'LOAD_CONST', 2, 888))
+        insts.insert(5, Instruction(131, 'CALL_FUNCTION', 1, 1))
+        insts.insert(6, Instruction(100, 'LOAD_CONST', 0, None))
+        insts.insert(7, Instruction(1, 'POP_TOP', None, None))
+        insts.insert(8, Instruction(83, 'RETURN_VALUE', None, None))
+        for inst in insts:
+            print(inst)
+        keys = get_code_keys()
+        code_options = {k: getattr(code, k) for k in keys}
+        code_options["co_consts"] = (None, 666, 888)
+        assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
+        new_code = assemble_instructions(insts, code_options)[1]
+        exec(new_code, {}, {})
+
+
+    def test_func():
+        print(666)
+        test()
+        
+
     test_func()

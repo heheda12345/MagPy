@@ -1,4 +1,5 @@
 from frontend.c_api import set_eval_frame, set_skip_files, get_value_stack_from_top
+from frontend.bytecode_writter import add_print_to_return
 import dis
 import sys
 
@@ -10,10 +11,11 @@ def simple_trace_func(frame, event, arg):
 def preprocess_frame(frame):
     try:
         print(f"preprocess frame {frame.f_code.co_filename}", id(frame))
-        print("bytecode", list(dis.get_instructions(frame.f_code)))
-        sys.settrace(simple_trace_func)
+        new_code = add_print_to_return(frame.f_code)
+        # sys.settrace(simple_trace_func)
     except Exception as e:
-        print(e)
+        print("exception in preprocess:", e)
+    return new_code
 
 def postprocess_frame(frame):
     try:
@@ -56,9 +58,9 @@ def compile(f):
         try:
             return f(*args, **kwargs)
         except Exception as e:
-            print(e)
+            print("exception in _fn:", e, type(e))
+            raise e
         finally:
-            print("restoring frame")
-            print("prior:", prior)
+            print("restoring frame, prior =", prior)
             set_eval_frame(prior)
     return _fn
