@@ -91,6 +91,7 @@ HAS_NAME = set(dis.hasname)
 
 # map from var name to index
 def fix_vars(instructions: List[Instruction], code_options):
+    print("co_names:", code_options["co_names"])
     varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
     for i in range(len(instructions)):
@@ -253,6 +254,7 @@ def assemble(instructions: List[Instruction], firstlineno):
 
 
 def assemble_instructions(instructions: List[Instruction], code_options) -> types.CodeType:
+    code_options["co_names"] = (*code_options["co_names"], "fake_print")
     fix_vars(instructions, code_options)
     keys = get_code_keys()
     dirty = True
@@ -312,7 +314,7 @@ def add_print_to_return(code: types.CodeType) -> List[Instruction]:
         if inst.opcode == dis.opmap["RETURN_VALUE"]:
             new_insts = [
                 create_instruction("DUP_TOP"),
-                create_instruction("LOAD_GLOBAL", "print"),
+                create_instruction("LOAD_GLOBAL", "fake_print"),
                 create_instruction("ROT_TWO"),
                 create_instruction("LOAD_CONST", old_const_count, "print: return value is"),
                 create_instruction("ROT_TWO"),

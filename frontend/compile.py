@@ -10,11 +10,12 @@ def simple_trace_func(frame, event, arg):
 
 def preprocess_frame(frame):
     try:
-        print(f"preprocess frame {frame.f_code.co_filename}", id(frame))
+        print(f"preprocess frame {frame.f_code.co_filename}")
         new_code = add_print_to_return(frame.f_code)
         # sys.settrace(simple_trace_func)
     except Exception as e:
-        print("exception in preprocess:", e)
+        print("exception in preprocess:", e, type(e))
+        raise e
     return new_code
 
 def postprocess_frame(frame):
@@ -49,10 +50,16 @@ def trace_func(frame, event, arg):
             print(f"trace_func: opcode is {dis.opname[opcode]}")
 
 
+def fake_print(*args, **kwargs):
+    print("fake_print:", *args, **kwargs)
+    return None
+
 def compile(f):
     if not hasattr(compile, "skip_file_setted"):
         set_skip_files(set())
         compile.skip_file_setted = True
+    import builtins
+    setattr(builtins, "fake_print", fake_print)
     def _fn(*args, **kwargs):
         prior = set_eval_frame((preprocess_frame, postprocess_frame, trace_func))
         try:
