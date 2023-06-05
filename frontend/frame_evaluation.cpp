@@ -3,8 +3,6 @@
 #include <pythread.h>
 #include <frameobject.h>
 
-#include <stdbool.h>
-
 #define unlikely(x) __builtin_expect((x), 0)
 
 
@@ -116,7 +114,7 @@ static PyObject* _custom_eval_frame(
     PyObject* postprocess = PyTuple_GetItem(callback, 1);
     PyObject* trace_func = PyTuple_GetItem(callback, 2);
     PyObject* result_preprocess = PyObject_CallFunction(preprocess, "O", (PyObject*) _frame);
-    PyObject* result = eval_custom_code(tstate, _frame, result_preprocess, false);
+    PyObject* result = eval_custom_code(tstate, _frame, (PyCodeObject*) result_preprocess, false);
     /*
     _frame->f_trace = trace_func;
     _frame->f_trace_opcodes = 1;
