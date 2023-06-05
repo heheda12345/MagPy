@@ -91,7 +91,6 @@ HAS_NAME = set(dis.hasname)
 
 # map from var name to index
 def fix_vars(instructions: List[Instruction], code_options):
-    print("co_names:", code_options["co_names"])
     varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
     for i in range(len(instructions)):
@@ -253,9 +252,26 @@ def assemble(instructions: List[Instruction], firstlineno):
     return bytes(code), bytes(lnotab)
 
 
-def assemble_instructions(instructions: List[Instruction], code_options) -> types.CodeType:
+def add_name_to_code_options(code_options: Dict[str, Any]):
     code_options["co_names"] = (*code_options["co_names"], "fake_print")
+
+
+def fix_constants(instructions: List[Instruction], code_options: Dict[str, Any]):
+    const_set = set(code_options["co_consts"])
+    const_list = list(code_options["co_consts"])
+    LOAD_CONST = dis.opmap["LOAD_CONST"]
+    for inst in instructions:
+        if inst.opcode == LOAD_CONST and inst.argval not in const_set:
+            const_set.add(inst.argval)
+            const_list.append(inst.argval)
+            inst.arg = len(const_list) - 1
+    code_options["co_consts"] = tuple(const_list)
+
+
+def assemble_instructions(instructions: List[Instruction], code_options) -> types.CodeType:
+    add_name_to_code_options(code_options)
     fix_vars(instructions, code_options)
+    fix_constants(instructions, code_options)
     keys = get_code_keys()
     dirty = True
     while dirty:
@@ -278,7 +294,8 @@ def assemble_instructions(instructions: List[Instruction], code_options) -> type
     if sys.version_info >= (3, 11):
         # generated code doesn't contain exceptions, so leave exception table empty
         code_options["co_exceptiontable"] = b""
-    return instructions, types.CodeType(*[code_options[k] for k in keys])
+    code = types.CodeType(*[code_options[k] for k in keys])
+    return instructions, code
 
 
 def virtualize_jumps(instructions):
@@ -309,14 +326,13 @@ def get_instructions(code: types.CodeType) -> List[Instruction]:
 
 def add_print_to_return(code: types.CodeType) -> List[Instruction]:
     instructions = get_instructions(code)
-    old_const_count = len(code.co_consts)
     for i, inst in enumerate(instructions):
         if inst.opcode == dis.opmap["RETURN_VALUE"]:
             new_insts = [
                 create_instruction("DUP_TOP"),
                 create_instruction("LOAD_GLOBAL", "fake_print"),
                 create_instruction("ROT_TWO"),
-                create_instruction("LOAD_CONST", old_const_count, "print: return value is"),
+                create_instruction("LOAD_CONST", None, "print: return value is"),
                 create_instruction("ROT_TWO"),
                 create_instruction("CALL_FUNCTION", 2),
                 create_instruction("POP_TOP")
@@ -326,39 +342,5 @@ def add_print_to_return(code: types.CodeType) -> List[Instruction]:
             break
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
-    code_options["co_consts"] = (*code.co_consts, "return value is")
     new_code = assemble_instructions(instructions, code_options)[1]
     return new_code
-
-import inspect
-
-if __name__ == '__main__':
-    def test():
-        test_func_frame = inspect.currentframe().f_back
-        code = test_func_frame.f_code
-        insts = get_instructions(code)
-        for inst in insts:
-            print(inst)
-        print("=====================")
-        insts.insert(3, Instruction(116, 'LOAD_GLOBAL', 0, 'print'))
-        insts.insert(4, Instruction(100, 'LOAD_CONST', 2, 888))
-        insts.insert(5, Instruction(131, 'CALL_FUNCTION', 1, 1))
-        insts.insert(6, Instruction(100, 'LOAD_CONST', 0, None))
-        insts.insert(7, Instruction(1, 'POP_TOP', None, None))
-        insts.insert(8, Instruction(83, 'RETURN_VALUE', None, None))
-        for inst in insts:
-            print(inst)
-        keys = get_code_keys()
-        code_options = {k: getattr(code, k) for k in keys}
-        code_options["co_consts"] = (None, 666, 888)
-        assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
-        new_code = assemble_instructions(insts, code_options)[1]
-        exec(new_code, {}, {})
-
-
-    def test_func():
-        print(666)
-        test()
-        
-
-    test_func()
