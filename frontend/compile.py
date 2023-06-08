@@ -9,6 +9,13 @@ import traceback
 def simple_trace_func(frame, event, arg):
     return None
 
+def check_fn(locals):
+    print("running check_fn, locals:", locals)
+    return locals['b'] == 2
+
+def graph_fn():
+    return 3
+
 def preprocess_frame(frame, frame_id):
     try:
         print(f"preprocess frame {frame.f_code.co_filename}")
@@ -18,7 +25,7 @@ def preprocess_frame(frame, frame_id):
         print("exception in preprocess:", e, type(e))
         print(traceback.format_exc())
         raise e
-    return new_code
+    return (new_code, check_fn, graph_fn)
 
 def postprocess_frame(frame):
     try:

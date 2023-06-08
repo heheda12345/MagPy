@@ -139,8 +139,14 @@ static PyObject* _custom_eval_frame(
     PyObject* trace_func = PyTuple_GetItem(callback, 2);
     PyObject* frame_id_object = PyLong_FromLong(frame_id);
     PyObject* result_preprocess = PyObject_CallFunction(preprocess, "Oi", _frame, frame_id_object);
+    PyObject* new_code = PyTuple_GetItem(result_preprocess, 0);
+    PyObject* check_fn = PyTuple_GetItem(result_preprocess, 1);
+    PyObject* graph_fn = PyTuple_GetItem(result_preprocess, 2);
+    if (program_cache[frame_id][0] == nullptr) {
+        program_cache[frame_id][0] = new Cache{check_fn, graph_fn, nullptr};
+    }
     Py_DecRef(frame_id_object);
-    PyObject* result = eval_custom_code(tstate, _frame, (PyCodeObject*) result_preprocess, false);
+    PyObject* result = eval_custom_code(tstate, _frame, (PyCodeObject*) new_code, false);
     /*
     _frame->f_trace = trace_func;
     _frame->f_trace_opcodes = 1;
