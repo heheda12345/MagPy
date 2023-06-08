@@ -1,27 +1,29 @@
-from frontend.c_api import set_eval_frame, set_skip_files, get_value_stack_from_top
-from frontend.bytecode_writter import add_print_to_return
+from frontend.c_api import set_eval_frame, set_skip_files, get_value_stack_from_top, guard_match
+from frontend.bytecode_writter import rewrite_bytecode
 import dis
 import sys
+import traceback
 
 # https://docs.python.org/3/library/sys.html#sys.settrace
 # a global tracing function must have been installed with settrace() in order to enable assigning frame.f_trace
 def simple_trace_func(frame, event, arg):
     return None
 
-def preprocess_frame(frame):
+def preprocess_frame(frame, frame_id):
     try:
         print(f"preprocess frame {frame.f_code.co_filename}")
-        new_code = add_print_to_return(frame.f_code)
+        new_code = rewrite_bytecode(frame.f_code)
         # sys.settrace(simple_trace_func)
     except Exception as e:
         print("exception in preprocess:", e, type(e))
+        print(traceback.format_exc())
         raise e
     return new_code
 
 def postprocess_frame(frame):
     try:
         print(f"postprocess frame {frame.f_code.co_filename}")
-        sys.settrace(None)
+        # sys.settrace(None)
         # print("bytecode", list(dis.get_instructions(frame.f_code)))
     except Exception as e:
         print(e)
@@ -50,16 +52,19 @@ def trace_func(frame, event, arg):
             print(f"trace_func: opcode is {dis.opname[opcode]}")
 
 
-def fake_print(*args, **kwargs):
-    print("fake_print:", *args, **kwargs)
+def run_graph(graph_id, *args, **kwargs):
+    print("run_graph", graph_id, args, kwargs)
     return None
 
+init = False
+
 def compile(f):
-    if not hasattr(compile, "skip_file_setted"):
+    global init
+    if not init:
         set_skip_files(set())
-        compile.skip_file_setted = True
-    import builtins
-    setattr(builtins, "fake_print", fake_print)
+        init = True
+        import builtins
+        setattr(builtins, "guard_match", guard_match)
     def _fn(*args, **kwargs):
         prior = set_eval_frame((preprocess_frame, postprocess_frame, trace_func))
         try:

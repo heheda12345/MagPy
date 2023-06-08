@@ -41,7 +41,8 @@ def convert_instruction(i: dis.Instruction):
 class _NotProvided:
     pass
 
-def create_instruction(name, arg=None, argval=_NotProvided, target=None):
+# short for create_instruction
+def ci(name, arg=None, argval=_NotProvided, target=None):
     if argval is _NotProvided:
         argval = arg
     return Instruction(
@@ -174,16 +175,16 @@ def fix_extended_args(instructions: List[Instruction]):
             inst.arg = 0
         elif inst.arg and inst.arg > 0xFFFFFF:
             maybe_pop_n(3)
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 24))
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 16))
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 8))
+            output.append(ci("EXTENDED_ARG", inst.arg >> 24))
+            output.append(ci("EXTENDED_ARG", inst.arg >> 16))
+            output.append(ci("EXTENDED_ARG", inst.arg >> 8))
         elif inst.arg and inst.arg > 0xFFFF:
             maybe_pop_n(2)
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 16))
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 8))
+            output.append(ci("EXTENDED_ARG", inst.arg >> 16))
+            output.append(ci("EXTENDED_ARG", inst.arg >> 8))
         elif inst.arg and inst.arg > 0xFF:
             maybe_pop_n(1)
-            output.append(create_instruction("EXTENDED_ARG", inst.arg >> 8))
+            output.append(ci("EXTENDED_ARG", inst.arg >> 8))
         output.append(inst)
 
     added = len(output) - len(instructions)
@@ -262,7 +263,6 @@ def fix_constants(instructions: List[Instruction], code_options: Dict[str, Any])
     LOAD_CONST = dis.opmap["LOAD_CONST"]
     for inst in instructions:
         if inst.opcode == LOAD_CONST and inst.argval not in const_set:
-            const_set.add(inst.argval)
             const_list.append(inst.argval)
             inst.arg = len(const_list) - 1
     code_options["co_consts"] = tuple(const_list)
@@ -288,9 +288,7 @@ def assemble_instructions(instructions: List[Instruction], code_options) -> type
     code_options["co_code"] = bytecode
     code_options["co_nlocals"] = len(code_options["co_varnames"])
     code_options["co_stacksize"] = stacksize_analysis(instructions)
-    assert set(keys) - {"co_posonlyargcount"} == set(code_options.keys()) - {
-        "co_posonlyargcount"
-    }
+    assert set(keys) - {"co_posonlyargcount"} == set(code_options.keys()) - {"co_posonlyargcount"}
     if sys.version_info >= (3, 11):
         # generated code doesn't contain exceptions, so leave exception table empty
         code_options["co_exceptiontable"] = b""
@@ -321,6 +319,49 @@ def get_instructions(code: types.CodeType) -> List[Instruction]:
     strip_extended_args(instructions)
     return instructions
 
+def add_guard(instructions: List[Instruction], start_inst: int, end_inst: int, frame_id: int, callsite_id: int, call_graph_insts: List[Instruction], call_fn_num_args: int, recover_stack_insts: List[Instruction]):
+    guard_code = [
+        ci("LOAD_GLOBAL", "guard_match"),
+        ci("LOAD_CONST", frame_id),
+        ci("LOAD_CONST", callsite_id),
+        ci("LOAD_GLOBAL", "locals"),
+        ci("CALL_FUNCTION", 0),
+        ci("CALL_FUNCTION", 3),
+        ci("STORE_FAST", "__graph_fn"),
+        ci("LOAD_GLOBAL", "callable"),
+        ci("LOAD_FAST", "__graph_fn"),
+        ci("CALL_FUNCTION", 1),
+        ci("POP_JUMP_IF_FALSE", target=instructions[start_inst]),
+        ci("LOAD_FAST", "__graph_fn"),
+        *call_graph_insts,
+        ci("CALL_FUNCTION", call_fn_num_args),
+        *recover_stack_insts,
+        ci("JUMP_FORWARD", target=instructions[end_inst]),
+    ]
+    instructions[start_inst:start_inst] = guard_code
+
+
+def add_name(code_options: Dict[str, Any], varnames, names):
+    code_options["co_varnames"] = (*code_options["co_varnames"], *tuple(varnames))
+    code_options["co_names"] = (*code_options["co_names"], *tuple(names))
+    code_options["co_nlocals"] = len(code_options["co_varnames"])
+
+
+def rewrite_bytecode(code: types.CodeType) -> List[Instruction]:
+    instructions = get_instructions(code)
+    for i, inst in enumerate(instructions):
+        print(i, inst, id(inst), id(inst.target))
+    add_guard(instructions, 0, 7, 0, 0, [], 0, [])
+    print("guarded code")
+    for i, inst in enumerate(instructions):
+        print(i, inst, id(inst), id(inst.target))
+    keys = get_code_keys()
+    code_options = {k: getattr(code, k) for k in keys}
+    add_name(code_options, ["__graph_fn"], ["guard_match", "locals", "callable"])
+    code_options["co_stacksize"] += 4
+    new_code = assemble_instructions(instructions, code_options)[1]
+    return new_code
+
 
 # test code
 
@@ -329,13 +370,13 @@ def add_print_to_return(code: types.CodeType) -> List[Instruction]:
     for i, inst in enumerate(instructions):
         if inst.opcode == dis.opmap["RETURN_VALUE"]:
             new_insts = [
-                create_instruction("DUP_TOP"),
-                create_instruction("LOAD_GLOBAL", "fake_print"),
-                create_instruction("ROT_TWO"),
-                create_instruction("LOAD_CONST", None, "print: return value is"),
-                create_instruction("ROT_TWO"),
-                create_instruction("CALL_FUNCTION", 2),
-                create_instruction("POP_TOP")
+                ci("DUP_TOP"),
+                ci("LOAD_GLOBAL", "print"),
+                ci("ROT_TWO"),
+                ci("LOAD_CONST", None, "print: return value is"),
+                ci("ROT_TWO"),
+                ci("CALL_FUNCTION", 2),
+                ci("POP_TOP")
             ]
             for j, new_inst in enumerate(new_insts):
                 instructions.insert(i + j, new_inst)

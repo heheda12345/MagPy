@@ -2,6 +2,7 @@
 #include <Python.h>
 #include <pythread.h>
 #include <frameobject.h>
+#include <cache.h>
 
 #define unlikely(x) __builtin_expect((x), 0)
 
@@ -28,7 +29,11 @@ static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 static int active_working_threads = 0;
 static PyObject *(*previous_eval_frame)(PyThreadState *tstate,
                                         PyFrameObject* frame, int throw_flag) = NULL;
+static size_t cache_entry_extra_index = -1;
+static void ignored(void* obj) {}
 
+ProgramCache program_cache;
+static int frame_count = 0;
 
 inline static PyObject* get_current_eval_frame_callback() {
     void* result = PyThread_tss_get(&eval_frame_callback_key);
@@ -41,6 +46,17 @@ inline static PyObject* get_current_eval_frame_callback() {
 
 inline static void set_eval_frame_callback(PyObject* obj) {
     PyThread_tss_set(&eval_frame_callback_key, obj);
+}
+
+inline static int get_frame_id(PyCodeObject* code) {
+    int* frame_id;
+    _PyCode_GetExtra((PyObject*)code, cache_entry_extra_index, (void**)&frame_id);
+    if (frame_id == NULL) {
+        // WARNING: memory leak here
+        frame_id = new int(frame_count++);
+        _PyCode_SetExtra((PyObject*)code, cache_entry_extra_index, frame_id);
+    }
+    return *frame_id;
 }
 
 inline static PyObject* eval_frame_default(
@@ -109,11 +125,21 @@ static PyObject* _custom_eval_frame(
         int throw_flag,
         PyObject* callback){
     set_eval_frame_callback(Py_None);
+    int frame_id = get_frame_id(_frame->f_code);
+    printf("frame_id %d\n", frame_id);
+    if (frame_id >= program_cache.size()) {
+        CHECK(frame_id == program_cache.size());
+        FrameCache empty;
+        empty.push_back(nullptr);
+        program_cache.push_back(empty);
+    }
     Py_INCREF(_frame);
     PyObject* preprocess = PyTuple_GetItem(callback, 0);
     PyObject* postprocess = PyTuple_GetItem(callback, 1);
     PyObject* trace_func = PyTuple_GetItem(callback, 2);
-    PyObject* result_preprocess = PyObject_CallFunction(preprocess, "O", (PyObject*) _frame);
+    PyObject* frame_id_object = PyLong_FromLong(frame_id);
+    PyObject* result_preprocess = PyObject_CallFunction(preprocess, "Oi", _frame, frame_id_object);
+    Py_DecRef(frame_id_object);
     PyObject* result = eval_custom_code(tstate, _frame, (PyCodeObject*) result_preprocess, false);
     /*
     _frame->f_trace = trace_func;
@@ -214,7 +240,7 @@ static PyObject* set_skip_files(PyObject* self, PyObject* args) {
         Py_DECREF(skip_files);
     }
     if (!PyArg_ParseTuple(args, "O", &skip_files)) {
-        PyErr_SetString(PyExc_TypeError, "invalid parameter");
+        PyErr_SetString(PyExc_TypeError, "invalid parameter in set_skip_files");
     }
     Py_INCREF(skip_files);
     Py_RETURN_NONE;
@@ -224,7 +250,7 @@ static PyObject* get_value_stack_from_top(PyObject* self, PyObject* args) {
     PyFrameObject* frame = NULL;
     int index = 0;
     if (!PyArg_ParseTuple(args, "Oi", &frame, &index)) {
-        PyErr_SetString(PyExc_TypeError, "invalid parameter");
+        PyErr_SetString(PyExc_TypeError, "invalid parameter in get_value_stack_from_top");
         return NULL;
     }
     PyObject* value = frame->f_stacktop[-index - 1];
@@ -232,10 +258,31 @@ static PyObject* get_value_stack_from_top(PyObject* self, PyObject* args) {
     return value;
 }
 
+static PyObject* guard_match(PyObject* self, PyObject* args) {
+    int frame_id, callsite_id;
+    PyObject* locals;
+    if (!PyArg_ParseTuple(args, "iiO", &frame_id, &callsite_id, &locals)) {
+        PyErr_SetString(PyExc_TypeError, "invalid parameter in guard_match");
+        return NULL;
+    }
+    printf("start run\n");
+    for (Cache* entry = program_cache[frame_id][callsite_id]; entry != NULL; entry = entry->next) {
+        PyObject* valid = PyObject_CallOneArg(entry->check_fn, locals);
+        Py_DECREF(valid);
+        if (valid == Py_True) {
+            printf("guard match\n");
+            return entry->graph_fn;
+        }
+    }
+    printf("guard cache miss\n");
+    return Py_None;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame, METH_VARARGS, NULL},
     {"set_skip_files", set_skip_files, METH_VARARGS, NULL},
     {"get_value_stack_from_top", get_value_stack_from_top, METH_VARARGS, NULL},
+    {"guard_match", guard_match, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}
 };
 
@@ -247,6 +294,12 @@ static struct PyModuleDef _module = {
     _methods};
 
 PyMODINIT_FUNC PyInit_c_api(void) {
+    cache_entry_extra_index = _PyEval_RequestCodeExtraIndex(ignored);
+    if (cache_entry_extra_index < 0) {
+        PyErr_SetString(PyExc_RuntimeError,
+                        "c_api: unable to register cache_entry extra index");
+        return NULL;
+    }
     int result = PyThread_tss_create(&eval_frame_callback_key);
     CHECK(result == 0);
     Py_INCREF(Py_None);
