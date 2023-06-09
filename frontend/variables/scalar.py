@@ -1,11 +1,14 @@
 # learn from https://stackoverflow.com/questions/3238350/subclassing-int-in-python
 from frontend.variables.base import Variable
+import math
+
 
 class TrackedScalarMeta(type):
     _dont_wrap = {
-        "__str__", "__repr__", "__hash__", "__getattribute__", "__init_subclass__", "__subclasshook__",
-        "__reduce_ex__", "__getnewargs__", "__format__", "__sizeof__", "__doc__", "__class__", "__new__",
-        "__getattr__", "__setattr__"
+        "__str__", "__repr__", "__hash__", "__getattribute__",
+        "__init_subclass__", "__subclasshook__", "__reduce_ex__",
+        "__getnewargs__", "__format__", "__sizeof__", "__doc__", "__class__",
+        "__new__", "__getattr__", "__setattr__"
     }
 
     def __new__(typ, name, bases, attrs, **kwargs):
@@ -29,7 +32,9 @@ class TrackedScalarMeta(type):
         for member in typ.wrapped:
             obj = object.__getattribute__(base_type, member)
             if callable(obj):
-                print(f"Wrapping {obj.__name__} with {cls.unwrap_wrapper.__name__}")
+                print(
+                    f"Wrapping {obj.__name__} with {cls.unwrap_wrapper.__name__}"
+                )
                 wrapped = cls.unwrap_wrapper(obj)
                 setattr(cls, member, wrapped)
         return cls
@@ -42,30 +47,39 @@ class TrackedScalarMeta(type):
     #     print("TrackedScalarMeta", name, bases, attrs)
     #     return super().__new__(cls, name, bases, attrs)
 
+
 class TrackedInt(Variable, metaclass=TrackedScalarMeta):
     base_type = int
+
     def __init__(self, value):
         print("init:", value)
         super().__init__(expr=f'{value}')
 
     @classmethod
     def unwrap_wrapper(cls, func):
+
         @cls.functools.wraps(func)
         def unwrap(*args, **kw):
             print("func:", func)
-            args = (x.unwrap() if isinstance(x, Variable) else x for x in args)
-            kw = {k: (v.unwrap() if isinstance(v, Variable) else v) for k, v in kw.items()}
+            args = list(
+                x.unwrap() if isinstance(x, Variable) else x for x in args)
+            kw = dict({
+                k: (v.unwrap() if isinstance(v, Variable) else v)
+                for k, v in kw.items()
+            })
             return func(*args, **kw)
+
         return unwrap
-    
+
     def unwrap_impl(self):
         return eval(self.expr)
 
     def __add__(self, __value: 'TrackedInt') -> 'TrackedInt':
         return TrackedInt(f'{self.expr} + {__value.expr}')
-    
+
     def __str__(self) -> str:
         return f"TrackedInt({self.expr})"
+
 
 MAGIC_NUMBER = 66666
 
@@ -78,3 +92,5 @@ if __name__ == '__main__':
     print("c:", c)
     d = a - b
     print("d:", d)
+    e = math.perm(a)
+    print("e:", e)

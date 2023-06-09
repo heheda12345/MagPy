@@ -5,6 +5,7 @@ import dis
 import types
 import sys
 
+
 @dataclasses.dataclass
 class Instruction:
     """A mutable version of dis.Instruction"""
@@ -41,32 +42,33 @@ def convert_instruction(i: dis.Instruction):
 class _NotProvided:
     pass
 
+
 # short for create_instruction
 def ci(name, arg=None, argval=_NotProvided, target=None):
     if argval is _NotProvided:
         argval = arg
-    return Instruction(
-        opcode=dis.opmap[name], opname=name, arg=arg, argval=argval, target=target
-    )
+    return Instruction(opcode=dis.opmap[name],
+                       opname=name,
+                       arg=arg,
+                       argval=argval,
+                       target=target)
 
 
 def get_code_keys():
     keys = ["co_argcount"]
     keys.append("co_posonlyargcount")
-    keys.extend(
-        [
-            "co_kwonlyargcount",
-            "co_nlocals",
-            "co_stacksize",
-            "co_flags",
-            "co_code",
-            "co_consts",
-            "co_names",
-            "co_varnames",
-            "co_filename",
-            "co_name",
-        ]
-    )
+    keys.extend([
+        "co_kwonlyargcount",
+        "co_nlocals",
+        "co_stacksize",
+        "co_flags",
+        "co_code",
+        "co_consts",
+        "co_names",
+        "co_varnames",
+        "co_filename",
+        "co_name",
+    ])
     if sys.version_info >= (3, 11):
         keys.append("co_qualname")
     keys.append("co_firstlineno")
@@ -77,12 +79,10 @@ def get_code_keys():
     if sys.version_info >= (3, 11):
         # not documented, but introduced in https://github.com/python/cpython/issues/84403
         keys.append("co_exceptiontable")
-    keys.extend(
-        [
-            "co_freevars",
-            "co_cellvars",
-        ]
-    )
+    keys.extend([
+        "co_freevars",
+        "co_cellvars",
+    ])
     return keys
 
 
@@ -92,7 +92,9 @@ HAS_NAME = set(dis.hasname)
 
 # map from var name to index
 def fix_vars(instructions: List[Instruction], code_options):
-    varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
+    varnames = {
+        name: idx for idx, name in enumerate(code_options["co_varnames"])
+    }
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
     for i in range(len(instructions)):
         if instructions[i].opcode in HAS_LOCAL:
@@ -122,10 +124,9 @@ def devirtualize_jumps(instructions):
             target = inst.target
             target_index = indexof[id(target)]
             for offset in (1, 2, 3):
-                if (
-                    target_index >= offset
-                    and instructions[target_index - offset].opcode == dis.EXTENDED_ARG
-                ):
+                if (target_index >= offset and
+                        instructions[target_index - offset].opcode
+                        == dis.EXTENDED_ARG):
                     target = instructions[target_index - offset]
                 else:
                     break
@@ -138,20 +139,24 @@ def devirtualize_jumps(instructions):
                     # Divide since bytecode is 2 bytes large.
                     inst.arg = int(target.offset / 2)
                 else:
-                    raise RuntimeError("Python 3.11+ should not have absolute jumps")
+                    raise RuntimeError(
+                        "Python 3.11+ should not have absolute jumps")
             else:  # relative jump
                 # byte offset between target and next instruction
-                inst.arg = int(target.offset - inst.offset - instruction_size(inst))
+                inst.arg = int(target.offset - inst.offset -
+                               instruction_size(inst))
                 if inst.arg < 0:
                     if sys.version_info < (3, 11):
-                        raise RuntimeError("Got negative jump offset for Python < 3.11")
+                        raise RuntimeError(
+                            "Got negative jump offset for Python < 3.11")
                     inst.arg = -inst.arg
                     # forward jumps become backward
                     if "FORWARD" in inst.opname:
                         flip_jump_direction(inst)
                 elif inst.arg > 0:
                     # backward jumps become forward
-                    if sys.version_info >= (3, 11) and "BACKWARD" in inst.opname:
+                    if sys.version_info >= (3,
+                                            11) and "BACKWARD" in inst.opname:
                         flip_jump_direction(inst)
                 if sys.version_info >= (3, 10):
                     # see bytecode size comment in the absolute jump case above
@@ -257,7 +262,8 @@ def add_name_to_code_options(code_options: Dict[str, Any]):
     code_options["co_names"] = (*code_options["co_names"], "fake_print")
 
 
-def fix_constants(instructions: List[Instruction], code_options: Dict[str, Any]):
+def fix_constants(instructions: List[Instruction], code_options: Dict[str,
+                                                                      Any]):
     const_set = set(code_options["co_consts"])
     const_list = list(code_options["co_consts"])
     LOAD_CONST = dis.opmap["LOAD_CONST"]
@@ -268,7 +274,8 @@ def fix_constants(instructions: List[Instruction], code_options: Dict[str, Any])
     code_options["co_consts"] = tuple(const_list)
 
 
-def assemble_instructions(instructions: List[Instruction], code_options) -> types.CodeType:
+def assemble_instructions(instructions: List[Instruction],
+                          code_options) -> types.CodeType:
     add_name_to_code_options(code_options)
     fix_vars(instructions, code_options)
     fix_constants(instructions, code_options)
@@ -288,7 +295,8 @@ def assemble_instructions(instructions: List[Instruction], code_options) -> type
     code_options["co_code"] = bytecode
     code_options["co_nlocals"] = len(code_options["co_varnames"])
     code_options["co_stacksize"] = stacksize_analysis(instructions)
-    assert set(keys) - {"co_posonlyargcount"} == set(code_options.keys()) - {"co_posonlyargcount"}
+    assert set(keys) - {"co_posonlyargcount"} == set(
+        code_options.keys()) - {"co_posonlyargcount"}
     if sys.version_info >= (3, 11):
         # generated code doesn't contain exceptions, so leave exception table empty
         code_options["co_exceptiontable"] = b""
@@ -303,7 +311,8 @@ def virtualize_jumps(instructions):
     for inst in instructions:
         if inst.opcode in dis.hasjabs or inst.opcode in dis.hasjrel:
             for offset in (0, 2, 4, 6):
-                if jump_targets[inst.argval + offset].opcode != dis.EXTENDED_ARG:
+                if jump_targets[inst.argval +
+                                offset].opcode != dis.EXTENDED_ARG:
                     inst.target = jump_targets[inst.argval + offset]
                     break
 
@@ -319,7 +328,11 @@ def get_instructions(code: types.CodeType) -> List[Instruction]:
     strip_extended_args(instructions)
     return instructions
 
-def add_guard(instructions: List[Instruction], start_inst: int, end_inst: int, frame_id: int, callsite_id: int, call_graph_insts: List[Instruction], call_fn_num_args: int, recover_stack_insts: List[Instruction]):
+
+def add_guard(instructions: List[Instruction], start_inst: int, end_inst: int,
+              frame_id: int, callsite_id: int,
+              call_graph_insts: List[Instruction], call_fn_num_args: int,
+              recover_stack_insts: List[Instruction]):
     guard_code = [
         ci("LOAD_GLOBAL", "guard_match"),
         ci("LOAD_CONST", frame_id),
@@ -342,7 +355,8 @@ def add_guard(instructions: List[Instruction], start_inst: int, end_inst: int, f
 
 
 def add_name(code_options: Dict[str, Any], varnames, names):
-    code_options["co_varnames"] = (*code_options["co_varnames"], *tuple(varnames))
+    code_options["co_varnames"] = (*code_options["co_varnames"],
+                                   *tuple(varnames))
     code_options["co_names"] = (*code_options["co_names"], *tuple(names))
     code_options["co_nlocals"] = len(code_options["co_varnames"])
 
@@ -357,13 +371,15 @@ def rewrite_bytecode(code: types.CodeType) -> List[Instruction]:
         print(i, inst, id(inst), id(inst.target))
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
-    add_name(code_options, ["__graph_fn"], ["guard_match", "locals", "callable"])
+    add_name(code_options, ["__graph_fn"],
+             ["guard_match", "locals", "callable"])
     code_options["co_stacksize"] += 4
     new_code = assemble_instructions(instructions, code_options)[1]
     return new_code
 
 
 # test code
+
 
 def add_print_to_return(code: types.CodeType) -> List[Instruction]:
     instructions = get_instructions(code)

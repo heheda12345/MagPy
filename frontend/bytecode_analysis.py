@@ -66,12 +66,10 @@ def stacksize_analysis(instructions):
             if inst.opcode not in TERMINAL_OPCODES:
                 assert next_inst is not None, f"missing next inst: {inst}"
                 stack_sizes[next_inst].offset_of(
-                    stack_size, stack_effect(inst.opcode, inst.arg, jump=False)
-                )
+                    stack_size, stack_effect(inst.opcode, inst.arg, jump=False))
             if inst.opcode in JUMP_OPCODES:
                 stack_sizes[inst.target].offset_of(
-                    stack_size, stack_effect(inst.opcode, inst.arg, jump=True)
-                )
+                    stack_size, stack_effect(inst.opcode, inst.arg, jump=True))
 
     if False:
         for inst in instructions:

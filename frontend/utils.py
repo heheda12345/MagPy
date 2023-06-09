@@ -2,6 +2,7 @@ import inspect
 import dis
 from frontend.bytecode_writter import get_code_keys
 
+
 def print_bytecode():
     test_func_frame = inspect.currentframe().f_back
     code = test_func_frame.f_code

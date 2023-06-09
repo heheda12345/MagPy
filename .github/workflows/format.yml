@@ -1,4 +1,4 @@
-name: YAPF Formatting Check
+name: Formatting Check
 on: [push]
 jobs:
   python-formatting-check:
