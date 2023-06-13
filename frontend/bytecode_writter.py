@@ -1,60 +1,14 @@
 import dataclasses
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 from frontend.bytecode_analysis import stacksize_analysis
+from frontend.instruction import Instruction, convert_instruction, ci
 import dis
 import types
 import sys
+from typing import Tuple, Callable
 
 
-@dataclasses.dataclass
-class Instruction:
-    """A mutable version of dis.Instruction"""
-
-    opcode: int
-    opname: str
-    arg: Optional[int]
-    argval: Any
-    offset: Optional[int] = None
-    starts_line: Optional[int] = None
-    is_jump_target: bool = False
-    # extra fields to make modification easier:
-    target: Optional["Instruction"] = None
-
-    def __hash__(self):
-        return id(self)
-
-    def __eq__(self, other):
-        return id(self) == id(other)
-
-
-def convert_instruction(i: dis.Instruction):
-    return Instruction(
-        i.opcode,
-        i.opname,
-        i.arg,
-        i.argval,
-        i.offset,
-        i.starts_line,
-        i.is_jump_target,
-    )
-
-
-class _NotProvided:
-    pass
-
-
-# short for create_instruction
-def ci(name, arg=None, argval=_NotProvided, target=None):
-    if argval is _NotProvided:
-        argval = arg
-    return Instruction(opcode=dis.opmap[name],
-                       opname=name,
-                       arg=arg,
-                       argval=argval,
-                       target=target)
-
-
-def get_code_keys():
+def get_code_keys() -> List[str]:
     keys = ["co_argcount"]
     keys.append("co_posonlyargcount")
     keys.extend([
@@ -91,7 +45,8 @@ HAS_NAME = set(dis.hasname)
 
 
 # map from var name to index
-def fix_vars(instructions: List[Instruction], code_options):
+def fix_vars(instructions: List[Instruction], code_options: Dict[str,
+                                                                 Any]) -> None:
     varnames = {
         name: idx for idx, name in enumerate(code_options["co_varnames"])
     }
@@ -103,18 +58,18 @@ def fix_vars(instructions: List[Instruction], code_options):
             instructions[i].arg = names[instructions[i].argval]
 
 
-def instruction_size(inst):
+def instruction_size(inst: Instruction) -> int:
     return 2
 
 
-def update_offsets(instructions):
+def update_offsets(instructions: List[Instruction]) -> None:
     offset = 0
     for inst in instructions:
         inst.offset = offset
         offset += instruction_size(inst)
 
 
-def devirtualize_jumps(instructions):
+def devirtualize_jumps(instructions: List[Instruction]) -> None:
     """Fill in args for virtualized jump target after instructions may have moved"""
     indexof = {id(inst): i for i, inst, in enumerate(instructions)}
     jumps = set(dis.hasjabs).union(set(dis.hasjrel))
@@ -122,6 +77,7 @@ def devirtualize_jumps(instructions):
     for inst in instructions:
         if inst.opcode in jumps:
             target = inst.target
+            assert target is not None
             target_index = indexof[id(target)]
             for offset in (1, 2, 3):
                 if (target_index >= offset and
@@ -143,33 +99,21 @@ def devirtualize_jumps(instructions):
                         "Python 3.11+ should not have absolute jumps")
             else:  # relative jump
                 # byte offset between target and next instruction
+                assert target.offset is not None
+                assert inst.offset is not None
                 inst.arg = int(target.offset - inst.offset -
                                instruction_size(inst))
                 if inst.arg < 0:
-                    if sys.version_info < (3, 11):
-                        raise RuntimeError(
-                            "Got negative jump offset for Python < 3.11")
-                    inst.arg = -inst.arg
-                    # forward jumps become backward
-                    if "FORWARD" in inst.opname:
-                        flip_jump_direction(inst)
-                elif inst.arg > 0:
-                    # backward jumps become forward
-                    if sys.version_info >= (3,
-                                            11) and "BACKWARD" in inst.opname:
-                        flip_jump_direction(inst)
-                if sys.version_info >= (3, 10):
-                    # see bytecode size comment in the absolute jump case above
-                    inst.arg //= 2
+                    raise RuntimeError(
+                        "Got negative jump offset for Python < 3.11")
             inst.argval = target.offset
-            inst.argrepr = f"to {target.offset}"
 
 
-def fix_extended_args(instructions: List[Instruction]):
+def fix_extended_args(instructions: List[Instruction]) -> int:
     """Fill in correct argvals for EXTENDED_ARG ops"""
-    output = []
+    output: List[Instruction] = []
 
-    def maybe_pop_n(n):
+    def maybe_pop_n(n: int) -> None:
         for _ in range(n):
             if output and output[-1].opcode == dis.EXTENDED_ARG:
                 output.pop()
@@ -198,12 +142,12 @@ def fix_extended_args(instructions: List[Instruction]):
     return added
 
 
-def remove_extra_line_nums(instructions):
+def remove_extra_line_nums(instructions: List[Instruction]) -> None:
     """Remove extra starts line properties before packing bytecode"""
 
     cur_line_no = None
 
-    def remove_line_num(inst):
+    def remove_line_num(inst: Instruction) -> None:
         nonlocal cur_line_no
         if inst.starts_line is None:
             return
@@ -216,16 +160,18 @@ def remove_extra_line_nums(instructions):
         remove_line_num(inst)
 
 
-def lnotab_writer(lineno, byteno=0):
+def lnotab_writer(
+        lineno: int,
+        byteno: int = 0) -> Tuple[List[int], Callable[[int, int], None]]:
     """
     Used to create typing.CodeType.co_lnotab
     See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
     This is the internal format of the line number table if Python < 3.10
     """
     assert sys.version_info < (3, 10)
-    lnotab = []
+    lnotab: List[int] = []
 
-    def update(lineno_new, byteno_new):
+    def update(lineno_new: int, byteno_new: int) -> None:
         nonlocal byteno, lineno
         while byteno_new != byteno or lineno_new != lineno:
             byte_offset = max(0, min(byteno_new - byteno, 255))
@@ -238,9 +184,10 @@ def lnotab_writer(lineno, byteno=0):
     return lnotab, update
 
 
-def assemble(instructions: List[Instruction], firstlineno):
+def assemble(instructions: List[Instruction],
+             firstlineno: int) -> Tuple[bytes, bytes]:
     """Do the opposite of dis.get_instructions()"""
-    code = []
+    code: List[int] = []
     lnotab, update_lineno = lnotab_writer(firstlineno)
 
     for inst in instructions:
@@ -258,12 +205,12 @@ def assemble(instructions: List[Instruction], firstlineno):
     return bytes(code), bytes(lnotab)
 
 
-def add_name_to_code_options(code_options: Dict[str, Any]):
+def add_name_to_code_options(code_options: Dict[str, Any]) -> None:
     code_options["co_names"] = (*code_options["co_names"], "fake_print")
 
 
-def fix_constants(instructions: List[Instruction], code_options: Dict[str,
-                                                                      Any]):
+def fix_constants(instructions: List[Instruction],
+                  code_options: Dict[str, Any]) -> None:
     const_set = set(code_options["co_consts"])
     const_list = list(code_options["co_consts"])
     LOAD_CONST = dis.opmap["LOAD_CONST"]
@@ -274,8 +221,10 @@ def fix_constants(instructions: List[Instruction], code_options: Dict[str,
     code_options["co_consts"] = tuple(const_list)
 
 
-def assemble_instructions(instructions: List[Instruction],
-                          code_options) -> types.CodeType:
+def assemble_instructions(
+        instructions: List[Instruction],
+        code_options: Dict[str,
+                           Any]) -> Tuple[List[Instruction], types.CodeType]:
     add_name_to_code_options(code_options)
     fix_vars(instructions, code_options)
     fix_constants(instructions, code_options)
@@ -284,7 +233,7 @@ def assemble_instructions(instructions: List[Instruction],
     while dirty:
         update_offsets(instructions)
         devirtualize_jumps(instructions)
-        dirty = fix_extended_args(instructions)
+        dirty = fix_extended_args(instructions) > 0
     remove_extra_line_nums(instructions)
 
     bytecode, lnotab = assemble(instructions, code_options["co_firstlineno"])
@@ -304,7 +253,7 @@ def assemble_instructions(instructions: List[Instruction],
     return instructions, code
 
 
-def virtualize_jumps(instructions):
+def virtualize_jumps(instructions: List[Instruction]) -> None:
     """Replace jump targets with pointers to make editing easier"""
     jump_targets = {inst.offset: inst for inst in instructions}
 
@@ -317,22 +266,22 @@ def virtualize_jumps(instructions):
                     break
 
 
-def strip_extended_args(instructions: List[Instruction]):
+def strip_extended_args(instructions: List[Instruction]) -> None:
     instructions[:] = [i for i in instructions if i.opcode != dis.EXTENDED_ARG]
 
 
 def get_instructions(code: types.CodeType) -> List[Instruction]:
     instructions = dis.Bytecode(code)
-    instructions = [convert_instruction(i) for i in instructions]
-    virtualize_jumps(instructions)
-    strip_extended_args(instructions)
-    return instructions
+    instructions_converted = [convert_instruction(i) for i in instructions]
+    virtualize_jumps(instructions_converted)
+    strip_extended_args(instructions_converted)
+    return instructions_converted
 
 
 def add_guard(instructions: List[Instruction], start_inst: int, end_inst: int,
               frame_id: int, callsite_id: int,
               call_graph_insts: List[Instruction], call_fn_num_args: int,
-              recover_stack_insts: List[Instruction]):
+              recover_stack_insts: List[Instruction]) -> None:
     guard_code = [
         ci("LOAD_GLOBAL", "guard_match"),
         ci("LOAD_CONST", frame_id),
@@ -354,14 +303,15 @@ def add_guard(instructions: List[Instruction], start_inst: int, end_inst: int,
     instructions[start_inst:start_inst] = guard_code
 
 
-def add_name(code_options: Dict[str, Any], varnames, names):
+def add_name(code_options: Dict[str, Any], varnames: List[str],
+             names: List[str]) -> None:
     code_options["co_varnames"] = (*code_options["co_varnames"],
                                    *tuple(varnames))
     code_options["co_names"] = (*code_options["co_names"], *tuple(names))
     code_options["co_nlocals"] = len(code_options["co_varnames"])
 
 
-def rewrite_bytecode(code: types.CodeType) -> List[Instruction]:
+def rewrite_bytecode(code: types.CodeType) -> types.CodeType:
     instructions = get_instructions(code)
     for i, inst in enumerate(instructions):
         print(i, inst, id(inst), id(inst.target))
@@ -381,7 +331,7 @@ def rewrite_bytecode(code: types.CodeType) -> List[Instruction]:
 # test code
 
 
-def add_print_to_return(code: types.CodeType) -> List[Instruction]:
+def add_print_to_return(code: types.CodeType) -> types.CodeType:
     instructions = get_instructions(code)
     for i, inst in enumerate(instructions):
         if inst.opcode == dis.opmap["RETURN_VALUE"]:

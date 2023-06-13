@@ -3,28 +3,32 @@ from frontend.bytecode_writter import rewrite_bytecode
 import dis
 import sys
 import traceback
+from types import FrameType, CodeType
+from typing import Any, Tuple, Callable
 
 
 # https://docs.python.org/3/library/sys.html#sys.settrace
 # a global tracing function must have been installed with settrace() in order to enable assigning frame.f_trace
-def simple_trace_func(frame, event, arg):
+def simple_trace_func(frame: FrameType, event: str, arg: Any) -> None:
     return None
 
 
-def check_fn(locals):
+def check_fn(locals: dict[str, Any]) -> bool:
     print("running check_fn, locals:", locals)
-    return locals['b'] == 2
+    return bool(locals['b'] == 2)
 
 
-def graph_fn():
+def graph_fn() -> Any:
     return 3
 
 
-def preprocess_frame(frame, frame_id):
+def preprocess_frame(
+        frame: FrameType, frame_id: int
+) -> Tuple[CodeType, Callable[..., Any], Callable[..., Any]]:
     try:
         print(f"preprocess frame {frame.f_code.co_filename}")
         new_code = rewrite_bytecode(frame.f_code)
-        # sys.settrace(simple_trace_func)
+        sys.settrace(simple_trace_func)
     except Exception as e:
         print("exception in preprocess:", e, type(e))
         print(traceback.format_exc())
@@ -32,7 +36,7 @@ def preprocess_frame(frame, frame_id):
     return (new_code, check_fn, graph_fn)
 
 
-def postprocess_frame(frame):
+def postprocess_frame(frame: FrameType) -> None:
     try:
         print(f"postprocess frame {frame.f_code.co_filename}")
         # sys.settrace(None)
@@ -56,7 +60,7 @@ STORE_OPCODES = list(
 last_op_code = dis.opmap.get("NOP")
 
 
-def trace_func(frame, event, arg):
+def trace_func(frame: FrameType, event: str, arg: Any) -> None:
     print(f"trace_func {frame.f_code.co_filename} {event} {arg} {id(frame)}")
     if event == "return":
         print(f"trace_func: return value is {arg}")
@@ -74,7 +78,7 @@ def trace_func(frame, event, arg):
             print(f"trace_func: opcode is {dis.opname[opcode]}")
 
 
-def run_graph(graph_id, *args, **kwargs):
+def run_graph(graph_id: int, *args: Any, **kwargs: Any) -> None:
     print("run_graph", graph_id, args, kwargs)
     return None
 
@@ -82,7 +86,7 @@ def run_graph(graph_id, *args, **kwargs):
 init = False
 
 
-def compile(f):
+def compile(f: Callable[..., Any]) -> Callable[..., Any]:
     global init
     if not init:
         set_skip_files(set())
@@ -90,7 +94,7 @@ def compile(f):
         import builtins
         setattr(builtins, "guard_match", guard_match)
 
-    def _fn(*args, **kwargs):
+    def _fn(*args: Any, **kwargs: Any) -> Any:
         prior = set_eval_frame(
             (preprocess_frame, postprocess_frame, trace_func))
         try:

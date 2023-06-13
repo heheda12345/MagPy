@@ -3,8 +3,11 @@ import dis
 from frontend.bytecode_writter import get_code_keys
 
 
-def print_bytecode():
-    test_func_frame = inspect.currentframe().f_back
+def print_bytecode() -> None:
+    this_frame = inspect.currentframe()  # the print_bytecode function
+    assert this_frame is not None
+    test_func_frame = this_frame.f_back
+    assert test_func_frame is not None
     code = test_func_frame.f_code
     insts = dis.Bytecode(code)
     for inst in insts:

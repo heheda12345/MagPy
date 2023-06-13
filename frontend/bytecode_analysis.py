@@ -2,12 +2,13 @@ import dataclasses
 import dis
 import sys
 from numbers import Real
+from typing import NewType, Union, List
+from frontend.instruction import Instruction
 
 TERMINAL_OPCODES = {
     dis.opmap["RETURN_VALUE"],
     dis.opmap["JUMP_FORWARD"],
     dis.opmap["RAISE_VARARGS"],
-    # TODO(jansel): double check exception handling
 }
 if sys.version_info >= (3, 9):
     TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
@@ -28,18 +29,21 @@ class FixedPointBox:
     value: bool = True
 
 
+Inf = float  # assume to be float("inf") or float("-inf")
+
+
 @dataclasses.dataclass
 class StackSize:
-    low: Real
-    high: Real
+    low: Union[int, Inf]
+    high: Union[int, Inf]
     fixed_point: FixedPointBox
 
-    def zero(self):
+    def zero(self) -> None:
         self.low = 0
         self.high = 0
         self.fixed_point.value = False
 
-    def offset_of(self, other, n):
+    def offset_of(self, other: 'StackSize', n: int) -> None:
         prior = (self.low, self.high)
         self.low = min(self.low, other.low + n)
         self.high = max(self.high, other.high + n)
@@ -47,7 +51,7 @@ class StackSize:
             self.fixed_point.value = False
 
 
-def stacksize_analysis(instructions):
+def stacksize_analysis(instructions: List[Instruction]) -> int:
     assert instructions
     fixed_point = FixedPointBox()
     stack_sizes = {
@@ -68,6 +72,7 @@ def stacksize_analysis(instructions):
                 stack_sizes[next_inst].offset_of(
                     stack_size, stack_effect(inst.opcode, inst.arg, jump=False))
             if inst.opcode in JUMP_OPCODES:
+                assert inst.target is not None, f"missing target: {inst}"
                 stack_sizes[inst.target].offset_of(
                     stack_size, stack_effect(inst.opcode, inst.arg, jump=True))
 
@@ -81,4 +86,5 @@ def stacksize_analysis(instructions):
 
     assert fixed_point.value, "failed to reach fixed point"
     assert low >= 0
+    assert isinstance(high, int)  # not infinity
     return high

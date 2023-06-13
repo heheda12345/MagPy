@@ -1,6 +1,9 @@
+# mypy: ignore-errors
 # learn from https://stackoverflow.com/questions/3238350/subclassing-int-in-python
+
 from frontend.variables.base import Variable
 import math
+from typing import Any, Callable, Dict, Tuple
 
 
 class TrackedScalarMeta(type):
@@ -11,7 +14,8 @@ class TrackedScalarMeta(type):
         "__new__", "__getattr__", "__setattr__"
     }
 
-    def __new__(typ, name, bases, attrs, **kwargs):
+    def __new__(typ, name: str, bases: Tuple[Any], attrs: Dict[str, Any],
+                **kwargs: Any) -> 'TrackedScalarMeta':
         #  Provide a call to the base class __new__
         print("new:", typ, name, bases, attrs, kwargs)
         base_type = attrs["base_type"]
@@ -39,6 +43,11 @@ class TrackedScalarMeta(type):
                 setattr(cls, member, wrapped)
         return cls
 
+    @classmethod
+    def unwrap_wrapper(cls, func: Callable[..., Any]) -> Callable[..., Any]:
+        raise NotImplementedError(
+            "unwrap_wrapper: should be implemented by subclasses")
+
     # def __class_new__(typ, *args, **kw):
     #     "Save boilerplate in our implementation"
     #     return typ.base_type.__new__(typ, *args, **kw)
@@ -51,12 +60,12 @@ class TrackedScalarMeta(type):
 class TrackedInt(Variable, metaclass=TrackedScalarMeta):
     base_type = int
 
-    def __init__(self, value):
+    def __init__(self, value: int):
         print("init:", value)
         super().__init__(expr=f'{value}')
 
     @classmethod
-    def unwrap_wrapper(cls, func):
+    def unwrap_wrapper(cls, func: Callable[..., Any]) -> Callable[..., Any]:
 
         @cls.functools.wraps(func)
         def unwrap(*args, **kw):
