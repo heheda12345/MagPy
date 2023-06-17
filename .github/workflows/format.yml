@@ -10,3 +10,13 @@ jobs:
       uses: AlexanderMelde/yapf-action@master
       with:
         args: --verbose
+  cpp-formatting-check:
+    name: C++ Formatting Check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: run clang-format to test if C++ code is correctly formatted
+      uses: RafikFarhad/clang-format-github-action@v3
+      with:
+        sources: frontend/**/*.cpp frontend/**/*.h
+        style: file
