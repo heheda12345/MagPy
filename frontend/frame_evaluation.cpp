@@ -3,6 +3,7 @@
 #include <cache.h>
 #include <frameobject.h>
 #include <pythread.h>
+#include <vector>
 
 #define unlikely(x) __builtin_expect((x), 0)
 
@@ -28,6 +29,7 @@ static PyObject *(*previous_eval_frame)(PyThreadState *tstate,
                                         PyFrameObject *frame,
                                         int throw_flag) = NULL;
 static size_t cache_entry_extra_index = -1;
+static std::vector<int *> frame_id_list;
 static void ignored(void *obj) {}
 
 ProgramCache program_cache;
@@ -54,6 +56,7 @@ inline static int get_frame_id(PyCodeObject *code) {
         // WARNING: memory leak here
         frame_id = new int(frame_count++);
         _PyCode_SetExtra((PyObject *)code, cache_entry_extra_index, frame_id);
+        frame_id_list.push_back(frame_id);
     }
     return *frame_id;
 }
@@ -131,11 +134,18 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     PyObject *postprocess = PyTuple_GetItem(callback, 1);
     PyObject *trace_func = PyTuple_GetItem(callback, 2);
     PyObject *frame_id_object = PyLong_FromLong(frame_id);
+    Py_INCREF(preprocess);
+    Py_INCREF(postprocess);
+    Py_INCREF(trace_func);
+    // Py_INCREF(frame_id_object);
     PyObject *result_preprocess =
         PyObject_CallFunction(preprocess, "Oi", _frame, frame_id_object);
     PyObject *new_code = PyTuple_GetItem(result_preprocess, 0);
     PyObject *check_fn = PyTuple_GetItem(result_preprocess, 1);
     PyObject *graph_fn = PyTuple_GetItem(result_preprocess, 2);
+    Py_INCREF(new_code);
+    Py_INCREF(check_fn);
+    Py_INCREF(graph_fn);
     if (program_cache[frame_id][0] == nullptr) {
         program_cache[frame_id][0] = new Cache{check_fn, graph_fn, nullptr};
     }
@@ -151,6 +161,11 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     PyObject *result_postprocess =
         PyObject_CallFunction(postprocess, "O", (PyObject *)_frame);
     Py_DECREF(_frame);
+    Py_DECREF(preprocess);
+    Py_DECREF(postprocess);
+    Py_DECREF(trace_func);
+    Py_DECREF(frame_id_object);
+    Py_DECREF(result_preprocess);
 
     set_eval_frame_callback(callback);
     return result;
@@ -276,14 +291,31 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
     for (Cache *entry = program_cache[frame_id][callsite_id]; entry != NULL;
          entry = entry->next) {
         PyObject *valid = PyObject_CallOneArg(entry->check_fn, locals);
-        Py_DECREF(valid);
         if (valid == Py_True) {
+            Py_DECREF(valid);
             printf("guard match\n");
             return entry->graph_fn;
         }
+        Py_DECREF(valid);
     }
     printf("guard cache miss\n");
     return Py_None;
+}
+
+static PyObject *finalize(PyObject *self, PyObject *args) {
+    for (int *frame_id : frame_id_list) {
+        delete frame_id;
+    }
+    frame_id_list.clear();
+
+    for (FrameCache &frame_cache : program_cache) {
+        for (Cache *entry : frame_cache) {
+            Py_DECREF(entry->check_fn);
+            Py_DECREF(entry->graph_fn);
+            delete entry;
+        }
+    }
+    Py_RETURN_NONE;
 }
 
 static PyMethodDef _methods[] = {
@@ -291,6 +323,7 @@ static PyMethodDef _methods[] = {
     {"set_skip_files", set_skip_files, METH_VARARGS, NULL},
     {"get_value_stack_from_top", get_value_stack_from_top, METH_VARARGS, NULL},
     {"guard_match", guard_match, METH_VARARGS, NULL},
+    {"finalize", finalize, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

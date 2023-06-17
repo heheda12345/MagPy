@@ -20,3 +20,6 @@ def get_value_stack_from_top(frame: FrameType, index: int) -> list[Any]:
 def guard_match(frame_id: int, callsite_id: int,
                 locals: Dict[str, Any]) -> Optional[Callable[..., Any]]:
     pass
+
+def finalize() -> None:
+    pass

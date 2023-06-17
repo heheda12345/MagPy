@@ -17,3 +17,6 @@ print(compiled_f(3), "should be 4")
 # print(compiled_f(3), "should be 5")
 # print(compiled_f(4), "should be 6")
 # print(compiled_f(5), "should be 7")
+
+from frontend.c_api import finalize
+finalize()
