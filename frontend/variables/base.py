@@ -2,7 +2,6 @@ from typing import Optional, Any
 
 
 class Variable:
-    import functools
 
     def __init__(self, expr: Optional[str] = None, unwrap: bool = False):
         self.expr = expr

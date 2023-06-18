@@ -5,12 +5,7 @@ import sys
 import traceback
 from types import FrameType, CodeType
 from typing import Any, Tuple, Callable
-
-
-# https://docs.python.org/3/library/sys.html#sys.settrace
-# a global tracing function must have been installed with settrace() in order to enable assigning frame.f_trace
-def simple_trace_func(frame: FrameType, event: str, arg: Any) -> None:
-    return None
+from frontend.tracer import enable_trace, disable_trace, get_trace_func
 
 
 def check_fn(locals: dict[str, Any]) -> bool:
@@ -23,26 +18,28 @@ def graph_fn() -> Any:
 
 
 def preprocess_frame(
-        frame: FrameType, frame_id: int
-) -> Tuple[CodeType, Callable[..., Any], Callable[..., Any]]:
+    frame: FrameType, frame_id: int
+) -> Tuple[CodeType, Callable[..., Any], Callable[..., Any], Callable[...,
+                                                                      Any]]:
     try:
-        print(f"preprocess frame {frame.f_code.co_filename}")
+        print(f"preprocess frame {frame.f_code.co_filename}", frame_id)
         new_code = rewrite_bytecode(frame.f_code)
-        sys.settrace(simple_trace_func)
+        trace_func = get_trace_func(frame_id)
     except Exception as e:
         print("exception in preprocess:", e, type(e))
         print(traceback.format_exc())
         raise e
-    return (new_code, check_fn, graph_fn)
+    return (new_code, check_fn, graph_fn, trace_func)
 
 
 def postprocess_frame(frame: FrameType) -> None:
     try:
         print(f"postprocess frame {frame.f_code.co_filename}")
-        # sys.settrace(None)
-        # print("bytecode", list(dis.get_instructions(frame.f_code)))
     except Exception as e:
-        print(e)
+        print("exception in postprocess:", e, type(e))
+        print(traceback.format_exc())
+        raise e
+    return None
 
 
 LOAD_OPCODES = list(
@@ -60,24 +57,6 @@ STORE_OPCODES = list(
 last_op_code = dis.opmap.get("NOP")
 
 
-def trace_func(frame: FrameType, event: str, arg: Any) -> None:
-    print(f"trace_func {frame.f_code.co_filename} {event} {arg} {id(frame)}")
-    if event == "return":
-        print(f"trace_func: return value is {arg}")
-    elif event == "opcode":
-        global last_op_code
-        if last_op_code in LOAD_OPCODES:
-            obj = get_value_stack_from_top(frame, 0)
-            print("obj", obj, type(obj))
-        opcode = frame.f_code.co_code[frame.f_lasti]
-        last_op_code = opcode
-        if opcode in LOAD_OPCODES:
-            opname = dis.opname[opcode]
-            print("opname", opname)
-        elif opcode in STORE_OPCODES:
-            print(f"trace_func: opcode is {dis.opname[opcode]}")
-
-
 def run_graph(graph_id: int, *args: Any, **kwargs: Any) -> None:
     print("run_graph", graph_id, args, kwargs)
     return None
@@ -93,10 +72,11 @@ def compile(f: Callable[..., Any]) -> Callable[..., Any]:
         init = True
         import builtins
         setattr(builtins, "guard_match", guard_match)
+        setattr(builtins, "enable_trace", enable_trace)
+        setattr(builtins, "disable_trace", disable_trace)
 
     def _fn(*args: Any, **kwargs: Any) -> Any:
-        prior = set_eval_frame(
-            (preprocess_frame, postprocess_frame, trace_func))
+        prior = set_eval_frame((preprocess_frame, postprocess_frame))
         try:
             return f(*args, **kwargs)
         except Exception as e:

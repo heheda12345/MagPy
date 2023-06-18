@@ -282,7 +282,13 @@ def add_guard(instructions: List[Instruction], start_inst: int, end_inst: int,
               frame_id: int, callsite_id: int,
               call_graph_insts: List[Instruction], call_fn_num_args: int,
               recover_stack_insts: List[Instruction]) -> None:
-    guard_code = [
+    start_trace_code = [
+        ci("LOAD_GLOBAL", "enable_trace"),
+        ci("CALL_FUNCTION", 0),
+        ci("POP_TOP"),
+        # ci("NOP")
+    ]
+    prefix_code = [
         ci("LOAD_GLOBAL", "guard_match"),
         ci("LOAD_CONST", frame_id),
         ci("LOAD_CONST", callsite_id),
@@ -293,14 +299,19 @@ def add_guard(instructions: List[Instruction], start_inst: int, end_inst: int,
         ci("LOAD_GLOBAL", "callable"),
         ci("LOAD_FAST", "__graph_fn"),
         ci("CALL_FUNCTION", 1),
-        ci("POP_JUMP_IF_FALSE", target=instructions[start_inst]),
-        ci("LOAD_FAST", "__graph_fn"),
-        *call_graph_insts,
-        ci("CALL_FUNCTION", call_fn_num_args),
-        *recover_stack_insts,
-        ci("JUMP_FORWARD", target=instructions[end_inst]),
+        ci("POP_JUMP_IF_FALSE", target=start_trace_code[0]),
+        ci("LOAD_FAST", "__graph_fn"), *call_graph_insts,
+        ci("CALL_FUNCTION", call_fn_num_args), *recover_stack_insts,
+        ci("JUMP_FORWARD", target=instructions[end_inst]), *start_trace_code
     ]
-    instructions[start_inst:start_inst] = guard_code
+    suffix_code = [
+        ci("LOAD_GLOBAL", "disable_trace"),
+        ci("CALL_FUNCTION", 0),
+        ci("POP_TOP"),
+    ]
+    instructions[start_inst:start_inst] = prefix_code
+    instructions[end_inst + len(prefix_code):end_inst +
+                 len(prefix_code)] = suffix_code
 
 
 def add_name(code_options: Dict[str, Any], varnames: List[str],
@@ -315,14 +326,15 @@ def rewrite_bytecode(code: types.CodeType) -> types.CodeType:
     instructions = get_instructions(code)
     for i, inst in enumerate(instructions):
         print(i, inst, id(inst), id(inst.target))
-    add_guard(instructions, 0, 7, 0, 0, [], 0, [])
+    add_guard(instructions, 0, len(instructions) - 1, 0, 0, [], 0, [])
     print("guarded code")
     for i, inst in enumerate(instructions):
         print(i, inst, id(inst), id(inst.target))
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
-    add_name(code_options, ["__graph_fn"],
-             ["guard_match", "locals", "callable"])
+    add_name(
+        code_options, ["__graph_fn"],
+        ["guard_match", "enable_trace", "disable_trace", "locals", "callable"])
     code_options["co_stacksize"] += 4
     new_code = assemble_instructions(instructions, code_options)[1]
     return new_code

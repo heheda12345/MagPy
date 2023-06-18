@@ -2,6 +2,7 @@
 #include <Python.h>
 #include <cache.h>
 #include <frameobject.h>
+#include <object.h>
 #include <pythread.h>
 #include <vector>
 
@@ -76,7 +77,9 @@ inline static PyObject *eval_frame_default(PyThreadState *tstate,
 
 inline static PyObject *eval_custom_code(PyThreadState *tstate,
                                          PyFrameObject *frame,
-                                         PyCodeObject *code, int throw_flag) {
+                                         PyCodeObject *code, int throw_flag,
+                                         bool trace_bytecode,
+                                         PyObject *trace_func) {
     Py_ssize_t ncells = 0;
     Py_ssize_t nfrees = 0;
     Py_ssize_t nlocals_new = code->co_nlocals;
@@ -97,6 +100,10 @@ inline static PyObject *eval_custom_code(PyThreadState *tstate,
         return NULL;
     }
 
+    shadow->f_trace_opcodes = trace_bytecode;
+    Py_CLEAR(shadow->f_trace);
+    Py_XINCREF(trace_func);
+    shadow->f_trace = trace_func;
     PyObject **fastlocals_old = frame->f_localsplus;
     PyObject **fastlocals_new = shadow->f_localsplus;
 
@@ -122,7 +129,6 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
                                     PyObject *callback) {
     set_eval_frame_callback(Py_None);
     int frame_id = get_frame_id(_frame->f_code);
-    printf("frame_id %d\n", frame_id);
     if (frame_id >= program_cache.size()) {
         CHECK(frame_id == program_cache.size());
         FrameCache empty;
@@ -132,30 +138,26 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     Py_INCREF(_frame);
     PyObject *preprocess = PyTuple_GetItem(callback, 0);
     PyObject *postprocess = PyTuple_GetItem(callback, 1);
-    PyObject *trace_func = PyTuple_GetItem(callback, 2);
-    PyObject *frame_id_object = PyLong_FromLong(frame_id);
     Py_INCREF(preprocess);
     Py_INCREF(postprocess);
-    Py_INCREF(trace_func);
-    // Py_INCREF(frame_id_object);
     PyObject *result_preprocess =
-        PyObject_CallFunction(preprocess, "Oi", _frame, frame_id_object);
+        PyObject_CallFunction(preprocess, "Oi", _frame, frame_id);
     PyObject *new_code = PyTuple_GetItem(result_preprocess, 0);
     PyObject *check_fn = PyTuple_GetItem(result_preprocess, 1);
     PyObject *graph_fn = PyTuple_GetItem(result_preprocess, 2);
+    PyObject *trace_func = PyTuple_GetItem(result_preprocess, 3);
     Py_INCREF(new_code);
     Py_INCREF(check_fn);
     Py_INCREF(graph_fn);
+    Py_INCREF(trace_func);
     if (program_cache[frame_id][0] == nullptr) {
         program_cache[frame_id][0] = new Cache{check_fn, graph_fn, nullptr};
     }
-    Py_DecRef(frame_id_object);
-    PyObject *result =
-        eval_custom_code(tstate, _frame, (PyCodeObject *)new_code, false);
+    PyObject *result = eval_custom_code(
+        tstate, _frame, (PyCodeObject *)new_code, false, true, trace_func);
+    // _frame->
+    // PyObject *result = _PyEval_EvalFrameDefault(tstate, _frame, throw_flag);
     /*
-    _frame->f_trace = trace_func;
-    _frame->f_trace_opcodes = 1;
-    PyObject* result = _PyEval_EvalFrameDefault(tstate, _frame, throw_flag);
     _frame->f_trace = NULL;
     */
     PyObject *result_postprocess =
@@ -164,8 +166,6 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     Py_DECREF(preprocess);
     Py_DECREF(postprocess);
     Py_DECREF(trace_func);
-    Py_DECREF(frame_id_object);
-    Py_DECREF(result_preprocess);
 
     set_eval_frame_callback(callback);
     return result;
@@ -183,7 +183,8 @@ static PyObject *custom_eval_frame_shim(PyThreadState *tstate,
     if (PySet_Contains(skip_files, frame->f_code->co_filename)) {
         return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
     }
-    return _custom_eval_frame(tstate, frame, throw_flag, callback);
+    PyObject *result = _custom_eval_frame(tstate, frame, throw_flag, callback);
+    return result;
 }
 
 inline static void enable_eval_frame_shim(PyThreadState *tstate) {
@@ -230,10 +231,9 @@ static PyObject *set_eval_frame(PyObject *self, PyObject *args) {
         return NULL;
     }
     if (new_callback != Py_None) {
-        if (!PyTuple_Check(new_callback) || PyTuple_Size(new_callback) != 3 ||
+        if (!PyTuple_Check(new_callback) || PyTuple_Size(new_callback) != 2 ||
             PyCallable_Check(PyTuple_GetItem(new_callback, 0)) != 1 ||
-            PyCallable_Check(PyTuple_GetItem(new_callback, 1)) != 1 ||
-            PyCallable_Check(PyTuple_GetItem(new_callback, 2)) != 1) {
+            PyCallable_Check(PyTuple_GetItem(new_callback, 1)) != 1) {
             PyErr_SetString(PyExc_TypeError, "should be callables");
             return NULL;
         }
@@ -287,7 +287,6 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
         PyErr_SetString(PyExc_TypeError, "invalid parameter in guard_match");
         return NULL;
     }
-    printf("start run\n");
     for (Cache *entry = program_cache[frame_id][callsite_id]; entry != NULL;
          entry = entry->next) {
         PyObject *valid = PyObject_CallOneArg(entry->check_fn, locals);
