@@ -23,7 +23,7 @@ def preprocess_frame(
                                                                       Any]]:
     try:
         print(f"preprocess frame {frame.f_code.co_filename}", frame_id)
-        new_code = rewrite_bytecode(frame.f_code)
+        new_code = rewrite_bytecode(frame.f_code, frame_id)
         trace_func = get_trace_func(frame_id)
     except Exception as e:
         print("exception in preprocess:", e, type(e))

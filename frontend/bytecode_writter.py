@@ -6,6 +6,8 @@ import dis
 import types
 import sys
 from typing import Tuple, Callable
+import copy
+from frontend.frame_saver import save_frame
 
 
 def get_code_keys() -> List[str]:
@@ -221,14 +223,11 @@ def fix_constants(instructions: List[Instruction],
     code_options["co_consts"] = tuple(const_list)
 
 
-def assemble_instructions(
-        instructions: List[Instruction],
-        code_options: Dict[str,
-                           Any]) -> Tuple[List[Instruction], types.CodeType]:
+def fix_instructions_for_assemble(instructions: List[Instruction],
+                                  code_options: Dict[str, Any]) -> None:
     add_name_to_code_options(code_options)
     fix_vars(instructions, code_options)
     fix_constants(instructions, code_options)
-    keys = get_code_keys()
     dirty = True
     while dirty:
         update_offsets(instructions)
@@ -236,6 +235,12 @@ def assemble_instructions(
         dirty = fix_extended_args(instructions) > 0
     remove_extra_line_nums(instructions)
 
+
+def assemble_instructions(
+        instructions: List[Instruction],
+        code_options: Dict[str,
+                           Any]) -> Tuple[List[Instruction], types.CodeType]:
+    keys = get_code_keys()
     bytecode, lnotab = assemble(instructions, code_options["co_firstlineno"])
     if sys.version_info < (3, 10):
         code_options["co_lnotab"] = lnotab
@@ -274,7 +279,6 @@ def get_instructions(code: types.CodeType) -> List[Instruction]:
     instructions = dis.Bytecode(code)
     instructions_converted = [convert_instruction(i) for i in instructions]
     virtualize_jumps(instructions_converted)
-    strip_extended_args(instructions_converted)
     return instructions_converted
 
 
@@ -322,10 +326,15 @@ def add_name(code_options: Dict[str, Any], varnames: List[str],
     code_options["co_nlocals"] = len(code_options["co_varnames"])
 
 
-def rewrite_bytecode(code: types.CodeType) -> types.CodeType:
-    instructions = get_instructions(code)
+def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
+    original_instructions = get_instructions(code)
+    instructions = copy.deepcopy(original_instructions)
+    virtualize_jumps(instructions)
+    for original_inst, inst in zip(original_instructions, instructions):
+        inst.original_inst = original_inst
     for i, inst in enumerate(instructions):
         print(i, inst, id(inst), id(inst.target))
+    strip_extended_args(instructions)
     add_guard(instructions, 0, len(instructions) - 1, 0, 0, [], 0, [])
     print("guarded code")
     for i, inst in enumerate(instructions):
@@ -336,6 +345,8 @@ def rewrite_bytecode(code: types.CodeType) -> types.CodeType:
         code_options, ["__graph_fn"],
         ["guard_match", "enable_trace", "disable_trace", "locals", "callable"])
     code_options["co_stacksize"] += 4
+    fix_instructions_for_assemble(instructions, code_options)
+    save_frame(original_instructions, instructions, frame_id)
     new_code = assemble_instructions(instructions, code_options)[1]
     return new_code
 

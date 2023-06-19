@@ -5,4 +5,6 @@ yapf -r . -d
 # python lint check
 mypy -p frontend
 # C++ code style
-clang-format --style=file -n --Werror frontend/**/*.cpp
+clang-format --style=file -n --Werror frontend/*.cpp
+
+echo "check passed"

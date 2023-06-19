@@ -16,6 +16,7 @@ class Instruction:
     is_jump_target: bool = False
     # extra fields to make modification easier:
     target: Optional["Instruction"] = None
+    original_inst: Optional["Instruction"] = None
 
     def __hash__(self) -> int:
         return id(self)
