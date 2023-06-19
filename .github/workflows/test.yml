@@ -5,13 +5,15 @@ on: [push]
 jobs:
   build:
 
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     strategy:
       matrix:
         python-version: ["3.9"]
 
     steps:
       - uses: actions/checkout@v3
+        with:
+          ssh-key: ${{ secrets.SSHKEY }}
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
