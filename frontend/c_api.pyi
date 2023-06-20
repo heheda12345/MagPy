@@ -20,5 +20,14 @@ def guard_match(frame_id: int, callsite_id: int,
                 locals: Dict[str, Any]) -> Optional[Callable[..., Any]]:
     pass
 
+
 def finalize() -> None:
+    pass
+
+
+def enter_nested_tracer() -> None:
+    pass
+
+
+def exit_nested_tracer() -> None:
     pass

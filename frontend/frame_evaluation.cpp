@@ -317,11 +317,25 @@ static PyObject *finalize(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
+static PyObject *enter_nested_tracer(PyObject *self, PyObject *args) {
+    PyThreadState *tstate = PyThreadState_GET();
+    tstate->tracing--;
+    Py_RETURN_NONE;
+}
+
+static PyObject *exit_nested_tracer(PyObject *self, PyObject *args) {
+    PyThreadState *tstate = PyThreadState_GET();
+    tstate->tracing++;
+    Py_RETURN_NONE;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame, METH_VARARGS, NULL},
     {"set_skip_files", set_skip_files, METH_VARARGS, NULL},
     {"get_value_stack_from_top", get_value_stack_from_top, METH_VARARGS, NULL},
     {"guard_match", guard_match, METH_VARARGS, NULL},
+    {"enter_nested_tracer", enter_nested_tracer, METH_VARARGS, NULL},
+    {"exit_nested_tracer", exit_nested_tracer, METH_VARARGS, NULL},
     {"finalize", finalize, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
