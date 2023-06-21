@@ -15,7 +15,7 @@ def gen_processed_code(gen_inst_fn):
 
     for o, g in zip(original_insts, guarded_insts[num_nop:]):
         g.original_inst = o
-    processed_code = ProcessedCode(original_insts, guarded_insts)
+    processed_code = ProcessedCode(original_insts, guarded_insts, [nops[-1]])
     return original_insts, guarded_insts, processed_code
 
 
@@ -23,7 +23,7 @@ def check_pc(gen_inst_fn, last_pcs, next_pcs):
     original_insts, guarded_insts, processed_code = gen_processed_code(
         gen_inst_fn)
     last_orig_pcs = [
-        processed_code.get_last_orig_pc(inst.offset) for inst in guarded_insts
+        processed_code.get_orig_pc(inst.offset) for inst in guarded_insts
     ]
     assert last_orig_pcs == last_pcs
     next_orig_pcs = [
@@ -42,7 +42,7 @@ def test_pc_simple_program():
             ci("RETURN_VALUE"),
         ]
 
-    last_pcs = [-1, -1, 0, 1, 2, 3]
+    last_pcs = [-2, -1, 0, 1, 2, 3]
     next_pcs = [-1, -1, 1, 2, 3, 4]
     check_pc(gen_inst, last_pcs, next_pcs)
 
@@ -58,7 +58,7 @@ def test_pc_with_ext():
             ci("RETURN_VALUE"),
         ]
 
-    last_pcs = [-1, -1, 0, 3, 3, 3, 4]
+    last_pcs = [-2, -1, 0, 3, 3, 3, 4]
     next_pcs = [-1, -1, 3, 4, 4, 4, 5]
     check_pc(gen_inst, last_pcs, next_pcs)
 

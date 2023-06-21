@@ -43,6 +43,7 @@ class ProcessedCode:
     '''
 
     last_pc_guarded_to_origin: dict[int, int]  # last pc guard -> origin
+    # heheda: not sure whether we need this field
     next_pc_guarded_to_origin: dict[
         int, int]  # next pc guard -> origin, -1 if unknown
     original_insts: list[Instruction]
@@ -53,7 +54,8 @@ class ProcessedCode:
                      int]  # guarded instruction -> pc in guard_insts
 
     def __init__(self, original_insts: list[Instruction],
-                 guard_insts: list[Instruction]) -> None:
+                 guard_insts: list[Instruction],
+                 inside_trace_opcodes: list[Instruction]) -> None:
         self.original_insts = original_insts[:]
         self.guard_insts = guard_insts[:]
 
@@ -76,11 +78,13 @@ class ProcessedCode:
             self.guarded_pc[inst] = pc
 
         self.last_pc_guarded_to_origin = {}
-        for i, inst in enumerate(guard_insts):
+        for inst in guard_insts:
             if inst.original_inst is not None:
                 self.last_pc_guarded_to_origin[cast(int, inst.offset) //
                                                2] = self.original_pc[
                                                    inst.original_inst]
+        for inst in inside_trace_opcodes:
+            self.last_pc_guarded_to_origin[cast(int, inst.offset) // 2] = -1
 
         self.next_pc_guarded_to_origin = {}
         for i, inst in enumerate(guard_insts):
@@ -107,12 +111,24 @@ class ProcessedCode:
             pc += 1
         return pc
 
-    def get_last_orig_pc(self, lasti: int) -> int:
+    def get_orig_pc(self, lasti: int) -> int:
+        '''
+        returns -1 if the lasti is a helper opcode inside tracing region
+        returns -2 if the lasti is outside tracing region
+        '''
         pc = lasti // 2
         if pc not in self.last_pc_guarded_to_origin:
-            return -1
+            return -2
 
         return self.last_pc_guarded_to_origin[pc]
+
+    def get_orig_inst(self, lasti: int) -> Optional[Instruction]:
+        pc = lasti // 2
+        assert pc in self.last_pc_guarded_to_origin
+        origin_pc = self.last_pc_guarded_to_origin[pc]
+        if origin_pc == -1:
+            return None  # is a helper opcode inside tracing region
+        return self.original_insts[self.last_pc_guarded_to_origin[pc]]
 
     def get_next_orig_pc(self,
                          lasti: int,
@@ -162,5 +178,11 @@ processed_codes: dict[int, ProcessedCode] = {}  # frame_id -> ProcessedCode
 
 
 def save_frame(original_insts: list[Instruction],
-               generated_insts: list[Instruction], frame_id: int) -> None:
-    processed_codes[frame_id] = ProcessedCode(original_insts, generated_insts)
+               generated_insts: list[Instruction], frame_id: int,
+               inside_trace_opcodes: list[Instruction]) -> None:
+    processed_codes[frame_id] = ProcessedCode(original_insts, generated_insts,
+                                              inside_trace_opcodes)
+
+
+def load_frame(frame_id: int) -> ProcessedCode:
+    return processed_codes[frame_id]

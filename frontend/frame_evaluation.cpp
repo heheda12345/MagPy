@@ -293,6 +293,7 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
         if (valid == Py_True) {
             Py_DECREF(valid);
             printf("guard match\n");
+            Py_INCREF(entry->graph_fn);
             return entry->graph_fn;
         }
         Py_DECREF(valid);

@@ -282,15 +282,16 @@ def get_instructions(code: types.CodeType) -> List[Instruction]:
     return instructions_converted
 
 
-def add_guard(instructions: List[Instruction], start_inst: int, end_inst: int,
-              frame_id: int, callsite_id: int,
-              call_graph_insts: List[Instruction], call_fn_num_args: int,
-              recover_stack_insts: List[Instruction]) -> None:
+def add_guard(
+    instructions: List[Instruction], start_inst: int, end_inst: int,
+    frame_id: int, callsite_id: int, call_graph_insts: List[Instruction],
+    call_fn_num_args: int, recover_stack_insts: List[Instruction]
+) -> Tuple[List[Instruction], List[Instruction]]:
     start_trace_code = [
         ci("LOAD_GLOBAL", "enable_trace"),
-        ci("CALL_FUNCTION", 0),
+        ci("LOAD_CONST", frame_id),
+        ci("CALL_FUNCTION", 1),
         ci("POP_TOP"),
-        # ci("NOP")
     ]
     prefix_code = [
         ci("LOAD_GLOBAL", "guard_match"),
@@ -310,12 +311,16 @@ def add_guard(instructions: List[Instruction], start_inst: int, end_inst: int,
     ]
     suffix_code = [
         ci("LOAD_GLOBAL", "disable_trace"),
-        ci("CALL_FUNCTION", 0),
+        ci("LOAD_CONST", frame_id),
+        ci("CALL_FUNCTION", 1),
         ci("POP_TOP"),
     ]
     instructions[start_inst:start_inst] = prefix_code
     instructions[end_inst + len(prefix_code):end_inst +
                  len(prefix_code)] = suffix_code
+    # NOTE: need to update inside_trace_opcodes when redefine prefix_code or suffix_code
+    inside_trace_opcodes = [*start_trace_code, *suffix_code]
+    return instructions, inside_trace_opcodes
 
 
 def add_name(code_options: Dict[str, Any], varnames: List[str],
@@ -335,7 +340,8 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
     for i, inst in enumerate(instructions):
         print(i, inst, id(inst), id(inst.target))
     strip_extended_args(instructions)
-    add_guard(instructions, 0, len(instructions) - 1, 0, 0, [], 0, [])
+    _, inside_trace_opcodes = add_guard(instructions, 0,
+                                        len(instructions) - 1, 0, 0, [], 0, [])
     print("guarded code")
     for i, inst in enumerate(instructions):
         print(i, inst, id(inst), id(inst.target))
@@ -346,7 +352,8 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
         ["guard_match", "enable_trace", "disable_trace", "locals", "callable"])
     code_options["co_stacksize"] += 4
     fix_instructions_for_assemble(instructions, code_options)
-    save_frame(original_instructions, instructions, frame_id)
+    save_frame(original_instructions, instructions, frame_id,
+               inside_trace_opcodes)
     new_code = assemble_instructions(instructions, code_options)[1]
     return new_code
 
