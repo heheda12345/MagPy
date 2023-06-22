@@ -6,30 +6,21 @@ import traceback
 from types import FrameType, CodeType
 from typing import Any, Tuple, Callable
 from frontend.tracer import enable_trace, disable_trace, get_trace_func
+from frontend.frame_tracker import enable_track
 
 
-def check_fn(locals: dict[str, Any]) -> bool:
-    print("running check_fn, locals:", locals)
-    return bool(locals['b'] == 2)
-
-
-def graph_fn() -> Any:
-    return 3
-
-
-def preprocess_frame(
-    frame: FrameType, frame_id: int
-) -> Tuple[CodeType, Callable[..., Any], Callable[..., Any], Callable[...,
-                                                                      Any]]:
+def preprocess_frame(frame: FrameType,
+                     frame_id: int) -> Tuple[CodeType, Callable[..., Any]]:
     try:
         print(f"preprocess frame {frame.f_code.co_filename}", frame_id)
+        enable_track(frame_id)
         new_code = rewrite_bytecode(frame.f_code, frame_id)
         trace_func = get_trace_func(frame_id)
     except Exception as e:
         print("exception in preprocess:", e, type(e))
         print(traceback.format_exc())
         raise e
-    return (new_code, check_fn, graph_fn, trace_func)
+    return (new_code, trace_func)
 
 
 def postprocess_frame(frame: FrameType) -> None:

@@ -8,6 +8,7 @@ import sys
 from typing import Tuple, Callable
 import copy
 from frontend.frame_saver import save_frame
+from frontend.frame_tracker import get_frame_tracker, TracedCode
 
 
 def get_code_keys() -> List[str]:
@@ -76,7 +77,7 @@ def devirtualize_jumps(instructions: List[Instruction]) -> None:
     indexof = {id(inst): i for i, inst, in enumerate(instructions)}
     jumps = set(dis.hasjabs).union(set(dis.hasjrel))
 
-    for inst in instructions:
+    for i, inst in enumerate(instructions):
         if inst.opcode in jumps:
             target = inst.target
             assert target is not None
@@ -282,45 +283,75 @@ def get_instructions(code: types.CodeType) -> List[Instruction]:
     return instructions_converted
 
 
-def add_guard(
-    instructions: List[Instruction], start_inst: int, end_inst: int,
-    frame_id: int, callsite_id: int, call_graph_insts: List[Instruction],
-    call_fn_num_args: int, recover_stack_insts: List[Instruction]
-) -> Tuple[List[Instruction], List[Instruction]]:
-    start_trace_code = [
-        ci("LOAD_GLOBAL", "enable_trace"),
-        ci("LOAD_CONST", frame_id),
-        ci("CALL_FUNCTION", 1),
-        ci("POP_TOP"),
-    ]
-    prefix_code = [
+def add_callsite(orignal_insts: List[Instruction], final_inst: Instruction,
+                 traced_codes: List[TracedCode], frame_id: int,
+                 callsite_id: int,
+                 start_pc: int) -> tuple[list[Instruction], list[Instruction]]:
+    assert orignal_insts[start_pc].opname != "RETURN_VALUE"
+    in_trace_insts = []
+    disable_trace_insts = []
+    if start_pc != 0:
+        disable_trace_insts.extend([
+            ci("LOAD_GLOBAL", "disable_trace"),
+            ci("LOAD_CONST", frame_id),
+            ci("CALL_FUNCTION", 1),
+            ci("POP_TOP"),
+        ])
+        in_trace_insts.extend(disable_trace_insts[:-1])
+    call_guard_insts = [
         ci("LOAD_GLOBAL", "guard_match"),
         ci("LOAD_CONST", frame_id),
         ci("LOAD_CONST", callsite_id),
         ci("LOAD_GLOBAL", "locals"),
         ci("CALL_FUNCTION", 0),
         ci("CALL_FUNCTION", 3),
+        ci("UNPACK_SEQUENCE", 2),
+        ci("STORE_FAST", "__case_idx"),
         ci("STORE_FAST", "__graph_fn"),
-        ci("LOAD_GLOBAL", "callable"),
-        ci("LOAD_FAST", "__graph_fn"),
-        ci("CALL_FUNCTION", 1),
-        ci("POP_JUMP_IF_FALSE", target=start_trace_code[0]),
-        ci("LOAD_FAST", "__graph_fn"), *call_graph_insts,
-        ci("CALL_FUNCTION", call_fn_num_args), *recover_stack_insts,
-        ci("JUMP_FORWARD", target=instructions[end_inst]), *start_trace_code
     ]
-    suffix_code = [
-        ci("LOAD_GLOBAL", "disable_trace"),
+    possible_matches: list[list[Instruction]] = []
+    for i, traced_code in enumerate(traced_codes):
+        insts = [
+            ci("LOAD_FAST", "__case_idx"),
+            ci("LOAD_CONST", i),
+            ci("COMPARE_OP", dis.cmp_op.index("=="), "=="),
+            ci("POP_JUMP_IF_FALSE", target=None),
+            ci("LOAD_FAST", "__graph_fn"),
+            *traced_code.call_graph_insts,
+        ]
+        if orignal_insts[traced_code.end_pc].opname != 'RETURN_VALUE':
+            insts.extend([
+                ci("LOAD_GLOBAL", "enable_trace"),
+                ci("LOAD_CONST", frame_id),
+                ci("CALL_FUNCTION", 1),
+                ci("POP_TOP"),
+                ci("JUMP_ABSOLUTE", target=orignal_insts[traced_code.end_pc])
+            ])
+            in_trace_insts.extend(insts[-2:])
+        else:
+            insts.append(ci("RETURN_VALUE"))
+        possible_matches.append(insts)
+    nomatch_code = [
+        ci("LOAD_GLOBAL", "enable_trace"),
         ci("LOAD_CONST", frame_id),
         ci("CALL_FUNCTION", 1),
         ci("POP_TOP"),
+        ci("JUMP_ABSOLUTE", target=orignal_insts[start_pc]),
     ]
-    instructions[start_inst:start_inst] = prefix_code
-    instructions[end_inst + len(prefix_code):end_inst +
-                 len(prefix_code)] = suffix_code
-    # NOTE: need to update inside_trace_opcodes when redefine prefix_code or suffix_code
-    inside_trace_opcodes = [*start_trace_code, *suffix_code]
-    return instructions, inside_trace_opcodes
+    possible_matches.append(nomatch_code)
+    in_trace_insts.extend(nomatch_code[-2:])
+    for insts1, insts2 in zip(possible_matches[:-1], possible_matches[1:]):
+        assert insts1[3].opname == "POP_JUMP_IF_FALSE"
+        insts1[3].target = insts2[0]
+    match_and_run_insts = []
+    for insts in possible_matches:
+        match_and_run_insts.extend(insts)
+    callsite_insts = [
+        *disable_trace_insts,
+        *call_guard_insts,
+        *match_and_run_insts,
+    ]
+    return callsite_insts, in_trace_insts
 
 
 def add_name(code_options: Dict[str, Any], varnames: List[str],
@@ -340,20 +371,52 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
     for i, inst in enumerate(instructions):
         print(i, inst, id(inst), id(inst.target))
     strip_extended_args(instructions)
-    _, inside_trace_opcodes = add_guard(instructions, 0,
-                                        len(instructions) - 1, 0, 0, [], 0, [])
+    tracker = get_frame_tracker(frame_id)
+    # list of (start_pc, traced_instructions)
+    run_traced_insts: list[tuple[int, list[Instruction]]] = []
+    in_trace_insts = []
+    final_insts = [
+        ci("LOAD_GLOBAL", "disable_trace"),
+        ci("LOAD_CONST", frame_id),
+        ci("CALL_FUNCTION", 1),
+        ci("POP_TOP"),
+        ci("RETURN_VALUE")
+    ]
+    in_trace_insts.extend(final_insts[:3])
+    for start_pc, callsite_id in tracker.callsite_id.items():
+        traced_codes = tracker.traced_codes[start_pc]
+        callsite_code, new_in_trace_insts = add_callsite(
+            instructions, final_insts[-1], traced_codes, frame_id, callsite_id,
+            start_pc)
+        run_traced_insts.append((start_pc, callsite_code))
+        in_trace_insts.extend(new_in_trace_insts)
+    next_original_pc: list[tuple[Instruction, Instruction]] = []
+    for i, inst in enumerate(instructions):
+        if inst.opname == "RETURN_VALUE":
+            instructions[i] = ci("JUMP_ABSOLUTE", target=final_insts[0])
+            next_original_pc.append((original_instructions[i], instructions[i]))
+            in_trace_insts.append(instructions[i])
+    run_traced_insts.sort(key=lambda x: x[0], reverse=True)
+    for start_pc, traced_code in run_traced_insts:
+        jump_inst = ci("JUMP_ABSOLUTE", target=traced_code[0])
+        next_original_pc.append((original_instructions[start_pc], jump_inst))
+        instructions.insert(start_pc, jump_inst)
+        in_trace_insts.append(jump_inst)
+    run_traced_insts.reverse()
+    for start_pc, traced_code in run_traced_insts:
+        instructions.extend(traced_code)
+    instructions.extend(final_insts)
     print("guarded code")
     for i, inst in enumerate(instructions):
         print(i, inst, id(inst), id(inst.target))
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
     add_name(
-        code_options, ["__graph_fn"],
+        code_options, ["__graph_fn", "__case_idx"],
         ["guard_match", "enable_trace", "disable_trace", "locals", "callable"])
-    code_options["co_stacksize"] += 4
     fix_instructions_for_assemble(instructions, code_options)
-    save_frame(original_instructions, instructions, frame_id,
-               inside_trace_opcodes)
+    save_frame(original_instructions, instructions, frame_id, in_trace_insts,
+               next_original_pc)
     new_code = assemble_instructions(instructions, code_options)[1]
     return new_code
 

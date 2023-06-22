@@ -36,6 +36,8 @@ static void ignored(void *obj) {}
 ProgramCache program_cache;
 static int frame_count = 0;
 
+bool need_postprocess = false;
+
 inline static PyObject *get_current_eval_frame_callback() {
     void *result = PyThread_tss_get(&eval_frame_callback_key);
     if (unlikely(result == NULL)) {
@@ -143,16 +145,10 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     PyObject *result_preprocess =
         PyObject_CallFunction(preprocess, "Oi", _frame, frame_id);
     PyObject *new_code = PyTuple_GetItem(result_preprocess, 0);
-    PyObject *check_fn = PyTuple_GetItem(result_preprocess, 1);
-    PyObject *graph_fn = PyTuple_GetItem(result_preprocess, 2);
-    PyObject *trace_func = PyTuple_GetItem(result_preprocess, 3);
+    PyObject *trace_func = PyTuple_GetItem(result_preprocess, 1);
     Py_INCREF(new_code);
-    Py_INCREF(check_fn);
-    Py_INCREF(graph_fn);
     Py_INCREF(trace_func);
-    if (program_cache[frame_id][0] == nullptr) {
-        program_cache[frame_id][0] = new Cache{check_fn, graph_fn, nullptr};
-    }
+    need_postprocess = false;
     PyObject *result = eval_custom_code(
         tstate, _frame, (PyCodeObject *)new_code, false, true, trace_func);
     // _frame->
@@ -160,8 +156,10 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     /*
     _frame->f_trace = NULL;
     */
-    PyObject *result_postprocess =
-        PyObject_CallFunction(postprocess, "O", (PyObject *)_frame);
+    if (need_postprocess) {
+        PyObject *result_postprocess =
+            PyObject_CallFunction(postprocess, "O", (PyObject *)_frame);
+    }
     Py_DECREF(_frame);
     Py_DECREF(preprocess);
     Py_DECREF(postprocess);
@@ -280,6 +278,25 @@ static PyObject *get_value_stack_from_top(PyObject *self, PyObject *args) {
     return value;
 }
 
+static PyObject *add_to_cache(PyObject *self, PyObject *args) {
+    int frame_id, callsite_id, id_in_callsite;
+    PyObject *check_fn, *graph_fn;
+    if (!PyArg_ParseTuple(args, "iiiOO", &frame_id, &callsite_id,
+                          &id_in_callsite, &check_fn, &graph_fn)) {
+        PyErr_SetString(PyExc_TypeError, "invalid parameter in add_to_cache");
+        return NULL;
+    }
+    if (callsite_id >= program_cache[frame_id].size()) {
+        CHECK(callsite_id == program_cache[frame_id].size());
+        program_cache[frame_id].push_back(nullptr);
+    }
+    Cache *entry = new Cache{
+        check_fn, PyTuple_Pack(2, PyLong_FromLong(id_in_callsite), graph_fn),
+        program_cache[frame_id][callsite_id]};
+    program_cache[frame_id][callsite_id] = entry;
+    Py_RETURN_NONE;
+}
+
 static PyObject *guard_match(PyObject *self, PyObject *args) {
     int frame_id, callsite_id;
     PyObject *locals;
@@ -299,7 +316,7 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
         Py_DECREF(valid);
     }
     printf("guard cache miss\n");
-    return Py_None;
+    return PyTuple_Pack(2, PyLong_FromLong(-1), Py_None);
 }
 
 static PyObject *finalize(PyObject *self, PyObject *args) {
@@ -335,9 +352,16 @@ static PyMethodDef _methods[] = {
     {"set_skip_files", set_skip_files, METH_VARARGS, NULL},
     {"get_value_stack_from_top", get_value_stack_from_top, METH_VARARGS, NULL},
     {"guard_match", guard_match, METH_VARARGS, NULL},
+    {"add_to_cache", add_to_cache, METH_VARARGS, NULL},
     {"enter_nested_tracer", enter_nested_tracer, METH_VARARGS, NULL},
     {"exit_nested_tracer", exit_nested_tracer, METH_VARARGS, NULL},
     {"finalize", finalize, METH_VARARGS, NULL},
+    {"mark_need_postprocess",
+     [](PyObject *self, PyObject *args) {
+         need_postprocess = true;
+         Py_RETURN_NONE;
+     },
+     METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

@@ -5,6 +5,7 @@ from types import FrameType
 from typing import Any, Callable
 from frontend.frame_saver import load_frame
 from frontend.guard_tracker import push_tracker, pop_tracker, record
+import inspect
 
 
 def get_trace_func(frame_id: int) -> Callable[[FrameType, str, Any], None]:
@@ -15,7 +16,7 @@ def get_trace_func(frame_id: int) -> Callable[[FrameType, str, Any], None]:
                 opcode = frame.f_code.co_code[frame.f_lasti]
                 opname = dis.opname[opcode]
                 print(
-                    f"trace_func {frame.f_code.co_filename} {event} {arg} {id(frame)} frame_id={frame_id} opname={opname}"
+                    f"trace_func {frame.f_code.co_filename} {event} {arg} {hex(id(frame))} frame_id={frame_id} opname={opname}"
                 )
                 record(frame, frame_id)
             else:
@@ -36,7 +37,11 @@ def empty_trace_func(_frame: FrameType, _event: str, _arg: Any) -> None:
 def enable_trace(frame_id: int) -> None:
     try:
         print("enable_trace")
-        push_tracker(frame_id)
+        this_frame = inspect.currentframe()
+        assert this_frame is not None
+        caller_frame = this_frame.f_back
+        assert caller_frame is not None
+        push_tracker(caller_frame, frame_id)
         sys.settrace(empty_trace_func)
     except Exception as e:
         print("exception in enable_trace:", e, type(e))

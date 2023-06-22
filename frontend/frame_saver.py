@@ -42,20 +42,23 @@ class ProcessedCode:
         pc: the index after dividing by sizeof(Instruction)
     '''
 
-    last_pc_guarded_to_origin: dict[int, int]  # last pc guard -> origin
+    pc_guarded_to_origin: dict[int, int]  # last pc guard -> origin
     # heheda: not sure whether we need this field
-    next_pc_guarded_to_origin: dict[
-        int, int]  # next pc guard -> origin, -1 if unknown
     original_insts: list[Instruction]
     guard_insts: list[Instruction]
     original_pc: dict[Instruction,
                       int]  # original instruction -> pc in original_insts
     guarded_pc: dict[Instruction,
                      int]  # guarded instruction -> pc in guard_insts
+    next_original_pc: dict[
+        int,
+        int]  # pc guarded -> original, only for replaced code in the orignal section of the guarded code
 
-    def __init__(self, original_insts: list[Instruction],
-                 guard_insts: list[Instruction],
-                 inside_trace_opcodes: list[Instruction]) -> None:
+    def __init__(
+            self, original_insts: list[Instruction],
+            guard_insts: list[Instruction],
+            inside_trace_opcodes: list[Instruction],
+            next_original_pc: list[tuple[Instruction, Instruction]]) -> None:
         self.original_insts = original_insts[:]
         self.guard_insts = guard_insts[:]
 
@@ -77,34 +80,18 @@ class ProcessedCode:
                 pc = cast(int, inst.offset) // 2
             self.guarded_pc[inst] = pc
 
-        self.last_pc_guarded_to_origin = {}
+        self.pc_guarded_to_origin = {}
         for inst in guard_insts:
             if inst.original_inst is not None:
-                self.last_pc_guarded_to_origin[cast(int, inst.offset) //
-                                               2] = self.original_pc[
-                                                   inst.original_inst]
+                self.pc_guarded_to_origin[cast(int, inst.offset) //
+                                          2] = self.original_pc[
+                                              inst.original_inst]
         for inst in inside_trace_opcodes:
-            self.last_pc_guarded_to_origin[cast(int, inst.offset) // 2] = -1
+            self.pc_guarded_to_origin[cast(int, inst.offset) // 2] = -1
 
-        self.next_pc_guarded_to_origin = {}
-        for i, inst in enumerate(guard_insts):
-            if inst.original_inst is not None:
-                if inst.opname in dynamic_next_pc_opnames:
-                    self.next_pc_guarded_to_origin[cast(int, inst.offset) //
-                                                   2] = -1
-                elif inst.opcode in dis.hasjabs or inst.opcode in dis.hasjrel:
-                    if inst.opname in ('JUMP_ABSOLUTE', 'JUMP_FORWARD'):
-                        assert inst.target in self.guarded_pc
-                        guarded_pc = self.guarded_pc[inst.target]
-                        self.next_pc_guarded_to_origin[cast(int, inst.offset) // 2] \
-                            = self.last_pc_guarded_to_origin[guarded_pc]
-                    else:
-                        logging.info("unknown jump inst %s", inst)
-                else:
-                    self.next_pc_guarded_to_origin[cast(
-                        int, inst.offset) // 2] = self.get_pc(
-                            self.original_insts,
-                            self.original_pc[inst.original_inst] + 1)
+        self.next_original_pc = {}
+        for o, g in next_original_pc:
+            self.next_original_pc[self.guarded_pc[g]] = self.original_pc[o]
 
     def get_pc(self, inst_list: list[Instruction], pc: int) -> int:
         while pc < len(inst_list) and inst_list[pc].opname == "EXTENDED_ARG":
@@ -117,53 +104,26 @@ class ProcessedCode:
         returns -2 if the lasti is outside tracing region
         '''
         pc = lasti // 2
-        if pc not in self.last_pc_guarded_to_origin:
+        if pc not in self.pc_guarded_to_origin:
             return -2
 
-        return self.last_pc_guarded_to_origin[pc]
+        return self.pc_guarded_to_origin[pc]
 
     def get_orig_inst(self, lasti: int) -> Optional[Instruction]:
         pc = lasti // 2
-        assert pc in self.last_pc_guarded_to_origin
-        origin_pc = self.last_pc_guarded_to_origin[pc]
+        assert pc in self.pc_guarded_to_origin, (
+            "pc %d not in pc_guarded_to_origin" % pc)
+        origin_pc = self.pc_guarded_to_origin[pc]
         if origin_pc == -1:
             return None  # is a helper opcode inside tracing region
-        return self.original_insts[self.last_pc_guarded_to_origin[pc]]
+        return self.original_insts[self.pc_guarded_to_origin[pc]]
 
-    def get_next_orig_pc(self,
-                         lasti: int,
-                         last_tos_bool: Optional[bool] = None) -> int:
+    def get_next_orig_pc(self, lasti: int) -> int:
         pc = lasti // 2
-        if pc not in self.next_pc_guarded_to_origin:
-            return -1
-        next_pc = self.next_pc_guarded_to_origin[pc]
-        if next_pc != -1:
-            return next_pc
-        last_origin_pc = self.last_pc_guarded_to_origin[pc]
-        last_inst = self.original_insts[last_origin_pc]
-        if last_inst.opname in ("POP_JUMP_IF_FALSE", "JUMP_IF_FALSE_OR_POP"):
-            if last_tos_bool is None:
-                raise ValueError(
-                    "last_tos_bool is None when last_inst is a conditional jump"
-                )
-            if last_tos_bool:
-                return self.get_pc(self.original_insts, last_origin_pc + 1)
-            else:
-                assert last_inst.target is not None
-                return self.original_pc[last_inst.target]
-        elif last_inst.opname in ("POP_JUMP_IF_TRUE", "JUMP_IF_TRUE_OR_POP"):
-            if last_tos_bool is None:
-                raise ValueError(
-                    "last_tos_bool is None when last_inst is a conditional jump"
-                )
-            if last_tos_bool:
-                assert last_inst.target is not None
-                return self.original_pc[last_inst.target]
-            else:
-                return self.get_pc(self.original_insts, last_origin_pc + 1)
+        if pc not in self.next_original_pc:
+            raise ValueError("pc %d not in next_original_pc" % pc)
 
-        else:
-            raise NotImplementedError
+        return self.next_original_pc[pc]
 
     def get_dependence_of_stack_var(self, original_inst: Instruction,
                                     stack_depth: int) -> list[Instruction]:
@@ -179,9 +139,11 @@ processed_codes: dict[int, ProcessedCode] = {}  # frame_id -> ProcessedCode
 
 def save_frame(original_insts: list[Instruction],
                generated_insts: list[Instruction], frame_id: int,
-               inside_trace_opcodes: list[Instruction]) -> None:
+               inside_trace_opcodes: list[Instruction],
+               next_original_pc: list[tuple[Instruction, Instruction]]) -> None:
     processed_codes[frame_id] = ProcessedCode(original_insts, generated_insts,
-                                              inside_trace_opcodes)
+                                              inside_trace_opcodes,
+                                              next_original_pc)
 
 
 def load_frame(frame_id: int) -> ProcessedCode:

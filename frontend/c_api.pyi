@@ -31,3 +31,13 @@ def enter_nested_tracer() -> None:
 
 def exit_nested_tracer() -> None:
     pass
+
+
+def mark_need_postprocess() -> None:
+    pass
+
+
+def add_to_cache(frame_id: int, callsite_id: int, id_in_callsite: int,
+                 guard_fn: Callable[..., Any], graph_fn: Callable[...,
+                                                                  Any]) -> None:
+    pass
