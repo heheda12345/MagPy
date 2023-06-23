@@ -290,6 +290,8 @@ static PyObject *add_to_cache(PyObject *self, PyObject *args) {
         CHECK(callsite_id == program_cache[frame_id].size());
         program_cache[frame_id].push_back(nullptr);
     }
+    Py_INCREF(check_fn);
+    Py_INCREF(graph_fn);
     Cache *entry = new Cache{
         check_fn, PyTuple_Pack(2, PyLong_FromLong(id_in_callsite), graph_fn),
         program_cache[frame_id][callsite_id]};
