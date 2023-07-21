@@ -16,11 +16,11 @@ def get_trace_func(frame_id: int) -> Callable[[FrameType, str, Any], None]:
                 opcode = frame.f_code.co_code[frame.f_lasti]
                 opname = dis.opname[opcode]
                 print(
-                    f"trace_func {frame.f_code.co_filename} {event} {arg} {hex(id(frame))} frame_id={frame_id} opname={opname}"
+                    f"tracing {event} {opname} {arg} pc={frame.f_lasti} frame={frame_id}({hex(id(frame))})"
                 )
                 record(frame, frame_id)
             else:
-                print(f"trace_func {frame.f_code.co_filename} {event} {arg}")
+                print(f"tracing {event} {arg} in {frame.f_code.co_filename}")
         except Exception as e:
             print("exception in trace_func:", e, type(e))
             print(traceback.format_exc())

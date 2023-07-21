@@ -7,6 +7,11 @@ from types import FrameType, CodeType
 from typing import Any, Tuple, Callable
 from frontend.tracer import enable_trace, disable_trace, get_trace_func
 from frontend.frame_tracker import enable_track
+import logging
+
+logging.basicConfig(
+    format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s',
+    level=logging.INFO)
 
 
 def preprocess_frame(frame: FrameType,

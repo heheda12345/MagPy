@@ -5,6 +5,7 @@ from frontend.c_api import get_value_stack_from_top, mark_need_postprocess
 from dataclasses import dataclass
 from frontend.instruction import Instruction, ci
 from .frame_tracker import TracedCode, get_frame_tracker
+import logging
 
 
 @dataclass
@@ -68,16 +69,17 @@ class GuardTracker:
 
         inst = self.code.get_orig_inst(self.frame.f_lasti)
         if inst is None:
-            self.restart()
+            self.restart(f"running injected code (pc={self.frame.f_lasti})")
             return
-        self.is_empty = False
         if self.start_pc is None:
             self.start_pc = self.code.get_orig_pc(self.frame.f_lasti)
             assert self.start_pc >= 0
         if hasattr(self, inst.opname):
-            getattr(self, inst.opname)(inst)
+            succuss = getattr(self, inst.opname)(inst)
+            if succuss:
+                self.is_empty = False
         else:
-            self.restart()
+            self.restart(f"unknown opcode {inst.opname}")
 
     def commit(self) -> None:
         with CommitCtx(self):
@@ -86,6 +88,7 @@ class GuardTracker:
             end_pc = self.code.get_orig_pc(self.frame.f_lasti)
             if end_pc == -1:
                 end_pc = self.code.get_next_orig_pc(self.frame.f_lasti)
+            print("commiting", self.start_pc, end_pc)
             call_graph_insts = [
                 ci("CALL_FUNCTION", 0),
                 ci("POP_TOP"),
@@ -144,13 +147,14 @@ def ___make_graph_fn():
         if isinstance(value, int):
             return [ci("LOAD_CONST", value)]
         else:
-            self.restart()
+            self.restart("unknown type in create_var_insts")
             return []
 
-    def restart(self) -> None:
+    def restart(self, restart_reason: str) -> None:
         if self.commiting:
             self.error_in_commiting = True
             return
+        logging.info(f"restart: {restart_reason}")
         self.commit()
         self.init_state()
 
@@ -163,26 +167,30 @@ def ___make_graph_fn():
             if hasattr(self, f'add_guard_{type(value).__name__}'):
                 getattr(self, f'add_guard_{type(value).__name__}')(out, value)
             else:
-                self.restart()
+                self.restart("unknown type in add_guard")
 
     def add_guard_int(self, var: Variable, value: int) -> None:
         self.guard.code.extend(var.guard.code)
         self.guard.code.append(f"{var.extract_code} == {value}")
 
-    def LOAD_FAST(self, inst: Instruction) -> None:
+    def LOAD_FAST(self, inst: Instruction) -> bool:
         self.stack.append(
             Variable(Guard([]), f"locals['{inst.argval}']",
                      [ci('LOAD_FAST', inst.arg, inst.argval)]))
+        return True
 
-    def LOAD_CONST(self, inst: Instruction) -> None:
+    def LOAD_CONST(self, inst: Instruction) -> bool:
         self.stack.append(None)
+        return True
 
-    def BINARY_ADD(self, inst: Instruction) -> None:
+    def BINARY_ADD(self, inst: Instruction) -> bool:
         self.guarded_pop(2)
         self.stack.append(None)
+        return True
 
-    def RETURN_VALUE(self, inst: Instruction) -> None:
-        self.restart()
+    def RETURN_VALUE(self, inst: Instruction) -> bool:
+        self.restart("return value")
+        return False
 
 
 trackers: list[GuardTracker] = []

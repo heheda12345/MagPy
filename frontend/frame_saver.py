@@ -1,7 +1,6 @@
 from frontend.instruction import Instruction
 from typing import Optional, cast
 import dis
-import logging
 
 dynamic_next_pc_opnames = {
     "POP_JUMP_IF_FALSE",
