@@ -147,3 +147,8 @@ def save_frame(original_insts: list[Instruction],
 
 def load_frame(frame_id: int) -> ProcessedCode:
     return processed_codes[frame_id]
+
+
+def reset() -> None:
+    global processed_codes
+    processed_codes.clear()

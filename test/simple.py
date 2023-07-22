@@ -1,5 +1,4 @@
-from frontend.compile import compile
-from frontend.c_api import finalize
+from frontend.compile import compile, reset
 
 
 # a = 1
@@ -26,5 +25,4 @@ print(compiled_g(3), "should be 4")
 compiled_k = compile(k)
 print(compiled_k(3), "should be 2")
 print(compiled_k(3), "should be 2")
-# FIXME: finalize crashes
-finalize()
+reset()

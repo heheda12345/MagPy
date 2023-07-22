@@ -210,3 +210,7 @@ def pop_tracker(frame_id: int) -> None:
 
 def record(frame: FrameType, frame_id: int) -> None:
     trackers[-1].record(frame, frame_id)
+
+
+def reset() -> None:
+    trackers.clear()

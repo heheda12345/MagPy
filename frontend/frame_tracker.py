@@ -13,6 +13,9 @@ class TracedCode:
     call_graph_insts: list[Instruction]
 
 
+total_cache_size = 0
+
+
 class FrameTracker:
     frame_id: int
     traced_codes: dict[int,
@@ -36,6 +39,8 @@ class FrameTracker:
         add_to_cache(self.frame_id, self.callsite_id[start_pc],
                      len(self.traced_codes[start_pc]) - 1, traced_code.guard_fn,
                      traced_code.graph_fn)
+        global total_cache_size
+        total_cache_size += 1
 
 
 trackers: dict[int, FrameTracker] = {}
@@ -48,3 +53,9 @@ def get_frame_tracker(frame_id: int) -> FrameTracker:
 def enable_track(frame_id: int) -> None:
     if frame_id not in trackers:
         trackers[frame_id] = FrameTracker(frame_id)
+
+
+def reset() -> None:
+    global total_cache_size
+    total_cache_size = 0
+    trackers.clear()

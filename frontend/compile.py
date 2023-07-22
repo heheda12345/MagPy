@@ -1,4 +1,4 @@
-from frontend.c_api import set_eval_frame, set_skip_files, get_value_stack_from_top, guard_match
+from frontend.c_api import set_eval_frame, set_skip_files, guard_match, c_reset
 from frontend.bytecode_writter import rewrite_bytecode
 import dis
 import sys
@@ -83,3 +83,13 @@ def compile(f: Callable[..., Any]) -> Callable[..., Any]:
             set_eval_frame(prior)
 
     return _fn
+
+
+def reset() -> None:
+    c_reset()
+    from frontend import frame_saver
+    frame_saver.reset()
+    from frontend import frame_tracker
+    frame_tracker.reset()
+    from frontend import guard_tracker
+    guard_tracker.reset()

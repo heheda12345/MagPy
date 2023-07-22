@@ -41,3 +41,7 @@ def add_to_cache(frame_id: int, callsite_id: int, id_in_callsite: int,
                  guard_fn: Callable[..., Any], graph_fn: Callable[...,
                                                                   Any]) -> None:
     pass
+
+
+def c_reset() -> None:
+    pass

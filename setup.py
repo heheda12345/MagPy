@@ -8,6 +8,7 @@ setuptools.setup(
     ext_modules=[
         setuptools.Extension('frontend.c_api',
                              ['frontend/frame_evaluation.cpp'],
-                             language='c++')
+                             language='c++',
+                             define_macros=[('LOG_CACHE', 'None')])
     ],
 )

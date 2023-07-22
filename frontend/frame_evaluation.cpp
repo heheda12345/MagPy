@@ -4,6 +4,8 @@
 #include <frameobject.h>
 #include <object.h>
 #include <pythread.h>
+#include <sstream>
+#include <string>
 #include <vector>
 
 #define unlikely(x) __builtin_expect((x), 0)
@@ -37,6 +39,20 @@ ProgramCache program_cache;
 static int frame_count = 0;
 
 bool need_postprocess = false;
+
+static void pylog(std::string message, const char *level = "info") {
+    static PyObject *pModule;
+    static PyObject *pFuncInfo;
+    if (pModule == NULL) {
+        pModule = PyImport_ImportModule("logging");
+        pFuncInfo = PyObject_GetAttrString(pModule, level);
+        CHECK(pFuncInfo != NULL)
+        CHECK(PyCallable_Check(pFuncInfo))
+    }
+    PyObject *pArgs = PyTuple_Pack(1, PyUnicode_FromString(message.c_str()));
+    PyObject_CallObject(pFuncInfo, pArgs);
+    Py_XDECREF(pArgs);
+}
 
 inline static PyObject *get_current_eval_frame_callback() {
     void *result = PyThread_tss_get(&eval_frame_callback_key);
@@ -311,17 +327,27 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
         PyObject *valid = PyObject_CallOneArg(entry->check_fn, locals);
         if (valid == Py_True) {
             Py_DECREF(valid);
-            printf("guard match\n");
+#ifdef LOG_CACHE
+            std::stringstream ss;
+            ss << "guard cache hit: frame_id " << frame_id << " callsite_id "
+               << callsite_id;
+            pylog(ss.str());
+#endif
             Py_INCREF(entry->graph_fn);
             return entry->graph_fn;
         }
         Py_DECREF(valid);
     }
-    printf("guard cache miss\n");
+#ifdef LOG_CACHE
+    std::stringstream ss;
+    ss << "guard cache miss: frame_id " << frame_id << " callsite_id "
+       << callsite_id;
+    pylog(ss.str());
+#endif
     return PyTuple_Pack(2, PyLong_FromLong(-1), Py_None);
 }
 
-static PyObject *finalize(PyObject *self, PyObject *args) {
+static PyObject *reset(PyObject *self, PyObject *args) {
     for (int *frame_id : frame_id_list) {
         delete frame_id;
     }
@@ -357,7 +383,7 @@ static PyMethodDef _methods[] = {
     {"add_to_cache", add_to_cache, METH_VARARGS, NULL},
     {"enter_nested_tracer", enter_nested_tracer, METH_VARARGS, NULL},
     {"exit_nested_tracer", exit_nested_tracer, METH_VARARGS, NULL},
-    {"finalize", finalize, METH_VARARGS, NULL},
+    {"c_reset", reset, METH_VARARGS, NULL},
     {"mark_need_postprocess",
      [](PyObject *self, PyObject *args) {
          need_postprocess = true;
