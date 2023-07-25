@@ -1,7 +1,6 @@
 #define PY_SSIZE_T_CLEAN
 #include "csrc.h"
 #include <Python.h>
-#include <cache.h>
 #include <frameobject.h>
 #include <object.h>
 #include <pythread.h>
@@ -38,7 +37,7 @@ static size_t cache_entry_extra_index = -1;
 static std::vector<int *> frame_id_list;
 static void ignored(void *obj) {}
 
-ProgramCache program_cache;
+frontend_csrc::ProgramCache program_cache;
 static int frame_count = 0;
 
 bool need_postprocess = false;
@@ -152,7 +151,7 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     int frame_id = get_frame_id(_frame->f_code);
     if (frame_id >= program_cache.size()) {
         CHECK(frame_id == program_cache.size());
-        FrameCache empty;
+        frontend_csrc::FrameCache empty;
         empty.push_back(nullptr);
         program_cache.push_back(empty);
     }
@@ -311,7 +310,7 @@ static PyObject *add_to_cache(PyObject *self, PyObject *args) {
     }
     Py_INCREF(check_fn);
     Py_INCREF(graph_fn);
-    Cache *entry = new Cache{
+    frontend_csrc::Cache *entry = new frontend_csrc::Cache{
         check_fn, PyTuple_Pack(2, PyLong_FromLong(id_in_callsite), graph_fn),
         program_cache[frame_id][callsite_id]};
     program_cache[frame_id][callsite_id] = entry;
@@ -325,8 +324,8 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
         PyErr_SetString(PyExc_TypeError, "invalid parameter in guard_match");
         return NULL;
     }
-    for (Cache *entry = program_cache[frame_id][callsite_id]; entry != NULL;
-         entry = entry->next) {
+    for (frontend_csrc::Cache *entry = program_cache[frame_id][callsite_id];
+         entry != NULL; entry = entry->next) {
         PyObject *valid = PyObject_CallOneArg(entry->check_fn, locals);
         if (valid == Py_True) {
             Py_DECREF(valid);
@@ -356,8 +355,8 @@ static PyObject *reset(PyObject *self, PyObject *args) {
     }
     frame_id_list.clear();
 
-    for (FrameCache &frame_cache : program_cache) {
-        for (Cache *entry : frame_cache) {
+    for (frontend_csrc::FrameCache &frame_cache : program_cache) {
+        for (frontend_csrc::Cache *entry : frame_cache) {
             Py_DECREF(entry->check_fn);
             Py_DECREF(entry->graph_fn);
             delete entry;
