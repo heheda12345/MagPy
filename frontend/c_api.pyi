@@ -45,3 +45,8 @@ def add_to_cache(frame_id: int, callsite_id: int, id_in_callsite: int,
 
 def c_reset() -> None:
     pass
+
+
+def stack_effect(op: int, oparg: int,
+                 jump: Optional[bool]) -> tuple[int, int, int, bool, bool]:
+    pass

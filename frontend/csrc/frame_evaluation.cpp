@@ -1,4 +1,5 @@
 #define PY_SSIZE_T_CLEAN
+#include "csrc.h"
 #include <Python.h>
 #include <cache.h>
 #include <frameobject.h>
@@ -24,6 +25,8 @@
         abort();                                                               \
     } else {                                                                   \
     }
+
+#define TO_PyBool(val) ((val) ? Py_True : Py_False)
 
 static PyObject *skip_files = Py_None;
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
@@ -375,6 +378,27 @@ static PyObject *exit_nested_tracer(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
+static PyObject *stack_effect_py(PyObject *self, PyObject *args) {
+    int opcode, oparg, jump;
+    PyObject *jump_obj;
+    if (!PyArg_ParseTuple(args, "iiO", &opcode, &oparg, &jump_obj)) {
+        PyErr_SetString(PyExc_TypeError, "invalid parameter in stack_effect");
+        return NULL;
+    }
+    if (jump_obj == Py_None) {
+        jump = -1;
+    } else if (jump_obj == Py_True) {
+        jump = 1;
+    } else if (jump_obj == Py_False) {
+        jump = 0;
+    }
+    frontend_csrc::StackEffect effect =
+        frontend_csrc::stack_effect(opcode, oparg, jump);
+    return Py_BuildValue("iiiOO", effect.read, effect.write_old,
+                         effect.write_new, TO_PyBool(effect.local_effect),
+                         TO_PyBool(effect.global_effect));
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame, METH_VARARGS, NULL},
     {"set_skip_files", set_skip_files, METH_VARARGS, NULL},
@@ -384,6 +408,7 @@ static PyMethodDef _methods[] = {
     {"enter_nested_tracer", enter_nested_tracer, METH_VARARGS, NULL},
     {"exit_nested_tracer", exit_nested_tracer, METH_VARARGS, NULL},
     {"c_reset", reset, METH_VARARGS, NULL},
+    {"stack_effect", stack_effect_py, METH_VARARGS, NULL},
     {"mark_need_postprocess",
      [](PyObject *self, PyObject *args) {
          need_postprocess = true;
