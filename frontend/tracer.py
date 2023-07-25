@@ -3,9 +3,9 @@ import dis
 import traceback
 from types import FrameType
 from typing import Any, Callable
-from frontend.frame_saver import load_frame
-from frontend.guard_tracker import push_tracker, pop_tracker, record
 import inspect
+from .code import load_code
+from .guard_tracker import push_tracker, pop_tracker, record
 
 
 def get_trace_func(frame_id: int) -> Callable[[FrameType, str, Any], None]:

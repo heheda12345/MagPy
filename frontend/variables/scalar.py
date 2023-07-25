@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 # learn from https://stackoverflow.com/questions/3238350/subclassing-int-in-python
 
-from frontend.variables.base import Variable
+from .base import Variable
 import math
 from typing import Any, Callable, Dict, Tuple
 

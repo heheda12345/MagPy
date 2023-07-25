@@ -1,9 +1,8 @@
 import dataclasses
 import dis
 import sys
-from numbers import Real
-from typing import NewType, Union, List
-from frontend.instruction import Instruction
+from typing import Union, List
+from .instruction import Instruction
 
 TERMINAL_OPCODES = {
     dis.opmap["RETURN_VALUE"],

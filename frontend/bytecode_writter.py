@@ -1,14 +1,14 @@
 import dataclasses
 from typing import Any, Dict, List
-from frontend.bytecode_analysis import stacksize_analysis
-from frontend.instruction import Instruction, convert_instruction, ci
 import dis
 import types
 import sys
 from typing import Tuple, Callable
 import copy
-from frontend.frame_saver import save_frame
-from frontend.frame_tracker import get_frame_tracker, TracedCode
+from .bytecode_analysis import stacksize_analysis
+from .instruction import Instruction, convert_instruction, ci
+from .code import save_code
+from .cache import get_frame_cache, CachedGraph
 
 
 def get_code_keys() -> List[str]:
@@ -284,7 +284,7 @@ def get_instructions(code: types.CodeType) -> List[Instruction]:
 
 
 def add_callsite(orignal_insts: List[Instruction], final_inst: Instruction,
-                 traced_codes: List[TracedCode], frame_id: int,
+                 cached_graphs: List[CachedGraph], frame_id: int,
                  callsite_id: int,
                  start_pc: int) -> tuple[list[Instruction], list[Instruction]]:
     assert orignal_insts[start_pc].opname != "RETURN_VALUE"
@@ -310,22 +310,22 @@ def add_callsite(orignal_insts: List[Instruction], final_inst: Instruction,
         ci("STORE_FAST", "__graph_fn"),
     ]
     possible_matches: list[list[Instruction]] = []
-    for i, traced_code in enumerate(traced_codes):
+    for i, graph in enumerate(cached_graphs):
         insts = [
             ci("LOAD_FAST", "__case_idx"),
             ci("LOAD_CONST", i),
             ci("COMPARE_OP", dis.cmp_op.index("=="), "=="),
             ci("POP_JUMP_IF_FALSE", target=None),
             ci("LOAD_FAST", "__graph_fn"),
-            *traced_code.call_graph_insts,
+            *graph.call_graph_insts,
         ]
-        if orignal_insts[traced_code.end_pc].opname != 'RETURN_VALUE':
+        if orignal_insts[graph.end_pc].opname != 'RETURN_VALUE':
             insts.extend([
                 ci("LOAD_GLOBAL", "enable_trace"),
                 ci("LOAD_CONST", frame_id),
                 ci("CALL_FUNCTION", 1),
                 ci("POP_TOP"),
-                ci("JUMP_ABSOLUTE", target=orignal_insts[traced_code.end_pc])
+                ci("JUMP_ABSOLUTE", target=orignal_insts[graph.end_pc])
             ])
             in_trace_insts.extend(insts[-2:])
         else:
@@ -371,7 +371,7 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
     for i, inst in enumerate(instructions):
         print(i, inst, id(inst), id(inst.target))
     strip_extended_args(instructions)
-    tracker = get_frame_tracker(frame_id)
+    frame_cache = get_frame_cache(frame_id)
     # list of (start_pc, traced_instructions)
     run_traced_insts: list[tuple[int, list[Instruction]]] = []
     in_trace_insts = []
@@ -383,10 +383,10 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
         ci("RETURN_VALUE")
     ]
     in_trace_insts.extend(final_insts[:3])
-    for start_pc, callsite_id in tracker.callsite_id.items():
-        traced_codes = tracker.traced_codes[start_pc]
+    for start_pc, callsite_id in frame_cache.callsite_id.items():
+        cached_graphs = frame_cache.cached_graphs[start_pc]
         callsite_code, new_in_trace_insts = add_callsite(
-            instructions, final_insts[-1], traced_codes, frame_id, callsite_id,
+            instructions, final_insts[-1], cached_graphs, frame_id, callsite_id,
             start_pc)
         run_traced_insts.append((start_pc, callsite_code))
         in_trace_insts.extend(new_in_trace_insts)
@@ -415,8 +415,8 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
         code_options, ["__graph_fn", "__case_idx"],
         ["guard_match", "enable_trace", "disable_trace", "locals", "callable"])
     fix_instructions_for_assemble(instructions, code_options)
-    save_frame(original_instructions, instructions, frame_id, in_trace_insts,
-               next_original_pc)
+    save_code(original_instructions, instructions, frame_id, in_trace_insts,
+              next_original_pc)
     new_code = assemble_instructions(instructions, code_options)[1]
     return new_code
 

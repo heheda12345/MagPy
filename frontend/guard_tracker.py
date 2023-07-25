@@ -1,11 +1,11 @@
 from types import FrameType
 from typing import Optional, Dict, Any
-from frontend.frame_saver import ProcessedCode, load_frame
-from frontend.c_api import get_value_stack_from_top, mark_need_postprocess
 from dataclasses import dataclass
-from frontend.instruction import Instruction, ci
-from .frame_tracker import TracedCode, get_frame_tracker
 import logging
+from .code import ProcessedCode, load_code
+from .c_api import get_value_stack_from_top, mark_need_postprocess
+from .instruction import Instruction, ci
+from .cache import CachedGraph, get_frame_cache
 
 
 @dataclass
@@ -47,7 +47,7 @@ class GuardTracker:
     is_empty: bool
 
     def __init__(self, frame: FrameType, frame_id: int):
-        self.code = load_frame(frame_id)
+        self.code = load_code(frame_id)
         self.frame = frame
         self.frame_id = frame_id
         self.init_state()
@@ -134,8 +134,8 @@ def ___make_graph_fn():
             print("call_graph_insts:", call_graph_insts)
             print("pc:", self.start_pc, end_pc)
             assert self.start_pc is not None
-            get_frame_tracker(self.frame_id).add(
-                TracedCode(
+            get_frame_cache(self.frame_id).add(
+                CachedGraph(
                     guard_fn,
                     graph_fn,
                     self.start_pc,
@@ -151,10 +151,11 @@ def ___make_graph_fn():
             return []
 
     def restart(self, restart_reason: str) -> None:
+        logging.info(
+            f"restart (commiting = {self.commiting}): {restart_reason}")
         if self.commiting:
             self.error_in_commiting = True
             return
-        logging.info(f"restart: {restart_reason}")
         self.commit()
         self.init_state()
 

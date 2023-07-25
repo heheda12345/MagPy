@@ -1,6 +1,6 @@
 import inspect
 import dis
-from frontend.bytecode_writter import get_code_keys
+from .bytecode_writter import get_code_keys
 
 
 def print_bytecode() -> None:

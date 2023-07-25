@@ -2,7 +2,7 @@ from enum import Enum
 import logging
 from collections import Iterable
 import torch
-from frontend import frame_tracker
+from frontend import cache
 
 HIT = 1
 MISS = 2
@@ -51,4 +51,4 @@ def run_and_check(compiled, expect_cache_logs, expect_cache_size: int, caplog,
     assert len(recorded_cache_logs) == len(expect_cache_logs)
     for recorded, expected in zip(recorded_cache_logs, expect_cache_logs):
         assert recorded == expected, f"wrong cache log: expect {expect_cache_logs}, got {recorded_cache_logs}"
-    assert frame_tracker.total_cache_size == expect_cache_size, f"wrong cache size: expect {expect_cache_size}, got {frame_tracker.total_cache_size}"
+    assert cache.TOTAL_SIZE == expect_cache_size, f"wrong cache size: expect {expect_cache_size}, got {cache.TOTAL_SIZE}"

@@ -1,6 +1,6 @@
-from frontend.instruction import Instruction
 from typing import Optional, cast
 import dis
+from .instruction import Instruction
 
 dynamic_next_pc_opnames = {
     "POP_JUMP_IF_FALSE",
@@ -136,16 +136,16 @@ class ProcessedCode:
 processed_codes: dict[int, ProcessedCode] = {}  # frame_id -> ProcessedCode
 
 
-def save_frame(original_insts: list[Instruction],
-               generated_insts: list[Instruction], frame_id: int,
-               inside_trace_opcodes: list[Instruction],
-               next_original_pc: list[tuple[Instruction, Instruction]]) -> None:
+def save_code(original_insts: list[Instruction],
+              generated_insts: list[Instruction], frame_id: int,
+              inside_trace_opcodes: list[Instruction],
+              next_original_pc: list[tuple[Instruction, Instruction]]) -> None:
     processed_codes[frame_id] = ProcessedCode(original_insts, generated_insts,
                                               inside_trace_opcodes,
                                               next_original_pc)
 
 
-def load_frame(frame_id: int) -> ProcessedCode:
+def load_code(frame_id: int) -> ProcessedCode:
     return processed_codes[frame_id]
 
 

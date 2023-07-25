@@ -1,13 +1,13 @@
-from frontend.c_api import set_eval_frame, set_skip_files, guard_match, c_reset
-from frontend.bytecode_writter import rewrite_bytecode
 import dis
 import sys
 import traceback
 from types import FrameType, CodeType
 from typing import Any, Tuple, Callable
-from frontend.tracer import enable_trace, disable_trace, get_trace_func
-from frontend.frame_tracker import enable_track
 import logging
+from .c_api import set_eval_frame, set_skip_files, guard_match, c_reset
+from .bytecode_writter import rewrite_bytecode
+from .tracer import enable_trace, disable_trace, get_trace_func
+from .cache import enable_cache
 
 logging.basicConfig(
     format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s',
@@ -18,7 +18,7 @@ def preprocess_frame(frame: FrameType,
                      frame_id: int) -> Tuple[CodeType, Callable[..., Any]]:
     try:
         print(f"preprocess frame {frame.f_code.co_filename}", frame_id)
-        enable_track(frame_id)
+        enable_cache(frame_id)
         new_code = rewrite_bytecode(frame.f_code, frame_id)
         trace_func = get_trace_func(frame_id)
     except Exception as e:
@@ -87,9 +87,9 @@ def compile(f: Callable[..., Any]) -> Callable[..., Any]:
 
 def reset() -> None:
     c_reset()
-    from frontend import frame_saver
-    frame_saver.reset()
-    from frontend import frame_tracker
-    frame_tracker.reset()
-    from frontend import guard_tracker
+    from . import code
+    code.reset()
+    from . import cache
+    cache.reset()
+    from . import guard_tracker
     guard_tracker.reset()
