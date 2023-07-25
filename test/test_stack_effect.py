@@ -12,7 +12,6 @@ def test_stack_effect():
                     continue
                 if op == 130 and oparg >= 3:  # RAISE_VARARGS
                     continue
-                print(op, oparg, jump, type(op), type(oparg), type(jump))
                 out = stack_effect(op, oparg, jump)
                 assert ref == out[2] - out[
                     1], f"op: {dis.opname[op]}({op}), oparg: {oparg}, jump: {jump}, ref: {ref}, out: {out}"

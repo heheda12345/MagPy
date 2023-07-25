@@ -20,5 +20,8 @@ jobs:
           pip install --force-reinstall .
       - name: Test with pytest
         run: |
+          source /opt/spack/share/spack/setup-env.sh
+          spack load cuda@11.8.0 /jb4mlxg
           source ~/venv/frontend-env/bin/activate
-          pytest -v test
+          pip install --upgrade -r requirements.txt -f https://download.pytorch.org/whl/torch_stable.html
+          pytest -vs test
