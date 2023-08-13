@@ -296,6 +296,16 @@ static PyObject *get_value_stack_from_top(PyObject *self, PyObject *args) {
     return value;
 }
 
+static PyObject *get_value_stack_size(PyObject *self, PyObject *args) {
+    PyFrameObject *frame = NULL;
+    if (!PyArg_ParseTuple(args, "O", &frame)) {
+        PyErr_SetString(PyExc_TypeError,
+                        "invalid parameter in get_value_stack_size");
+        return NULL;
+    }
+    return PyLong_FromLong((int)(frame->f_stacktop - frame->f_valuestack));
+}
+
 static PyObject *add_to_cache(PyObject *self, PyObject *args) {
     int frame_id, callsite_id, id_in_callsite;
     PyObject *check_fn, *graph_fn;
@@ -402,6 +412,7 @@ static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame, METH_VARARGS, NULL},
     {"set_skip_files", set_skip_files, METH_VARARGS, NULL},
     {"get_value_stack_from_top", get_value_stack_from_top, METH_VARARGS, NULL},
+    {"get_value_stack_size", get_value_stack_size, METH_VARARGS, NULL},
     {"guard_match", guard_match, METH_VARARGS, NULL},
     {"add_to_cache", add_to_cache, METH_VARARGS, NULL},
     {"enter_nested_tracer", enter_nested_tracer, METH_VARARGS, NULL},

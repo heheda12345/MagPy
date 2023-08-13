@@ -298,7 +298,13 @@ def add_callsite(orignal_insts: List[Instruction], final_inst: Instruction,
             ci("POP_TOP"),
         ])
         in_trace_insts.extend(disable_trace_insts[:-1])
+    stack_var_max_depth = max((g.stack_var_max_depth for g in cached_graphs),
+                              default=0)
+    prepare_stack_insts = [
+        ci("STORE_FAST", f"__stack__{i}") for i in range(stack_var_max_depth)
+    ]
     call_guard_insts = [
+        *prepare_stack_insts,
         ci("LOAD_GLOBAL", "guard_match"),
         ci("LOAD_CONST", frame_id),
         ci("LOAD_CONST", callsite_id),
@@ -331,7 +337,12 @@ def add_callsite(orignal_insts: List[Instruction], final_inst: Instruction,
         else:
             insts.append(ci("RETURN_VALUE"))
         possible_matches.append(insts)
+    restore_stack_insts = [
+        ci("LOAD_FAST", f"__stack__{i}")
+        for i in range(stack_var_max_depth - 1, -1, -1)
+    ]
     nomatch_code = [
+        *restore_stack_insts,
         ci("LOAD_GLOBAL", "enable_trace"),
         ci("LOAD_CONST", frame_id),
         ci("CALL_FUNCTION", 1),
@@ -382,11 +393,15 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
         ci("RETURN_VALUE")
     ]
     in_trace_insts.extend(final_insts[:3])
+    stack_var_max_depth = 0
     for start_pc, callsite_id in frame_cache.callsite_id.items():
         cached_graphs = frame_cache.cached_graphs[start_pc]
         callsite_code, new_in_trace_insts = add_callsite(
             instructions, final_insts[-1], cached_graphs, frame_id, callsite_id,
             start_pc)
+        stack_var_max_depth = max(
+            stack_var_max_depth,
+            max((g.stack_var_max_depth for g in cached_graphs), default=0))
         run_traced_insts.append((start_pc, callsite_code))
         in_trace_insts.extend(new_in_trace_insts)
     next_original_pc: list[tuple[Instruction, Instruction]] = []
@@ -410,7 +425,8 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
     add_name(
-        code_options, ["__graph_fn", "__case_idx"],
+        code_options, ["__graph_fn", "__case_idx"] +
+        [f"__stack__{i}" for i in range(stack_var_max_depth)],
         ["guard_match", "enable_trace", "disable_trace", "locals", "callable"])
     fix_instructions_for_assemble(instructions, code_options)
     save_code(original_instructions, instructions, frame_id, in_trace_insts,

@@ -3,8 +3,9 @@ from typing import Optional, Dict, Any
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import logging
+import re
 from .code import ProcessedCode, load_code
-from .c_api import get_value_stack_from_top
+from .c_api import get_value_stack_from_top, get_value_stack_size
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
 
@@ -23,16 +24,25 @@ class Variable:
 
 class RuntimeVar(Variable):
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(Guard([]),
                          "@@RUNTIME_VAR, should not read this field@@", [])
+
+
+class StackVar(Variable):
+    depth: int
+
+    def __init__(self, depth: int) -> None:
+        var_name = f"__stack__{depth}"
+        super().__init__(Guard([]), f"locals['{var_name}']",
+                         [ci('LOAD_FAST', var_name, var_name)])
 
 
 class State:
     guard: Guard
     start_pc: int
     is_empty: bool
-    stack: list[Optional[Variable]]
+    stack: list[Variable]
 
     def __init__(self) -> None:
         self.guard = Guard([])
@@ -44,6 +54,14 @@ class State:
         for modifier in modifiers:
             modifier.apply(self)
         self.is_empty = False
+
+    @classmethod
+    def from_frame(cls, frame: FrameType, read_stack: bool) -> 'State':
+        state = cls()
+        if read_stack:
+            stack_size = get_value_stack_size(frame)
+            state.stack = [StackVar(i) for i in range(stack_size)]
+        return state
 
 
 class StateModifier(ABC):
@@ -96,10 +114,12 @@ class GuardTracker:
         self.code = load_code(frame_id)
         self.frame = frame
         self.frame_id = frame_id
-        self.init_state()
+        self.init_state(
+            read_stack=False
+        )  # stack pointer is not initialized at the creation of a stack frame
 
-    def init_state(self) -> None:
-        self.state = State()
+    def init_state(self, read_stack: bool = True) -> None:
+        self.state = State.from_frame(self.frame, read_stack)
         self.is_commiting = False
         self.have_error = False
         self.error_in_commiting = False
@@ -160,6 +180,7 @@ def ___make_guard_fn():
     def fn(locals):
         print("running guard_fn", locals)
         {ok_code}
+        print("ok = ", ok)
         return ok
     return fn
 def ___make_graph_fn():
@@ -174,6 +195,13 @@ def ___make_graph_fn():
         guard_fn = out["___make_guard_fn"]()
         graph_fn = out["___make_graph_fn"]()
 
+        stack_var_max_depth = -1
+        # find all __stack__* variables from py_code
+        pattern = re.compile(r"__stack__(\d+)")
+        for m in pattern.finditer(py_code):
+            stack_var_max_depth = max(stack_var_max_depth, int(m.group(1)))
+        stack_var_max_depth += 1
+
         print("guard_fn:", guard_fn)
         print("call_graph_insts:", call_graph_insts)
         print("pc:", self.state.start_pc, end_pc)
@@ -185,6 +213,7 @@ def ___make_graph_fn():
                 self.state.start_pc,
                 end_pc,
                 call_graph_insts,
+                stack_var_max_depth,
             ))
 
     def create_var_insts(self, value: Any) -> list[Instruction]:
@@ -223,24 +252,20 @@ def ___make_graph_fn():
         self.state.guard.code.extend(var.guard.code)
         self.state.guard.code.append(f"{var.extract_code} == {value}")
 
-    def LOAD_FAST(self, inst: Instruction):
+    def LOAD_FAST(self, inst: Instruction) -> None:
         new_var = Variable(Guard([]), f"locals['{inst.argval}']",
                            [ci('LOAD_FAST', inst.arg, inst.argval)])
         self.modifiers.append(StackPushModifier(new_var))
-        return True
 
-    def LOAD_CONST(self, _inst: Instruction):
+    def LOAD_CONST(self, _inst: Instruction) -> None:
         self.modifiers.append(StackPushModifier(RuntimeVar()))
-        return True
 
-    def BINARY_ADD(self, _inst: Instruction):
+    def BINARY_ADD(self, _inst: Instruction) -> None:
         self.guarded_pop(2)
         self.modifiers.append(StackPushModifier(RuntimeVar()))
-        return True
 
-    def RETURN_VALUE(self, _inst: Instruction):
+    def RETURN_VALUE(self, _inst: Instruction) -> None:
         self.restart("return value")
-        return False
 
 
 trackers: list[GuardTracker] = []

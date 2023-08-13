@@ -11,6 +11,7 @@ class CachedGraph:
     start_pc: int
     end_pc: int
     call_graph_insts: list[Instruction]
+    stack_var_max_depth: int
 
 
 TOTAL_SIZE = 0
