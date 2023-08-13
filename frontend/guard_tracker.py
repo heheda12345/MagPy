@@ -1,9 +1,10 @@
 from types import FrameType
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
+from abc import ABC, abstractmethod
 import logging
 from .code import ProcessedCode, load_code
-from .c_api import get_value_stack_from_top, mark_need_postprocess
+from .c_api import get_value_stack_from_top
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
 
@@ -20,31 +21,76 @@ class Variable:
     extract_insts: list[Instruction]
 
 
-class CommitCtx:
-    old_commiting: bool
+class RuntimeVar(Variable):
 
-    def __init__(self, tracker: 'GuardTracker'):
-        self.tracker = tracker
+    def __init__(self):
+        super().__init__(Guard([]),
+                         "@@RUNTIME_VAR, should not read this field@@", [])
 
-    def __enter__(self) -> None:
-        self.old_commiting = self.tracker.commiting
-        self.tracker.commiting = True
 
-    def __exit__(self, _exc_type: Any, _exc_value: Any,
-                 _traceback: Any) -> None:
-        self.tracker.commiting = self.old_commiting
+class State:
+    guard: Guard
+    start_pc: int
+    is_empty: bool
+    stack: list[Optional[Variable]]
+
+    def __init__(self) -> None:
+        self.guard = Guard([])
+        self.start_pc = -1
+        self.is_empty = True
+        self.stack = []
+
+    def update(self, modifiers: list['StateModifier']) -> None:
+        for modifier in modifiers:
+            modifier.apply(self)
+        self.is_empty = False
+
+
+class StateModifier(ABC):
+
+    @abstractmethod
+    def apply(self, state: State) -> None:
+        raise NotImplementedError()
+
+
+class NewGuardModifier(StateModifier):
+
+    def __init__(self, guard: Guard):
+        self.guard = guard
+
+    def apply(self, state: State) -> None:
+        state.guard.code.extend(self.guard.code)
+
+
+class StackPopModifier(StateModifier):
+    n_pop: int
+
+    def __init__(self, n_pop: int):
+        self.n_pop = n_pop
+
+    def apply(self, state: State) -> None:
+        for _ in range(self.n_pop):
+            state.stack.pop()
+
+
+class StackPushModifier(StateModifier):
+    var_push: Variable
+
+    def __init__(self, var_push: Variable):
+        self.var_push = var_push
+
+    def apply(self, state: State) -> None:
+        state.stack.append(self.var_push)
 
 
 class GuardTracker:
-    stack: list[Optional[Variable]]
     code: ProcessedCode
     frame_id: int
-    guard: Guard
     frame: FrameType
     is_commiting: bool
-    error_in_commiting: bool
-    start_pc: Optional[int]
-    is_empty: bool
+    state: State
+    modifiers: list[StateModifier]
+    have_error: bool
 
     def __init__(self, frame: FrameType, frame_id: int):
         self.code = load_code(frame_id)
@@ -53,13 +99,11 @@ class GuardTracker:
         self.init_state()
 
     def init_state(self) -> None:
-        self.error = False
-        self.stack = []
-        self.guard = Guard([])
+        self.state = State()
+        self.is_commiting = False
+        self.have_error = False
         self.error_in_commiting = False
-        self.commiting = False
-        self.start_pc = None
-        self.is_empty = True
+        self.modifiers = []
 
     def record(
             self, frame: FrameType, frame_id: int
@@ -67,51 +111,51 @@ class GuardTracker:
         assert frame_id == self.frame_id
         assert frame == self.frame
 
+        if self.have_error:
+            self.init_state()
+
         inst = self.code.get_orig_inst(self.frame.f_lasti)
         if inst is None:
             self.restart(f"running injected code (pc={self.frame.f_lasti})")
             return
-        if self.start_pc is None:
-            self.start_pc = self.code.get_orig_pc(self.frame.f_lasti)
-            assert self.start_pc >= 0
+        if self.state.start_pc == -1:
+            self.state.start_pc = self.code.get_orig_pc(self.frame.f_lasti)
+            assert self.state.start_pc >= 0
         if hasattr(self, inst.opname):
-            succuss = getattr(self, inst.opname)(inst)
-            if succuss:
-                self.is_empty = False
+            getattr(self, inst.opname)(inst)
+            if not self.have_error:
+                self.update_state()
         else:
             self.restart(f"unknown opcode {inst.opname}")
 
     def commit(self) -> None:
-        with CommitCtx(self):
-            if self.is_empty:
-                return
-            end_pc = self.code.get_orig_pc(self.frame.f_lasti)
-            if end_pc == -1:
-                end_pc = self.code.get_next_orig_pc(self.frame.f_lasti)
-            print("commiting", self.start_pc, end_pc)
-            call_graph_insts = [
-                ci("CALL_FUNCTION", 0),
-                ci("POP_TOP"),
-            ]
-            for i, var in enumerate(self.stack):
-                if var is not None:
-                    self.guard.code.extend(var.guard.code)
-                    call_graph_insts.extend(var.extract_insts)
-                else:
-                    val = get_value_stack_from_top(self.frame,
-                                                   len(self.stack) - i - 1)
-                    call_graph_insts.extend(self.create_var_insts(val))
-            if self.error_in_commiting:
-                return
-            self.guarded_pop(len(self.stack))
-            if self.error_in_commiting:
-                return
-            code = " and ".join(self.guard.code)
-            if code == "":
-                ok_code = "ok = True"
+        if self.state.is_empty:
+            return
+        end_pc = self.code.get_orig_pc(self.frame.f_lasti)
+        if end_pc == -1:
+            end_pc = self.code.get_next_orig_pc(self.frame.f_lasti)
+        print("commiting", self.state.start_pc, end_pc)
+        call_graph_insts = [
+            ci("CALL_FUNCTION", 0),
+            ci("POP_TOP"),
+        ]
+        guard = self.state.guard
+        for i, var in enumerate(self.state.stack):
+            if not isinstance(var, RuntimeVar):
+                guard.code.extend(var.guard.code)
+                call_graph_insts.extend(var.extract_insts)
             else:
-                ok_code = f"ok = {code}"
-            py_code = f"""\
+                val = get_value_stack_from_top(self.frame,
+                                               len(self.state.stack) - i - 1)
+                call_graph_insts.extend(self.create_var_insts(val))
+        if self.error_in_commiting:
+            return
+        code = " and ".join(guard.code)
+        if code == "":
+            ok_code = "ok = True"
+        else:
+            ok_code = f"ok = {code}"
+        py_code = f"""\
 def ___make_guard_fn():
     def fn(locals):
         print("running guard_fn", locals)
@@ -124,24 +168,24 @@ def ___make_graph_fn():
         return None
     return fn
             """
-            out: Dict[str, Any] = dict()
-            print("RUNNING PY CODE", py_code)
-            exec(py_code, self.frame.f_globals, out)
-            guard_fn = out["___make_guard_fn"]()
-            graph_fn = out["___make_graph_fn"]()
+        out: Dict[str, Any] = dict()
+        print("RUNNING PY CODE", py_code)
+        exec(py_code, self.frame.f_globals, out)
+        guard_fn = out["___make_guard_fn"]()
+        graph_fn = out["___make_graph_fn"]()
 
-            print("guard_fn:", guard_fn)
-            print("call_graph_insts:", call_graph_insts)
-            print("pc:", self.start_pc, end_pc)
-            assert self.start_pc is not None
-            get_frame_cache(self.frame_id).add(
-                CachedGraph(
-                    guard_fn,
-                    graph_fn,
-                    self.start_pc,
-                    end_pc,
-                    call_graph_insts,
-                ))
+        print("guard_fn:", guard_fn)
+        print("call_graph_insts:", call_graph_insts)
+        print("pc:", self.state.start_pc, end_pc)
+        assert self.state.start_pc >= 0
+        get_frame_cache(self.frame_id).add(
+            CachedGraph(
+                guard_fn,
+                graph_fn,
+                self.state.start_pc,
+                end_pc,
+                call_graph_insts,
+            ))
 
     def create_var_insts(self, value: Any) -> list[Instruction]:
         if isinstance(value, int):
@@ -152,44 +196,49 @@ def ___make_graph_fn():
 
     def restart(self, restart_reason: str) -> None:
         logging.info(
-            f"restart (commiting = {self.commiting}): {restart_reason}")
-        if self.commiting:
+            f"restart (commiting = {self.is_commiting}): {restart_reason}")
+        if self.is_commiting:
             self.error_in_commiting = True
             return
+        self.have_error = True
         self.commit()
-        self.init_state()
+
+    def update_state(self) -> None:
+        self.state.update(self.modifiers)
+        self.modifiers.clear()
 
     def guarded_pop(self, num_var: int) -> None:
         for i in range(num_var):
-            out = self.stack.pop()
-            if out is None:
+            out = self.state.stack[-i - 1]
+            if isinstance(out, RuntimeVar):
                 continue
             value = get_value_stack_from_top(self.frame, i)
             if hasattr(self, f'add_guard_{type(value).__name__}'):
                 getattr(self, f'add_guard_{type(value).__name__}')(out, value)
             else:
                 self.restart("unknown type in add_guard")
+        self.modifiers.append(StackPopModifier(num_var))
 
     def add_guard_int(self, var: Variable, value: int) -> None:
-        self.guard.code.extend(var.guard.code)
-        self.guard.code.append(f"{var.extract_code} == {value}")
+        self.state.guard.code.extend(var.guard.code)
+        self.state.guard.code.append(f"{var.extract_code} == {value}")
 
-    def LOAD_FAST(self, inst: Instruction) -> bool:
-        self.stack.append(
-            Variable(Guard([]), f"locals['{inst.argval}']",
-                     [ci('LOAD_FAST', inst.arg, inst.argval)]))
+    def LOAD_FAST(self, inst: Instruction):
+        new_var = Variable(Guard([]), f"locals['{inst.argval}']",
+                           [ci('LOAD_FAST', inst.arg, inst.argval)])
+        self.modifiers.append(StackPushModifier(new_var))
         return True
 
-    def LOAD_CONST(self, inst: Instruction) -> bool:
-        self.stack.append(None)
+    def LOAD_CONST(self, _inst: Instruction):
+        self.modifiers.append(StackPushModifier(RuntimeVar()))
         return True
 
-    def BINARY_ADD(self, inst: Instruction) -> bool:
+    def BINARY_ADD(self, _inst: Instruction):
         self.guarded_pop(2)
-        self.stack.append(None)
+        self.modifiers.append(StackPushModifier(RuntimeVar()))
         return True
 
-    def RETURN_VALUE(self, inst: Instruction) -> bool:
+    def RETURN_VALUE(self, _inst: Instruction):
         self.restart("return value")
         return False
 
@@ -205,7 +254,7 @@ def push_tracker(frame: FrameType, frame_id: int) -> None:
 
 def pop_tracker(frame_id: int) -> None:
     to_pop = trackers.pop()
-    assert to_pop.is_empty
+    assert to_pop.state.is_empty
     assert to_pop.frame_id == frame_id
 
 
