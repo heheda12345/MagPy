@@ -6,7 +6,7 @@ import sys
 from typing import Tuple, Callable
 import copy
 from .bytecode_analysis import stacksize_analysis
-from .instruction import Instruction, convert_instruction, ci
+from .instruction import Instruction, convert_instruction, ci, format_insts
 from .code import save_code
 from .cache import get_frame_cache, CachedGraph
 
@@ -368,8 +368,7 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
     virtualize_jumps(instructions)
     for original_inst, inst in zip(original_instructions, instructions):
         inst.original_inst = original_inst
-    for i, inst in enumerate(instructions):
-        print(i, inst, id(inst), id(inst.target))
+    print(format_insts(instructions))
     strip_extended_args(instructions)
     frame_cache = get_frame_cache(frame_id)
     # list of (start_pc, traced_instructions)
@@ -407,8 +406,7 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
         instructions.extend(traced_code)
     instructions.extend(final_insts)
     print("guarded code")
-    for i, inst in enumerate(instructions):
-        print(i, inst, id(inst), id(inst.target))
+    print(format_insts(instructions))
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
     add_name(

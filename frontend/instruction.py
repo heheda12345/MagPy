@@ -24,6 +24,11 @@ class Instruction:
     def __eq__(self, other: object) -> bool:
         return id(self) == id(other)
 
+    def __repr__(self) -> str:
+        # yellow if is original inst, green if is generated inst
+        color = "\033[33m" if self.original_inst else "\033[32m"
+        return f"{color}{self.opname}\033[0m({self.arg}, {self.argval})"
+
 
 def convert_instruction(i: dis.Instruction) -> Instruction:
     return Instruction(
@@ -35,6 +40,17 @@ def convert_instruction(i: dis.Instruction) -> Instruction:
         i.starts_line,
         i.is_jump_target,
     )
+
+
+def format_insts(insts: list[Instruction]) -> str:
+    ret = ""
+    for i, inst in enumerate(insts):
+        if inst.target is not None:
+            target_idx = insts.index(inst.target)
+            ret += f"{i}: {inst} -> inst {target_idx}\n"
+        else:
+            ret += f"{i}: {inst}\n"
+    return ret
 
 
 class _NotProvided:
