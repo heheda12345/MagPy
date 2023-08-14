@@ -160,6 +160,7 @@ class GuardTracker:
             ci("POP_TOP"),
         ]
         guard = self.state.guard
+        # FIXME: should not reproduce the whole stack
         for i, var in enumerate(self.state.stack):
             if not isinstance(var, RuntimeVar):
                 guard.code.extend(var.guard.code)

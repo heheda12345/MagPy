@@ -26,6 +26,11 @@
     }
 
 #define TO_PyBool(val) ((val) ? Py_True : Py_False)
+#define PRINT_PYERR                                                            \
+    {                                                                          \
+        if (PyErr_Occurred())                                                  \
+            PyErr_Print();                                                     \
+    }
 
 static PyObject *skip_files = Py_None;
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
@@ -243,6 +248,7 @@ static PyObject *decrese_working_threads(PyThreadState *tstate) {
 static PyObject *set_eval_frame(PyObject *self, PyObject *args) {
     PyObject *new_callback = NULL;
     if (!PyArg_ParseTuple(args, "O", &new_callback)) {
+        PRINT_PYERR;
         PyErr_SetString(PyExc_TypeError, "invalid parameter");
         return NULL;
     }
@@ -277,6 +283,7 @@ static PyObject *set_skip_files(PyObject *self, PyObject *args) {
         Py_DECREF(skip_files);
     }
     if (!PyArg_ParseTuple(args, "O", &skip_files)) {
+        PRINT_PYERR
         PyErr_SetString(PyExc_TypeError, "invalid parameter in set_skip_files");
     }
     Py_INCREF(skip_files);
@@ -287,6 +294,7 @@ static PyObject *get_value_stack_from_top(PyObject *self, PyObject *args) {
     PyFrameObject *frame = NULL;
     int index = 0;
     if (!PyArg_ParseTuple(args, "Oi", &frame, &index)) {
+        PRINT_PYERR;
         PyErr_SetString(PyExc_TypeError,
                         "invalid parameter in get_value_stack_from_top");
         return NULL;
@@ -299,6 +307,7 @@ static PyObject *get_value_stack_from_top(PyObject *self, PyObject *args) {
 static PyObject *get_value_stack_size(PyObject *self, PyObject *args) {
     PyFrameObject *frame = NULL;
     if (!PyArg_ParseTuple(args, "O", &frame)) {
+        PRINT_PYERR;
         PyErr_SetString(PyExc_TypeError,
                         "invalid parameter in get_value_stack_size");
         return NULL;
@@ -311,6 +320,7 @@ static PyObject *add_to_cache(PyObject *self, PyObject *args) {
     PyObject *check_fn, *graph_fn;
     if (!PyArg_ParseTuple(args, "iiiOO", &frame_id, &callsite_id,
                           &id_in_callsite, &check_fn, &graph_fn)) {
+        PRINT_PYERR;
         PyErr_SetString(PyExc_TypeError, "invalid parameter in add_to_cache");
         return NULL;
     }
@@ -331,6 +341,7 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
     int frame_id, callsite_id;
     PyObject *locals;
     if (!PyArg_ParseTuple(args, "iiO", &frame_id, &callsite_id, &locals)) {
+        PRINT_PYERR;
         PyErr_SetString(PyExc_TypeError, "invalid parameter in guard_match");
         return NULL;
     }
@@ -391,6 +402,7 @@ static PyObject *stack_effect_py(PyObject *self, PyObject *args) {
     int opcode, oparg, jump;
     PyObject *jump_obj;
     if (!PyArg_ParseTuple(args, "iiO", &opcode, &oparg, &jump_obj)) {
+        PRINT_PYERR;
         PyErr_SetString(PyExc_TypeError, "invalid parameter in stack_effect");
         return NULL;
     }

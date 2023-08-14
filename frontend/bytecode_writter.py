@@ -218,9 +218,10 @@ def fix_constants(instructions: List[Instruction],
     const_list = list(code_options["co_consts"])
     LOAD_CONST = dis.opmap["LOAD_CONST"]
     for inst in instructions:
-        if inst.opcode == LOAD_CONST and inst.argval not in const_set:
-            const_list.append(inst.argval)
-            inst.arg = len(const_list) - 1
+        if inst.opcode == LOAD_CONST:
+            if inst.argval not in const_set:
+                const_list.append(inst.argval)
+            inst.arg = const_list.index(inst.argval)
     code_options["co_consts"] = tuple(const_list)
 
 
