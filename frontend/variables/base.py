@@ -1,24 +1,30 @@
-from typing import Optional, Any
+from dataclasses import dataclass
+from ..instruction import Instruction, ci
 
 
+@dataclass
+class Guard:
+    code: list[str]
+
+
+@dataclass
 class Variable:
+    guard: Guard
+    extract_code: str
+    extract_insts: list[Instruction]
 
-    def __init__(self, expr: Optional[str] = None, unwrap: bool = False):
-        self.expr = expr
-        self.evaled = False
-        if unwrap:
-            self.value = self.unwrap()
-        else:
-            self.value = None
 
-    def unwrap(self) -> Any:
-        print("unwrap is called on", self)
-        if self.evaled:
-            return self.value
-        result = self.unwrap_impl()
-        self.evaled = True
-        return result
+class RuntimeVar(Variable):
 
-    def unwrap_impl(self) -> Any:
-        raise NotImplementedError(
-            "eval_impl: should be implemented by subclasses")
+    def __init__(self) -> None:
+        super().__init__(Guard([]),
+                         "@@RUNTIME_VAR, should not read this field@@", [])
+
+
+class StackVar(Variable):
+    depth: int
+
+    def __init__(self, depth: int) -> None:
+        var_name = f"__stack__{depth}"
+        super().__init__(Guard([]), f"locals['{var_name}']",
+                         [ci('LOAD_FAST', var_name, var_name)])

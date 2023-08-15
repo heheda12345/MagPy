@@ -1,24 +1,18 @@
 import torch
+import torch.nn as nn
 from frontend.compile import compile, reset
 
-# def f(x, y):
-#     z = x + 1
-#     if z > 0:
-#         return y + 1
-#     else:
-#         return y + 2
-
-# compiled_f = compile(f)
-# print(compiled_f(0, 0), "should be 1")
-# print(compiled_f(0, 0), "should be 1")
-# print(compiled_f(-1, 0), "should be 2")
-# print(compiled_f(-1, 0), "should be 2")
+import torch
 
 
-def f(x):
-    return (x + 1) // 2 + 1
+def f(a, b, c):
+    return a + b + c
 
 
 compiled_f = compile(f)
-print(compiled_f(1), "should be 2")
-print(compiled_f(1), "should be 2")
+
+a = torch.full((1,), 1.0)
+b = torch.full((1,), 2.0)
+c = torch.full((1,), 3.0)
+print(compiled_f(a, b, c))
+print(compiled_f(a, b, c))

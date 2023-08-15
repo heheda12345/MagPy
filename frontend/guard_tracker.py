@@ -1,51 +1,24 @@
 from types import FrameType
-from typing import Optional, Dict, Any
-from dataclasses import dataclass
+from typing import Dict, Any
 from abc import ABC, abstractmethod
 import logging
 import re
+import torch
 from .code import ProcessedCode, load_code
 from .c_api import get_value_stack_from_top, get_value_stack_size
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
-
-
-@dataclass
-class Guard:
-    code: list[str]
-
-
-@dataclass
-class Variable:
-    guard: Guard
-    extract_code: str
-    extract_insts: list[Instruction]
-
-
-class RuntimeVar(Variable):
-
-    def __init__(self) -> None:
-        super().__init__(Guard([]),
-                         "@@RUNTIME_VAR, should not read this field@@", [])
-
-
-class StackVar(Variable):
-    depth: int
-
-    def __init__(self, depth: int) -> None:
-        var_name = f"__stack__{depth}"
-        super().__init__(Guard([]), f"locals['{var_name}']",
-                         [ci('LOAD_FAST', var_name, var_name)])
+from . import variables as var
 
 
 class State:
-    guard: Guard
+    guard: var.Guard
     start_pc: int
     is_empty: bool
-    stack: list[Variable]
+    stack: list[var.Variable]
 
     def __init__(self) -> None:
-        self.guard = Guard([])
+        self.guard = var.Guard([])
         self.start_pc = -1
         self.is_empty = True
         self.stack = []
@@ -60,7 +33,7 @@ class State:
         state = cls()
         if read_stack:
             stack_size = get_value_stack_size(frame)
-            state.stack = [StackVar(i) for i in range(stack_size)]
+            state.stack = [var.StackVar(i) for i in range(stack_size)]
         return state
 
 
@@ -73,7 +46,7 @@ class StateModifier(ABC):
 
 class NewGuardModifier(StateModifier):
 
-    def __init__(self, guard: Guard):
+    def __init__(self, guard: var.Guard):
         self.guard = guard
 
     def apply(self, state: State) -> None:
@@ -92,9 +65,9 @@ class StackPopModifier(StateModifier):
 
 
 class StackPushModifier(StateModifier):
-    var_push: Variable
+    var_push: var.Variable
 
-    def __init__(self, var_push: Variable):
+    def __init__(self, var_push: var.Variable):
         self.var_push = var_push
 
     def apply(self, state: State) -> None:
@@ -154,6 +127,8 @@ class GuardTracker:
         end_pc = self.code.get_orig_pc(self.frame.f_lasti)
         if end_pc == -1:
             end_pc = self.code.get_next_orig_pc(self.frame.f_lasti)
+        assert self.is_commiting == False
+        self.is_commiting = True
         print("commiting", self.state.start_pc, end_pc)
         call_graph_insts = [
             ci("CALL_FUNCTION", 0),
@@ -161,10 +136,10 @@ class GuardTracker:
         ]
         guard = self.state.guard
         # FIXME: should not reproduce the whole stack
-        for i, var in enumerate(self.state.stack):
-            if not isinstance(var, RuntimeVar):
-                guard.code.extend(var.guard.code)
-                call_graph_insts.extend(var.extract_insts)
+        for i, v in enumerate(self.state.stack):
+            if not isinstance(v, var.RuntimeVar):
+                guard.code.extend(v.guard.code)
+                call_graph_insts.extend(v.extract_insts)
             else:
                 val = get_value_stack_from_top(self.frame,
                                                len(self.state.stack) - i - 1)
@@ -216,10 +191,13 @@ def ___make_graph_fn():
                 call_graph_insts,
                 stack_var_max_depth,
             ))
+        self.is_commiting = False
 
     def create_var_insts(self, value: Any) -> list[Instruction]:
         if isinstance(value, int):
             return [ci("LOAD_CONST", value)]
+        elif isinstance(value, torch.Tensor):
+            return [ci("LOAD_CONST", 233)]
         else:
             self.restart("unknown type in create_var_insts")
             return []
@@ -240,30 +218,36 @@ def ___make_graph_fn():
     def guarded_pop(self, num_var: int) -> None:
         for i in range(num_var):
             out = self.state.stack[-i - 1]
-            if isinstance(out, RuntimeVar):
+            if isinstance(out, var.RuntimeVar):
                 continue
             value = get_value_stack_from_top(self.frame, i)
-            if hasattr(self, f'add_guard_{type(value).__name__}'):
-                getattr(self, f'add_guard_{type(value).__name__}')(out, value)
+            type_name = type(value).__name__
+            if hasattr(self, f'add_guard_{type_name}'):
+                getattr(self, f'add_guard_{type_name}')(out, value)
             else:
-                self.restart("unknown type in add_guard")
+                self.restart(f"unknown type {type_name} in add_guard")
         self.modifiers.append(StackPopModifier(num_var))
 
-    def add_guard_int(self, var: Variable, value: int) -> None:
+    def add_guard_int(self, var: var.Variable, value: int) -> None:
         self.state.guard.code.extend(var.guard.code)
         self.state.guard.code.append(f"{var.extract_code} == {value}")
 
+    def add_guard_Tensor(self, var: var.Variable, value: torch.Tensor) -> None:
+        self.state.guard.code.extend(var.guard.code)
+        self.state.guard.code.append(
+            f"{var.extract_code}.shape == {value.shape}")
+
     def LOAD_FAST(self, inst: Instruction) -> None:
-        new_var = Variable(Guard([]), f"locals['{inst.argval}']",
-                           [ci('LOAD_FAST', inst.arg, inst.argval)])
+        new_var = var.Variable(var.Guard([]), f"locals['{inst.argval}']",
+                               [ci('LOAD_FAST', inst.arg, inst.argval)])
         self.modifiers.append(StackPushModifier(new_var))
 
     def LOAD_CONST(self, _inst: Instruction) -> None:
-        self.modifiers.append(StackPushModifier(RuntimeVar()))
+        self.modifiers.append(StackPushModifier(var.RuntimeVar()))
 
     def BINARY_ADD(self, _inst: Instruction) -> None:
         self.guarded_pop(2)
-        self.modifiers.append(StackPushModifier(RuntimeVar()))
+        self.modifiers.append(StackPushModifier(var.RuntimeVar()))
 
     def RETURN_VALUE(self, _inst: Instruction) -> None:
         self.restart("return value")
