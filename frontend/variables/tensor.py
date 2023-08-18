@@ -14,6 +14,19 @@
 import torch
 import torch.fx
 from typing import Union
+import torch
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch._subclasses.fake_tensor import FakeTensor
+import torch._inductor.compile_fx
+
+class Graph:
+    fake_mode: torch._subclasses.FakeTensorMode
+    def __init__(self):
+        self.fake_mode = torch._subclasses.FakeTensorMode()
+    
+    # refer to wrap_fx_proxy_cls in torch._dynamo.builder for other types
+    def tensor_to_fake(self, example_input: torch.Tensor) -> FakeTensor:
+        return self.fake_mode.from_tensor(example_input, static_shapes=True)
 
 _counter = 0
 
@@ -44,9 +57,9 @@ class TensorVar:
 
 
 if __name__ == '__main__':
-    a = torch.full((1,), 1.0)
-    b = torch.full((1,), 2.0)
-    c = torch.full((1,), 3.0)
+    a = torch.full((1000000,), 1.0)
+    b = torch.full((1000000,), 2.0)
+    c = torch.full((1000000,), 3.0)
 
     result_graph = torch.fx.Graph()
     tracer = torch.fx.proxy.GraphAppendingTracer(result_graph)
@@ -57,11 +70,17 @@ if __name__ == '__main__':
 
     var_d = TensorVar(var_a.proxy + var_b.proxy)
     var_e = TensorVar(var_d.proxy + var_c.proxy)
-    result_graph.output(var_e.proxy.node)
+    result_graph.output((var_e.proxy.node,))
     print(result_graph)
     model = torch.fx.GraphModule(torch.nn.Module(), result_graph)
     model.recompile()
     print(model)
-    print(
-        model(torch.full((1,), 4.0), torch.full((1,), 5.0), torch.full((1,),
-                                                                       6.0)))
+
+    graph = Graph()
+    example_inputs = (graph.tensor_to_fake(a), graph.tensor_to_fake(b), graph.tensor_to_fake(c))
+    print(example_inputs)
+    compiled = torch._inductor.compile_fx.compile_fx(model, example_inputs)
+
+    from timeit import timeit
+    print(timeit(stmt="a + b + c", number=100, globals=globals()))
+    print(timeit(stmt="compiled(a, b, c)", number=100, globals=globals()))
