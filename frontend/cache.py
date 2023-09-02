@@ -10,8 +10,9 @@ class CachedGraph:
     graph_fn: Callable[..., Any]
     start_pc: int
     end_pc: int
-    call_graph_insts: list[Instruction]
-    stack_var_max_depth: int
+    start_stack_size: int
+    end_stack_size: int
+    return_values: list[str]
 
 
 TOTAL_SIZE = 0

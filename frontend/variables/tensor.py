@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # def proxy_args_kwargs(args, kwargs):
 #     try:
 #         proxy_args = tuple(arg.as_proxy() for arg in args)
@@ -19,14 +21,17 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch._subclasses.fake_tensor import FakeTensor
 import torch._inductor.compile_fx
 
+
 class Graph:
     fake_mode: torch._subclasses.FakeTensorMode
+
     def __init__(self):
         self.fake_mode = torch._subclasses.FakeTensorMode()
-    
+
     # refer to wrap_fx_proxy_cls in torch._dynamo.builder for other types
     def tensor_to_fake(self, example_input: torch.Tensor) -> FakeTensor:
         return self.fake_mode.from_tensor(example_input, static_shapes=True)
+
 
 _counter = 0
 
@@ -77,7 +82,8 @@ if __name__ == '__main__':
     print(model)
 
     graph = Graph()
-    example_inputs = (graph.tensor_to_fake(a), graph.tensor_to_fake(b), graph.tensor_to_fake(c))
+    example_inputs = (graph.tensor_to_fake(a), graph.tensor_to_fake(b),
+                      graph.tensor_to_fake(c))
     print(example_inputs)
     compiled = torch._inductor.compile_fx.compile_fx(model, example_inputs)
 

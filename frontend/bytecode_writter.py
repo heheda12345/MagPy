@@ -284,10 +284,11 @@ def get_instructions(code: types.CodeType) -> List[Instruction]:
     return instructions_converted
 
 
-def add_callsite(orignal_insts: List[Instruction], final_inst: Instruction,
-                 cached_graphs: List[CachedGraph], frame_id: int,
-                 callsite_id: int,
-                 start_pc: int) -> tuple[list[Instruction], list[Instruction]]:
+def add_callsite(
+    orignal_insts: List[Instruction], final_inst: Instruction,
+    cached_graphs: List[CachedGraph], frame_id: int, callsite_id: int,
+    start_pc: int
+) -> tuple[list[Instruction], list[Instruction], dict[str, list[str]]]:
     assert orignal_insts[start_pc].opname != "RETURN_VALUE"
     in_trace_insts = []
     disable_trace_insts = []
@@ -299,10 +300,16 @@ def add_callsite(orignal_insts: List[Instruction], final_inst: Instruction,
             ci("POP_TOP"),
         ])
         in_trace_insts.extend(disable_trace_insts[:-1])
-    stack_var_max_depth = max((g.stack_var_max_depth for g in cached_graphs),
-                              default=0)
+
+    start_stack_size = cached_graphs[0].start_stack_size if cached_graphs else 0
+    end_stack_size = cached_graphs[0].end_stack_size if cached_graphs else 0
+    for graph in cached_graphs:
+        assert graph.start_stack_size == start_stack_size
+        assert graph.end_stack_size == end_stack_size
+
     prepare_stack_insts = [
-        ci("STORE_FAST", f"__stack__{i}") for i in range(stack_var_max_depth)
+        ci("STORE_FAST", f"__stack__{i}")
+        for i in range(start_stack_size - 1, -1, -1)
     ]
     call_guard_insts = [
         *prepare_stack_insts,
@@ -311,21 +318,42 @@ def add_callsite(orignal_insts: List[Instruction], final_inst: Instruction,
         ci("LOAD_CONST", callsite_id),
         ci("LOAD_GLOBAL", "locals"),
         ci("CALL_FUNCTION", 0),
-        ci("CALL_FUNCTION", 3),
+        ci("CALL_FUNCTION",
+           3,
+           comment="call guard_match(frame_id, callsite_id, locals)"),
         ci("UNPACK_SEQUENCE", 2),
         ci("STORE_FAST", "__case_idx"),
         ci("STORE_FAST", "__graph_fn"),
     ]
     possible_matches: list[list[Instruction]] = []
     for i, graph in enumerate(cached_graphs):
+        # avoid "referenced before assignment" error when __stack__ is only assigned in graph_fn
+        if end_stack_size > start_stack_size:
+            for j in range(start_stack_size, end_stack_size):
+                call_guard_insts.extend(
+                    [ci("LOAD_CONST", 233),
+                     ci("STORE_FAST", f"__stack__{j}")])
         insts = [
             ci("LOAD_FAST", "__case_idx"),
             ci("LOAD_CONST", i),
             ci("COMPARE_OP", dis.cmp_op.index("=="), "=="),
             ci("POP_JUMP_IF_FALSE", target=None),
             ci("LOAD_FAST", "__graph_fn"),
-            *graph.call_graph_insts,
+            ci("LOAD_GLOBAL", "locals"),
+            ci("CALL_FUNCTION", 0),
+            ci("CALL_FUNCTION", 1, comment="call graph_fn"),
         ]
+        if len(graph.return_values) == 0:
+            ci("POP_TOP")
+        elif len(graph.return_values) == 1:
+            pass
+        if len(graph.return_values) > 1:
+            ci("UNPACK_SEQUENCE", len(graph.return_values))
+        for return_value in reversed(graph.return_values):
+            if not return_value.startswith("__stack__"):
+                raise NotImplementedError("TODO: support return non-stack vars")
+            else:
+                break
         if orignal_insts[graph.end_pc].opname != 'RETURN_VALUE':
             insts.extend([
                 ci("LOAD_GLOBAL", "enable_trace"),
@@ -340,8 +368,9 @@ def add_callsite(orignal_insts: List[Instruction], final_inst: Instruction,
         possible_matches.append(insts)
     restore_stack_insts = [
         ci("LOAD_FAST", f"__stack__{i}")
-        for i in range(stack_var_max_depth - 1, -1, -1)
+        for i in range(end_stack_size - 1, -1, -1)
     ]
+
     nomatch_code = [
         *restore_stack_insts,
         ci("LOAD_GLOBAL", "enable_trace"),
@@ -363,7 +392,17 @@ def add_callsite(orignal_insts: List[Instruction], final_inst: Instruction,
         *call_guard_insts,
         *match_and_run_insts,
     ]
-    return callsite_insts, in_trace_insts
+    new_names = {
+        "varnames": ["__graph_fn", "__case_idx"] + [
+            f"__stack__{i}"
+            for i in range(max(start_stack_size, end_stack_size))
+        ],
+        "names": [
+            "guard_match", "enable_trace", "disable_trace", "locals",
+            "callable", "print"
+        ]
+    }
+    return callsite_insts, in_trace_insts, new_names
 
 
 def add_name(code_options: Dict[str, Any], varnames: List[str],
@@ -394,17 +433,16 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
         ci("RETURN_VALUE")
     ]
     in_trace_insts.extend(final_insts[:3])
-    stack_var_max_depth = 0
+    new_names_all: dict[str, set[str]] = {"varnames": set(), "names": set()}
     for start_pc, callsite_id in frame_cache.callsite_id.items():
         cached_graphs = frame_cache.cached_graphs[start_pc]
-        callsite_code, new_in_trace_insts = add_callsite(
+        callsite_code, new_in_trace_insts, new_names = add_callsite(
             instructions, final_insts[-1], cached_graphs, frame_id, callsite_id,
             start_pc)
-        stack_var_max_depth = max(
-            stack_var_max_depth,
-            max((g.stack_var_max_depth for g in cached_graphs), default=0))
         run_traced_insts.append((start_pc, callsite_code))
         in_trace_insts.extend(new_in_trace_insts)
+        new_names_all["varnames"].update(new_names["varnames"])
+        new_names_all["names"].update(new_names["names"])
     next_original_pc: list[tuple[Instruction, Instruction]] = []
     for i, inst in enumerate(instructions):
         if inst.opname == "RETURN_VALUE":
@@ -425,10 +463,8 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
     print(format_insts(instructions))
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
-    add_name(
-        code_options, ["__graph_fn", "__case_idx"] +
-        [f"__stack__{i}" for i in range(stack_var_max_depth)],
-        ["guard_match", "enable_trace", "disable_trace", "locals", "callable"])
+    add_name(code_options, list(new_names_all["varnames"]),
+             list(new_names_all["names"]))
     fix_instructions_for_assemble(instructions, code_options)
     save_code(original_instructions, instructions, frame_id, in_trace_insts,
               next_original_pc)

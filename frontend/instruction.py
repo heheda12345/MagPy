@@ -17,6 +17,7 @@ class Instruction:
     # extra fields to make modification easier:
     target: Optional["Instruction"] = None
     original_inst: Optional["Instruction"] = None
+    comment: str = ""
 
     def __hash__(self) -> int:
         return id(self)
@@ -27,7 +28,9 @@ class Instruction:
     def __repr__(self) -> str:
         # yellow if is original inst, green if is generated inst
         color = "\033[33m" if self.original_inst else "\033[32m"
-        return f"{color}{self.opname}\033[0m({self.arg}, {self.argval})"
+        color_gray = "\033[90m"
+        comment = f"{color_gray}# {self.comment} \033[0m" if self.comment else ""
+        return f"{color}{self.opname}\033[0m({self.arg}, {self.argval}) {comment}"
 
 
 def convert_instruction(i: dis.Instruction) -> Instruction:
@@ -61,11 +64,13 @@ class _NotProvided:
 def ci(name: str,
        arg: Any = None,
        argval: Any = _NotProvided,
-       target: Optional[Instruction] = None) -> Instruction:
+       target: Optional[Instruction] = None,
+       comment: str = "") -> Instruction:
     if argval is _NotProvided:
         argval = arg
     return Instruction(opcode=dis.opmap[name],
                        opname=name,
                        arg=arg,
                        argval=argval,
-                       target=target)
+                       target=target,
+                       comment=comment)

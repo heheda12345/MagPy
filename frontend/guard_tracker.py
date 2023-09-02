@@ -9,19 +9,20 @@ from .c_api import get_value_stack_from_top, get_value_stack_size
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
 from . import variables as var
+from .utils import is_scalar
 
 
 class State:
     guard: var.Guard
     start_pc: int
+    start_stack_size: int
     is_empty: bool
-    stack: list[var.Variable]
 
     def __init__(self) -> None:
         self.guard = var.Guard([])
         self.start_pc = -1
+        self.start_stack_size = -1
         self.is_empty = True
-        self.stack = []
 
     def update(self, modifiers: list['StateModifier']) -> None:
         for modifier in modifiers:
@@ -32,8 +33,11 @@ class State:
     def from_frame(cls, frame: FrameType, read_stack: bool) -> 'State':
         state = cls()
         if read_stack:
-            stack_size = get_value_stack_size(frame)
-            state.stack = [var.StackVar(i) for i in range(stack_size)]
+            state.start_stack_size = get_value_stack_size(frame)
+            for i in range(state.start_stack_size):
+                value = get_value_stack_from_top(frame, i)
+                guard = var.make_guard(f"__stack__{i}", value)
+                state.guard.code.extend(guard.code)
         return state
 
 
@@ -53,32 +57,10 @@ class NewGuardModifier(StateModifier):
         state.guard.code.extend(self.guard.code)
 
 
-class StackPopModifier(StateModifier):
-    n_pop: int
-
-    def __init__(self, n_pop: int):
-        self.n_pop = n_pop
-
-    def apply(self, state: State) -> None:
-        for _ in range(self.n_pop):
-            state.stack.pop()
-
-
-class StackPushModifier(StateModifier):
-    var_push: var.Variable
-
-    def __init__(self, var_push: var.Variable):
-        self.var_push = var_push
-
-    def apply(self, state: State) -> None:
-        state.stack.append(self.var_push)
-
-
 class GuardTracker:
     code: ProcessedCode
     frame_id: int
     frame: FrameType
-    is_commiting: bool
     state: State
     modifiers: list[StateModifier]
     have_error: bool
@@ -93,9 +75,7 @@ class GuardTracker:
 
     def init_state(self, read_stack: bool = True) -> None:
         self.state = State.from_frame(self.frame, read_stack)
-        self.is_commiting = False
         self.have_error = False
-        self.error_in_commiting = False
         self.modifiers = []
 
     def record(
@@ -104,13 +84,13 @@ class GuardTracker:
         assert frame_id == self.frame_id
         assert frame == self.frame
 
-        if self.have_error:
-            self.init_state()
-
         inst = self.code.get_orig_inst(self.frame.f_lasti)
         if inst is None:
             self.restart(f"running injected code (pc={self.frame.f_lasti})")
             return
+        # call init_state after is_inject_code check to avoid frequent init_state
+        if self.have_error:
+            self.init_state()
         if self.state.start_pc == -1:
             self.state.start_pc = self.code.get_orig_pc(self.frame.f_lasti)
             assert self.state.start_pc >= 0
@@ -124,33 +104,26 @@ class GuardTracker:
     def commit(self) -> None:
         if self.state.is_empty:
             return
+        assert self.state.start_pc >= 0
         end_pc = self.code.get_orig_pc(self.frame.f_lasti)
         if end_pc == -1:
             end_pc = self.code.get_next_orig_pc(self.frame.f_lasti)
-        assert self.is_commiting == False
-        self.is_commiting = True
         print("commiting", self.state.start_pc, end_pc)
-        call_graph_insts = [
-            ci("CALL_FUNCTION", 0),
-            ci("POP_TOP"),
-        ]
         guard = self.state.guard
-        # FIXME: should not reproduce the whole stack
-        for i, v in enumerate(self.state.stack):
-            if not isinstance(v, var.RuntimeVar):
-                guard.code.extend(v.guard.code)
-                call_graph_insts.extend(v.extract_insts)
-            else:
-                val = get_value_stack_from_top(self.frame,
-                                               len(self.state.stack) - i - 1)
-                call_graph_insts.extend(self.create_var_insts(val))
-        if self.error_in_commiting:
-            return
-        code = " and ".join(guard.code)
-        if code == "":
+        guard_code = " and ".join(guard.code)
+        if guard_code == "":
             ok_code = "ok = True"
         else:
-            ok_code = f"ok = {code}"
+            ok_code = f"ok = {guard_code}"
+        # TODO: can be optimized by only reproduce the modified variables
+        result_writer = var.ResultWriter(initial_indent=2)
+        stack_size = get_value_stack_size(self.frame)
+        for i in range(stack_size):
+            value = get_value_stack_from_top(self.frame, i)
+            result_writer.save(f"__stack__{i}", value)
+        graph_code = result_writer.get_code()
+        graph_retures = [f"__stack__{i}" for i in range(stack_size)]
+
         py_code = f"""\
 def ___make_guard_fn():
     def fn(locals):
@@ -160,54 +133,37 @@ def ___make_guard_fn():
         return ok
     return fn
 def ___make_graph_fn():
-    def fn():
-        print("running graph_fn")
-        return None
+    def fn(locals):
+        print("running graph_fn", locals)
+{graph_code}
+        print("graph_fn done", locals)
+        return {", ".join(graph_retures)}
     return fn
-            """
+        """
         out: Dict[str, Any] = dict()
-        print("RUNNING PY CODE", py_code)
+        print("RUNNING PY CODE\n", py_code)
         exec(py_code, self.frame.f_globals, out)
         guard_fn = out["___make_guard_fn"]()
         graph_fn = out["___make_graph_fn"]()
 
-        stack_var_max_depth = -1
-        # find all __stack__* variables from py_code
-        pattern = re.compile(r"__stack__(\d+)")
-        for m in pattern.finditer(py_code):
-            stack_var_max_depth = max(stack_var_max_depth, int(m.group(1)))
-        stack_var_max_depth += 1
-
         print("guard_fn:", guard_fn)
-        print("call_graph_insts:", call_graph_insts)
         print("pc:", self.state.start_pc, end_pc)
-        assert self.state.start_pc >= 0
+        print("stack:", self.state.start_stack_size, stack_size)
+
         get_frame_cache(self.frame_id).add(
             CachedGraph(
                 guard_fn,
                 graph_fn,
                 self.state.start_pc,
                 end_pc,
-                call_graph_insts,
-                stack_var_max_depth,
+                start_stack_size=self.state.start_stack_size,
+                end_stack_size=stack_size,
+                return_values=graph_retures,
             ))
-        self.is_commiting = False
-
-    def create_var_insts(self, value: Any) -> list[Instruction]:
-        if isinstance(value, int):
-            return [ci("LOAD_CONST", value)]
-        elif isinstance(value, torch.Tensor):
-            return [ci("LOAD_CONST", 233)]
-        else:
-            self.restart("unknown type in create_var_insts")
-            return []
+        self.state.is_empty = True
 
     def restart(self, restart_reason: str) -> None:
-        logging.info(
-            f"restart (commiting = {self.is_commiting}): {restart_reason}")
-        if self.is_commiting:
-            self.error_in_commiting = True
-            return
+        logging.info(f"restart: {restart_reason}")
         self.have_error = True
         self.commit()
 
@@ -215,39 +171,22 @@ def ___make_graph_fn():
         self.state.update(self.modifiers)
         self.modifiers.clear()
 
-    def guarded_pop(self, num_var: int) -> None:
-        for i in range(num_var):
-            out = self.state.stack[-i - 1]
-            if isinstance(out, var.RuntimeVar):
-                continue
-            value = get_value_stack_from_top(self.frame, i)
-            type_name = type(value).__name__
-            if hasattr(self, f'add_guard_{type_name}'):
-                getattr(self, f'add_guard_{type_name}')(out, value)
-            else:
-                self.restart(f"unknown type {type_name} in add_guard")
-        self.modifiers.append(StackPopModifier(num_var))
-
-    def add_guard_int(self, var: var.Variable, value: int) -> None:
-        self.state.guard.code.extend(var.guard.code)
-        self.state.guard.code.append(f"{var.extract_code} == {value}")
-
-    def add_guard_Tensor(self, var: var.Variable, value: torch.Tensor) -> None:
-        self.state.guard.code.extend(var.guard.code)
-        self.state.guard.code.append(
-            f"{var.extract_code}.shape == {value.shape}")
-
     def LOAD_FAST(self, inst: Instruction) -> None:
-        new_var = var.Variable(var.Guard([]), f"locals['{inst.argval}']",
-                               [ci('LOAD_FAST', inst.arg, inst.argval)])
-        self.modifiers.append(StackPushModifier(new_var))
+        obj = self.frame.f_locals[inst.argval]
+        guard = var.make_guard(f'locals["{inst.argval}"]', obj)
+        self.modifiers.append(NewGuardModifier(guard))
 
     def LOAD_CONST(self, _inst: Instruction) -> None:
-        self.modifiers.append(StackPushModifier(var.RuntimeVar()))
+        pass
 
     def BINARY_ADD(self, _inst: Instruction) -> None:
-        self.guarded_pop(2)
-        self.modifiers.append(StackPushModifier(var.RuntimeVar()))
+        obj1 = get_value_stack_from_top(self.frame, 1)
+        obj2 = get_value_stack_from_top(self.frame, 0)
+        if is_scalar(obj1) and is_scalar(obj2):
+            pass
+        else:
+            # TODO: record the operation in compute graph
+            raise NotImplementedError
 
     def RETURN_VALUE(self, _inst: Instruction) -> None:
         self.restart("return value")
