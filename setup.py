@@ -3,7 +3,7 @@ import setuptools
 setuptools.setup(
     name='frontend',
     version='0.0.0',
-    packages=['frontend'],
+    packages=setuptools.find_packages('.', exclude=['test']),
     include_dirs=['frontend'],
     ext_modules=[
         setuptools.Extension(
