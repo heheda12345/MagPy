@@ -36,7 +36,7 @@ class State:
             state.start_stack_size = get_value_stack_size(frame)
             for i in range(state.start_stack_size):
                 value = get_value_stack_from_top(frame, i)
-                guard = var.make_guard(f"__stack__{i}", value)
+                guard = var.make_guard(f"locals['__stack__{i}']", value)
                 state.guard.code.extend(guard.code)
         return state
 

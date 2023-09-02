@@ -21,9 +21,12 @@ def print_bytecode() -> None:
 
 
 class PyCodeWriter:
-    imports = set()
+    imports: set[str]
+    code_str: str
+    indent: int
 
     def __init__(self) -> None:
+        self.imports = set()
         self.code_str = ''
         self.indent = 0
 
@@ -51,7 +54,7 @@ class PyCodeWriter:
     def add_import(self, module_name: str) -> None:
         self.imports.add(module_name)
 
-    def get_imports(self, indent) -> str:
+    def get_imports(self, indent: int) -> str:
         print("imports:", self.imports)
         return '\n'.join(f'{"    " * indent}import {module_name}'
                          for module_name in self.imports)

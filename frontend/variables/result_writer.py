@@ -33,5 +33,5 @@ class ResultWriter:
     def get_code(self) -> str:
         return self.writer.get_code()
 
-    def get_imports(self, indent) -> str:
+    def get_imports(self, indent: int) -> str:
         return self.writer.get_imports(indent)

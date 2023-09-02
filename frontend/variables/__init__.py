@@ -6,6 +6,7 @@ from .result_writer import ResultWriter
 
 ty2guard = {
     float: ScalarGuard,
+    int: ScalarGuard,
 }
 
 

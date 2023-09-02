@@ -327,12 +327,6 @@ def add_callsite(
     ]
     possible_matches: list[list[Instruction]] = []
     for i, graph in enumerate(cached_graphs):
-        # avoid "referenced before assignment" error when __stack__ is only assigned in graph_fn
-        if end_stack_size > start_stack_size:
-            for j in range(start_stack_size, end_stack_size):
-                call_guard_insts.extend(
-                    [ci("LOAD_CONST", 233),
-                     ci("STORE_FAST", f"__stack__{j}")])
         insts = [
             ci("LOAD_FAST", "__case_idx"),
             ci("LOAD_CONST", i),
@@ -344,11 +338,11 @@ def add_callsite(
             ci("CALL_FUNCTION", 1, comment="call graph_fn"),
         ]
         if len(graph.return_values) == 0:
-            ci("POP_TOP")
+            insts.append(ci("POP_TOP"))
         elif len(graph.return_values) == 1:
             pass
-        if len(graph.return_values) > 1:
-            ci("UNPACK_SEQUENCE", len(graph.return_values))
+        elif len(graph.return_values) > 1:
+            insts.append(ci("UNPACK_SEQUENCE", len(graph.return_values)))
         for return_value in reversed(graph.return_values):
             if not return_value.startswith("__stack__"):
                 raise NotImplementedError("TODO: support return non-stack vars")
@@ -368,9 +362,8 @@ def add_callsite(
         possible_matches.append(insts)
     restore_stack_insts = [
         ci("LOAD_FAST", f"__stack__{i}")
-        for i in range(end_stack_size - 1, -1, -1)
+        for i in range(start_stack_size - 1, -1, -1)
     ]
-
     nomatch_code = [
         *restore_stack_insts,
         ci("LOAD_GLOBAL", "enable_trace"),
