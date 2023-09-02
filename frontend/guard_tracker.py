@@ -54,7 +54,7 @@ class NewGuardModifier(StateModifier):
         self.guard = guard
 
     def apply(self, state: State) -> None:
-        state.guard.code.extend(self.guard.code)
+        state.guard.add(self.guard)
 
 
 class GuardTracker:
@@ -115,6 +115,7 @@ class GuardTracker:
             ok_code = "ok = True"
         else:
             ok_code = f"ok = {guard_code}"
+        guard_imports = guard.get_imports(1)
         # TODO: can be optimized by only reproduce the modified variables
         result_writer = var.ResultWriter(initial_indent=2)
         stack_size = get_value_stack_size(self.frame)
@@ -123,9 +124,11 @@ class GuardTracker:
             result_writer.save(f"__stack__{i}", value)
         graph_code = result_writer.get_code()
         graph_retures = [f"__stack__{i}" for i in range(stack_size)]
+        graph_imports = result_writer.get_imports(1)
 
         py_code = f"""\
 def ___make_guard_fn():
+{guard_imports}
     def fn(locals):
         print("running guard_fn", locals)
         {ok_code}
@@ -133,6 +136,7 @@ def ___make_guard_fn():
         return ok
     return fn
 def ___make_graph_fn():
+{graph_imports}
     def fn(locals):
         print("running graph_fn", locals)
 {graph_code}

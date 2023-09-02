@@ -1,7 +1,8 @@
 import inspect
 import dis
-from .bytecode_writter import get_code_keys
 from typing import Any
+import struct
+from .bytecode_writter import get_code_keys
 
 
 def print_bytecode() -> None:
@@ -20,21 +21,26 @@ def print_bytecode() -> None:
 
 
 class PyCodeWriter:
+    imports = set()
 
     def __init__(self) -> None:
         self.code_str = ''
-        self.intend = 0
+        self.indent = 0
 
     def block_start(self) -> None:
-        self.intend += 1
+        self.indent += 1
 
     def block_end(self) -> None:
-        self.intend -= 1
+        self.indent -= 1
+
+    def set_indent(self, indent: int) -> None:
+        self.indent = indent
 
     def write(self, code_str: str) -> None:
+        print("writing: indent", self.indent)
         code = code_str.splitlines()
         for line in code:
-            self.code_str += '    ' * self.intend + line + '\n'
+            self.code_str += '    ' * self.indent + line + '\n'
 
     def wl(self, code_str: str) -> None:
         self.write(code_str + '\n')
@@ -42,6 +48,21 @@ class PyCodeWriter:
     def get_code(self) -> str:
         return self.code_str
 
+    def add_import(self, module_name: str) -> None:
+        self.imports.add(module_name)
+
+    def get_imports(self, indent) -> str:
+        print("imports:", self.imports)
+        return '\n'.join(f'{"    " * indent}import {module_name}'
+                         for module_name in self.imports)
+
 
 def is_scalar(value: Any) -> bool:
     return type(value) in {int, float, bool, str}
+
+
+def get_float_string(value: float) -> str:
+    binary_data = struct.pack('d', value)
+    hex_string = "b'" + ''.join(
+        '\\x' + format(byte, '02x') for byte in binary_data) + "'"
+    return f"struct.unpack('d', {hex_string})[0]"
