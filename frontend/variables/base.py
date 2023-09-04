@@ -1,22 +1,39 @@
 from dataclasses import dataclass
-from typing import Optional
+from abc import abstractmethod
+from typing import Any, TYPE_CHECKING
+if TYPE_CHECKING:
+    from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
 
 
 @dataclass
-class Guard:
-    code: list[str]
-    imports: Optional[set[str]] = None
+class Variable:
+    need_guard_check: bool
+    extract_code_at_start: str = ""
 
-    def add(self, other: 'Guard') -> None:
-        self.code.extend(other.code)
-        if other.imports is None:
-            return
-        if self.imports is None:
-            self.imports = set()
-        self.imports.update(other.imports)
+    def __init__(self,
+                 need_guard_check: bool,
+                 extract_code_at_start: str = "") -> None:
+        self.need_guard_check = need_guard_check
+        self.extract_code_at_start = extract_code_at_start
+        if need_guard_check:
+            assert extract_code_at_start != ""
 
-    def get_imports(self, indent: int) -> str:
-        imports = self.imports or set()
-        print("imports:", self.imports)
-        return '\n'.join(
-            f'{"    " * indent}import {module_name}' for module_name in imports)
+    @classmethod
+    @abstractmethod
+    def from_value(self,
+                   value: Any,
+                   need_guard_check: bool,
+                   extract_code_at_start: str = "") -> 'Variable':
+        raise NotImplementedError
+
+    def make_guard(self, writer: GuardFnCodegen) -> None:
+        if self.need_guard_check:
+            self.make_guard_inner(writer)
+
+    @abstractmethod
+    def make_guard_inner(self, writer: GuardFnCodegen) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def make_output(self, target_name: str, codegen: GraphFnCodegen) -> None:
+        raise NotImplementedError

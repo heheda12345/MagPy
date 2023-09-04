@@ -1,13 +1,40 @@
-from typing import Any
-from .base import Guard
-from ..utils import get_float_string
+from typing import Any, TYPE_CHECKING
+from .base import Variable
+from ..pycode_writer import get_float_string
+if TYPE_CHECKING:
+    from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
 
 
-class ScalarGuard(Guard):
+class ScalarVar(Variable):
+    value: Any
 
-    def __init__(self, extract_code: str, value: Any) -> None:
-        if type(value) == float:
-            super().__init__([f"{extract_code} == {get_float_string(value)}"],
-                             set(["struct"]))
+    def __init__(self,
+                 value: Any,
+                 need_guard_check: bool,
+                 extract_code_at_start: str = "") -> None:
+        super().__init__(need_guard_check, extract_code_at_start)
+        self.value = value
+
+    def make_guard_inner(self, codegen: GuardFnCodegen) -> None:
+        if type(self.value) == float:
+            codegen.add_check(
+                f"{self.extract_code_at_start} == {get_float_string(self.value)}"
+            )
+            codegen.add_import("struct")
         else:
-            super().__init__([f"{extract_code} == {value}"])
+            codegen.add_check(f"{self.extract_code_at_start} == {self.value}")
+
+    def make_output(self, target_name: str, codegen: GraphFnCodegen) -> None:
+        if type(self.value) == float:
+            codegen.output(target_name,
+                           f"{get_float_string(self.value)} # {self.value}")
+            codegen.add_import("struct")
+        else:
+            codegen.output(target_name, str(self.value))
+
+    @classmethod
+    def from_value(cls,
+                   value: Any,
+                   need_guard_check: bool,
+                   extract_code_at_start: str = "") -> 'ScalarVar':
+        return cls(value, need_guard_check, extract_code_at_start)

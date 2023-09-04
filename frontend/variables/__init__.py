@@ -1,24 +1,20 @@
 from typing import Any
-from .base import Guard
-from .tensor import TensorVar
-from .scalar import ScalarGuard
-from .result_writer import ResultWriter
+import torch
+from .base import Variable
+# from .tensor import TensorVar
+from .scalar import ScalarVar
 
-ty2guard = {
-    float: ScalarGuard,
-    int: ScalarGuard,
+ty2var = {
+    float: ScalarVar,
+    int: ScalarVar,
 }
 
 
-def make_guard(extract_code: str, value: Any) -> Guard:
-    if type(value) in ty2guard:
-        return ty2guard[type(value)](extract_code, value)
-    else:
-        raise NotImplementedError(f"unknown type: {type(value)}")
+def make_var_from_value(value: Any,
+                        need_guard_check: bool,
+                        extract_code_at_start: str = "") -> Variable:
+    return ty2var[type(value)].from_value(value, need_guard_check,
+                                          extract_code_at_start)
 
 
-__all__ = [
-    'Guard',
-    'make_guard',
-    'ResultWriter',
-]
+__all__ = ['make_var_from_value', 'Variable']

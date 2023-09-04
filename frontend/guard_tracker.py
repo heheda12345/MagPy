@@ -2,24 +2,25 @@ from types import FrameType
 from typing import Dict, Any
 from abc import ABC, abstractmethod
 import logging
-import re
 import torch
 from .code import ProcessedCode, load_code
 from .c_api import get_value_stack_from_top, get_value_stack_size
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
-from . import variables as var
+from . import variables as vs
 from .utils import is_scalar
+from .object_table import ObjectTable
+from .pycode_generator import GraphFnCodegen, GuardFnCodegen
 
 
 class State:
-    guard: var.Guard
+    objects: ObjectTable
     start_pc: int
     start_stack_size: int
     is_empty: bool
 
     def __init__(self) -> None:
-        self.guard = var.Guard([])
+        self.objects = ObjectTable()
         self.start_pc = -1
         self.start_stack_size = -1
         self.is_empty = True
@@ -36,8 +37,9 @@ class State:
             state.start_stack_size = get_value_stack_size(frame)
             for i in range(state.start_stack_size):
                 value = get_value_stack_from_top(frame, i)
-                guard = var.make_guard(f"locals['__stack__{i}']", value)
-                state.guard.code.extend(guard.code)
+                var = vs.make_var_from_value(value, True,
+                                             f"locals['__stack__{i}']")
+                state.objects.add(var, value)
         return state
 
 
@@ -48,13 +50,14 @@ class StateModifier(ABC):
         raise NotImplementedError()
 
 
-class NewGuardModifier(StateModifier):
+class NewVarModifier(StateModifier):
 
-    def __init__(self, guard: var.Guard):
-        self.guard = guard
+    def __init__(self, var: vs.Variable, value: Any):
+        self.var = var
+        self.value = value
 
     def apply(self, state: State) -> None:
-        state.guard.add(self.guard)
+        state.objects.add(self.var, self.value)
 
 
 class GuardTracker:
@@ -109,40 +112,24 @@ class GuardTracker:
         if end_pc == -1:
             end_pc = self.code.get_next_orig_pc(self.frame.f_lasti)
         print("commiting", self.state.start_pc, end_pc)
-        guard = self.state.guard
-        guard_code = " and ".join(guard.code)
-        if guard_code == "":
-            ok_code = "ok = True"
-        else:
-            ok_code = f"ok = {guard_code}"
-        guard_imports = guard.get_imports(1)
+        guard_codegen = GuardFnCodegen()
+        for var in self.state.objects.get_all():
+            var.make_guard(guard_codegen)
+        guard_code = guard_codegen.get_code()
+        print("guard_code:\n", guard_code)
         # TODO: can be optimized by only reproduce the modified variables
-        result_writer = var.ResultWriter(initial_indent=2)
+        graph_codegen = GraphFnCodegen()
         stack_size = get_value_stack_size(self.frame)
         for i in range(stack_size):
             value = get_value_stack_from_top(self.frame, i)
-            result_writer.save(f"__stack__{i}", value)
-        graph_code = result_writer.get_code()
-        graph_retures = [f"__stack__{i}" for i in range(stack_size)]
-        graph_imports = result_writer.get_imports(1)
+            var = vs.make_var_from_value(
+                value, False)  # should we read from object table?
+            var.make_output(f"__stack__{i}", graph_codegen)
+        graph_code = graph_codegen.get_code()
 
         py_code = f"""\
-def ___make_guard_fn():
-{guard_imports}
-    def fn(locals):
-        print("running guard_fn", locals)
-        {ok_code}
-        print("ok = ", ok)
-        return ok
-    return fn
-def ___make_graph_fn():
-{graph_imports}
-    def fn(locals):
-        print("running graph_fn", locals)
 {graph_code}
-        print("graph_fn done", locals)
-        return {", ".join(graph_retures)}
-    return fn
+{guard_code}
         """
         out: Dict[str, Any] = dict()
         print("RUNNING PY CODE\n", py_code)
@@ -162,7 +149,7 @@ def ___make_graph_fn():
                 end_pc,
                 start_stack_size=self.state.start_stack_size,
                 end_stack_size=stack_size,
-                return_values=graph_retures,
+                return_values=graph_codegen.get_return_values(),
             ))
         self.state.is_empty = True
 
@@ -177,8 +164,8 @@ def ___make_graph_fn():
 
     def LOAD_FAST(self, inst: Instruction) -> None:
         obj = self.frame.f_locals[inst.argval]
-        guard = var.make_guard(f'locals["{inst.argval}"]', obj)
-        self.modifiers.append(NewGuardModifier(guard))
+        var = vs.make_var_from_value(obj, True, f'locals["{inst.argval}"]')
+        self.modifiers.append(NewVarModifier(var, obj))
 
     def LOAD_CONST(self, _inst: Instruction) -> None:
         pass
