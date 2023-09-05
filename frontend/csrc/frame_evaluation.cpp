@@ -383,6 +383,8 @@ static PyObject *reset(PyObject *self, PyObject *args) {
             delete entry;
         }
     }
+    program_cache.clear();
+    frame_count = 0;
     Py_RETURN_NONE;
 }
 

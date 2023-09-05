@@ -1,5 +1,6 @@
 from typing import Any
 from .variables.base import Variable
+from .variables.scalar import ScalarVar
 
 
 class ObjectTable:
@@ -19,3 +20,9 @@ class ObjectTable:
 
     def get_all(self) -> list[Variable]:
         return list(self.objs.values()) + self.objs_no_id
+
+    def get(self, value: Any) -> Variable:
+        if isinstance(value, int) and value >= -5 and value <= 256:
+            return ScalarVar(value, False)
+        else:
+            return self.objs[id(value)]

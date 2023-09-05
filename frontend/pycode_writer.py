@@ -1,5 +1,6 @@
 from typing import Any
 import struct
+import keyword
 
 
 def get_float_string(value: float) -> str:
@@ -18,6 +19,23 @@ def new_name(prefix: str) -> str:
     global NEW_VAR_ID
     NEW_VAR_ID += 1
     return f"{prefix}_{NEW_VAR_ID}"
+
+
+def is_valid_name(variable_name: str) -> bool:
+    if not variable_name:
+        return False
+
+    if not variable_name[0].isalpha() and variable_name[0] != '_':
+        return False
+
+    for char in variable_name[1:]:
+        if not (char.isalnum() or char == '_'):
+            return False
+
+    if keyword.iskeyword(variable_name):
+        return False
+
+    return True
 
 
 class PyCodeWriter:
