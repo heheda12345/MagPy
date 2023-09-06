@@ -9,12 +9,13 @@ import operator
 from .code import ProcessedCode, load_code
 from .c_api import get_value_stack_from_top, get_value_stack_size
 from .instruction import Instruction, ci
-from .cache import CachedGraph, get_frame_cache
+from .cache import CachedGraph, get_frame_cache, StorePos, StoreInStack, StoreInLocal
 from . import variables as vs
 from .utils import is_scalar
 from .object_table import ObjectTable
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
 from .fx_graph import FxGraph, fx_graph_functions
+from .bytecode_analysis import livevars_analysis
 
 
 class State:
@@ -24,6 +25,7 @@ class State:
     is_empty: bool
     fx_graph: FxGraph
     proxy_waiting_ids: list[torch.fx.Proxy]
+    stored_locals: set[str]
 
     def __init__(self) -> None:
         self.objects = ObjectTable()
@@ -32,6 +34,7 @@ class State:
         self.is_empty = True
         self.fx_graph = FxGraph()
         self.proxy_waiting_ids = []
+        self.stored_locals = set()
 
     def proxy_args_kwargs(
         self, args: list[Any], kwargs: dict[str, Any]
@@ -122,17 +125,28 @@ class GuardTracker:
             var.make_guard(guard_codegen)
         guard_code = guard_codegen.get_code()
         graph_codegen = GraphFnCodegen()
-        # TODO: can be optimized by only reproduce the modified variables
         for node in self.state.fx_graph.result_graph.nodes:
             if node.op == "placeholder":
                 var = node.meta["var"]
                 assert isinstance(var, vs.TensorVar)
                 graph_codegen.add_graph_input(var.extract_code_at_start)
+        current_inst = self.code.get_inst(self.frame.f_lasti)
+        # livevars_analysis should return the same result when passing self.code.guard_insts
+        # and self.code.original_insts, but as current_inst may not be in original_insts,
+        # we pass guard_insts here
+        live_vars = livevars_analysis(self.code.guard_insts, current_inst)
+        live_vars = live_vars.intersection(self.state.stored_locals)
+        for i, live_var in enumerate(live_vars):
+            value = self.frame.f_locals[live_var]
+            var = self.state.objects.get(value, allow_unexist_const=True)
+            var.make_output(f"__live_{i}", StoreInLocal(live_var),
+                            graph_codegen)
+        # TODO: can be optimized by only reproduce the modified variables
         stack_size = get_value_stack_size(self.frame)
         for i in range(stack_size):
             value = get_value_stack_from_top(self.frame, i)
             var = self.state.objects.get(value)
-            var.make_output(f"__stack__{i}", graph_codegen)
+            var.make_output(f"__stack__{i}", StoreInStack(i), graph_codegen)
         graph_code = graph_codegen.get_code()
         compiled_graph = self.state.fx_graph.compile(
             outputs=graph_codegen.get_graph_outputs())
@@ -142,7 +156,8 @@ class GuardTracker:
 {guard_code}
         """
         out: Dict[str, Any] = dict()
-        print("RUNNING PY CODE\n", py_code)
+        print("RUNNING PY CODE")
+        print(py_code)
         exec(py_code, self.frame.f_globals, out)
         guard_fn = out["___make_guard_fn"](*guard_codegen.vars.values())
         graph_fn = out["___make_graph_fn"](compiled_graph)
@@ -204,22 +219,26 @@ class GuardTracker:
         else:
             raise NotImplementedError
 
-    def LOAD_FAST(self, inst: Instruction) -> None:
-        obj = self.frame.f_locals[inst.argval]
-        var = vs.make_var_from_value(obj, True, self.state.fx_graph,
-                                     f'locals["{inst.argval}"]')
-        self.state.objects.add(var, obj)
-
-    def LOAD_CONST(self, _inst: Instruction) -> None:
-        pass
-
     def BINARY_ADD(self, _inst: Instruction) -> None:
         obj1 = get_value_stack_from_top(self.frame, 1)
         obj2 = get_value_stack_from_top(self.frame, 0)
         self.call_function(operator.add, [obj1, obj2], {})
 
+    def LOAD_FAST(self, inst: Instruction) -> None:
+        if inst.argval not in self.state.stored_locals:
+            obj = self.frame.f_locals[inst.argval]
+            var = vs.make_var_from_value(obj, True, self.state.fx_graph,
+                                         f'locals["{inst.argval}"]')
+            self.state.objects.add(var, obj)
+
+    def LOAD_CONST(self, _inst: Instruction) -> None:
+        pass
+
     def RETURN_VALUE(self, _inst: Instruction) -> None:
         self.restart("return value")
+
+    def STORE_FAST(self, inst: Instruction) -> None:
+        self.state.stored_locals.add(inst.argval)
 
 
 trackers: list[GuardTracker] = []

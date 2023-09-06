@@ -4,6 +4,24 @@ from .instruction import Instruction
 from .c_api import add_to_cache
 
 
+class StorePos:
+    pass
+
+
+class StoreInStack(StorePos):
+    idx: int
+
+    def __init__(self, idx: int) -> None:
+        self.idx = idx
+
+
+class StoreInLocal(StorePos):
+    name: str
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
 @dataclass
 class CachedGraph:
     guard_fn: Callable[..., Any]
@@ -12,7 +30,7 @@ class CachedGraph:
     end_pc: int
     start_stack_size: int
     end_stack_size: int
-    return_values: list[str]
+    return_values: list[StorePos]
 
 
 TOTAL_SIZE = 0

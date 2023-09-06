@@ -1,10 +1,9 @@
-from typing import Tuple, Any
+from typing import Tuple
 import torch
 import torch.fx
-from .object_table import ObjectTable
 from .pycode_writer import PyCodeWriter, new_name, is_valid_name
+from .cache import StorePos
 from .variables import Variable
-from .fx_graph import FxGraph
 
 
 def gen_imports(writer: PyCodeWriter, imports: set[str]) -> None:
@@ -13,7 +12,7 @@ def gen_imports(writer: PyCodeWriter, imports: set[str]) -> None:
 
 
 class GraphFnCodegen:
-    outputs: list[Tuple[str, str]]
+    outputs: list[Tuple[str, StorePos, str]]
     imports: set[str]
     graph_inputs: list[str]
     graph_outputs: list[torch.fx.Proxy]
@@ -24,8 +23,9 @@ class GraphFnCodegen:
         self.graph_inputs = []
         self.graph_outputs = []
 
-    def output(self, target_name: str, code: str) -> None:
-        self.outputs.append((target_name, code))
+    def output(self, name_in_graph_fn: str, store_pos: StorePos,
+               code: str) -> None:
+        self.outputs.append((name_in_graph_fn, store_pos, code))
 
     def add_import(self, module_name: str) -> None:
         self.imports.add(module_name)
@@ -41,19 +41,19 @@ class GraphFnCodegen:
         # TODO: simplify
         writer.wl(f"graph_out = compiled_graph({', '.join(self.graph_inputs)})")
         writer.wl(f"print('graph_out', graph_out)")
-        for target_name, code in self.outputs:
+        for target_name, _, code in self.outputs:
             writer.wl(f"{target_name} = {code}")
         writer.wl(f"print('graph_fn done', locals)")
         graph_retures = ", ".join(
-            [f"{target_name}" for target_name, _ in self.outputs])
+            [f"{target_name}" for target_name, _, _ in self.outputs])
         writer.wl(f"return {graph_retures}")
         writer.block_end()
         writer.wl(f"return fn")
         writer.block_end()
         return writer.get_code()
 
-    def get_return_values(self) -> list[str]:
-        return [target_name for target_name, _ in self.outputs]
+    def get_return_values(self) -> list[StorePos]:
+        return [store_pos for _, store_pos, _ in self.outputs]
 
     def add_graph_output(self, proxy: torch.fx.Proxy) -> str:
         self.graph_outputs.append(proxy)
@@ -89,6 +89,8 @@ class GuardFnCodegen:
         gen_imports(writer, self.imports)
         writer.wl(f"def fn(locals):")
         writer.block_start()
+        writer.write(f"try:")
+        writer.block_start()
         writer.wl(f"print('running guard_fn', locals)")
         if len(self.checks) == 0:
             writer.wl(f"ok = True")
@@ -96,6 +98,14 @@ class GuardFnCodegen:
             writer.wl(
                 f"ok = {' and '.join(map(lambda x: f'({x})', self.checks))}")
         writer.wl(f"print('ok = ', ok)")
+        writer.block_end()
+        writer.wl(f"except Exception as e:")
+        writer.block_start()
+        writer.wl(f"print('exception in graph_fn:', e, type(e))")
+        writer.wl(f'import traceback')
+        writer.wl(f"print(traceback.format_exc())")
+        writer.wl(f"return False")
+        writer.block_end()
         writer.wl(f"return ok")
         writer.block_end()
         writer.wl(f"return fn")

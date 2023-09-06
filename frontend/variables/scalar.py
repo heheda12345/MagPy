@@ -4,6 +4,7 @@ import torch.fx
 from .base import Variable
 from ..pycode_writer import get_float_string
 from ..fx_graph import ProxyArgs
+from ..cache import StorePos
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
 
@@ -29,13 +30,14 @@ class ScalarVar(Variable):
         else:
             codegen.add_check(f"{self.extract_code_at_start} == {self.value}")
 
-    def make_output(self, target_name: str, codegen: "GraphFnCodegen") -> None:
+    def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
+                    codegen: "GraphFnCodegen") -> None:
         if type(self.value) == float:
-            codegen.output(target_name,
+            codegen.output(name_in_graph_fn, store_pos,
                            f"{get_float_string(self.value)} # {self.value}")
             codegen.add_import("struct")
         else:
-            codegen.output(target_name, str(self.value))
+            codegen.output(name_in_graph_fn, store_pos, str(self.value))
 
     @classmethod
     def from_value(cls,

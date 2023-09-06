@@ -20,6 +20,64 @@ JUMP_OPNAMES = {dis.opname[opcode] for opcode in JUMP_OPCODES}
 HASLOCAL = set(dis.haslocal)
 HASFREE = set(dis.hasfree)
 
+
+def get_indexof(insts: List[Instruction]) -> dict[Instruction, int]:
+    """
+    Get a mapping from instruction memory address to index in instruction list.
+    Additionally checks that each instruction only appears once in the list.
+    """
+    indexof: dict[Instruction, int] = {}
+    for i, inst in enumerate(insts):
+        assert inst not in indexof
+        indexof[inst] = i
+    return indexof
+
+
+@dataclasses.dataclass
+class ReadsWrites:
+    reads: set[str]
+    writes: set[str]
+    visited: set[int]
+
+
+def livevars_analysis(instructions: List[Instruction],
+                      instruction: Instruction) -> set[str]:
+    indexof = get_indexof(instructions)
+    must = ReadsWrites(set(), set(), set())
+    may = ReadsWrites(set(), set(), set())
+
+    def walk(state: ReadsWrites, start: int) -> None:
+        if start in state.visited:
+            return
+        state.visited.add(start)
+
+        for i in range(start, len(instructions)):
+            inst = instructions[i]
+            if inst.opcode in HASLOCAL or inst.opcode in HASFREE:
+                if "LOAD" in inst.opname or "DELETE" in inst.opname:
+                    assert isinstance(inst.argval, str)
+                    if inst.argval not in must.writes:
+                        state.reads.add(inst.argval)
+                elif "STORE" in inst.opname:
+                    assert isinstance(inst.argval, str)
+                    state.writes.add(inst.argval)
+                elif inst.opname == "MAKE_CELL":
+                    pass
+                else:
+                    raise NotImplementedError(f"unhandled {inst.opname}")
+            # if inst.exn_tab_entry:
+            #     walk(may, indexof[inst.exn_tab_entry.target])
+            if inst.opcode in JUMP_OPCODES:
+                assert inst.target is not None
+                walk(may, indexof[inst.target])
+                state = may
+            if inst.opcode in TERMINAL_OPCODES:
+                return
+
+    walk(must, indexof[instruction])
+    return must.reads | may.reads
+
+
 stack_effect = dis.stack_effect
 
 

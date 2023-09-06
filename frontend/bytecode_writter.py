@@ -8,7 +8,7 @@ import copy
 from .bytecode_analysis import stacksize_analysis
 from .instruction import Instruction, convert_instruction, ci, format_insts
 from .code import save_code
-from .cache import get_frame_cache, CachedGraph
+from .cache import get_frame_cache, CachedGraph, StorePos, StoreInStack, StoreInLocal
 
 
 def get_code_keys() -> List[str]:
@@ -343,11 +343,18 @@ def add_callsite(
             pass
         elif len(graph.return_values) > 1:
             insts.append(ci("UNPACK_SEQUENCE", len(graph.return_values)))
-        for return_value in reversed(graph.return_values):
-            if not return_value.startswith("__stack__"):
-                raise NotImplementedError("TODO: support return non-stack vars")
+        stack_var_start = False
+        for return_value in graph.return_values:
+            if isinstance(return_value, StoreInStack):
+                stack_var_start = True
+                continue
             else:
-                break
+                assert not stack_var_start
+            if isinstance(return_value, StoreInLocal):
+                insts.append(ci("STORE_FAST", return_value.name))
+            else:
+                raise NotImplementedError(
+                    f"{return_value} is not supported in bytecode writer")
         if orignal_insts[graph.end_pc].opname != 'RETURN_VALUE':
             insts.extend([
                 ci("LOAD_GLOBAL", "enable_trace"),

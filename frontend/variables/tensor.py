@@ -6,6 +6,7 @@ from frontend.pycode_generator import GuardFnCodegen, GraphFnCodegen
 from .base import Variable
 from ..pycode_writer import new_name
 from ..fx_graph import FxGraph, ProxyArgs
+from ..cache import StorePos
 
 
 class TensorVar(Variable):
@@ -98,6 +99,7 @@ class TensorVar(Variable):
         codegen.add_check(
             f"{name_in_codegen}.guard_check({self.extract_code_at_start})")
 
-    def make_output(self, target_name: str, codegen: GraphFnCodegen) -> None:
+    def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
+                    codegen: "GraphFnCodegen") -> None:
         name_in_graph_output = codegen.add_graph_output(self.proxy)
-        codegen.output(target_name, name_in_graph_output)
+        codegen.output(name_in_graph_fn, store_pos, name_in_graph_output)

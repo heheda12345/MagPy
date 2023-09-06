@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from abc import abstractmethod
 from typing import Any, TYPE_CHECKING
+from ..cache import StorePos
 if TYPE_CHECKING:
     import torch
     import torch.fx
@@ -39,7 +40,8 @@ class Variable:
         raise NotImplementedError
 
     @abstractmethod
-    def make_output(self, target_name: str, codegen: "GraphFnCodegen") -> None:
+    def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
+                    codegen: "GraphFnCodegen") -> None:
         raise NotImplementedError
 
     @abstractmethod

@@ -124,6 +124,10 @@ class ProcessedCode:
 
         return self.next_original_pc[pc]
 
+    def get_inst(self, lasti: int) -> Instruction:
+        pc = lasti // 2
+        return self.guard_insts[pc]
+
     def get_dependence_of_stack_var(self, original_inst: Instruction,
                                     stack_depth: int) -> list[Instruction]:
         raise NotImplementedError
