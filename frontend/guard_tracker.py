@@ -145,7 +145,7 @@ class GuardTracker:
         stack_size = get_value_stack_size(self.frame)
         for i in range(stack_size):
             value = get_value_stack_from_top(self.frame, i)
-            var = self.state.objects.get(value)
+            var = self.state.objects.get(value, allow_unexist_const=True)
             var.make_output(f"__stack__{i}", StoreInStack(i), graph_codegen)
         graph_code = graph_codegen.get_code()
         compiled_graph = self.state.fx_graph.compile(
