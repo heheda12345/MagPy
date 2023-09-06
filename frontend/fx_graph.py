@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 import operator
 import torch
 import torch.fx
@@ -39,6 +39,19 @@ def fx_graph_functions() -> set[Callable[..., Any]]:
         # operator.ior,
     }
     return fns
+
+
+BaseArgumentTypes = Union[
+    str,
+    int,
+    float,
+    bool,
+    complex,
+    #   torch.dtype, torch.Tensor, torch.device, torch.memory_format,
+    #   torch.layout, torch._ops.OpOverload
+]
+
+ProxyArgs = Union[BaseArgumentTypes, torch.fx.Proxy]
 
 
 class FxGraph:

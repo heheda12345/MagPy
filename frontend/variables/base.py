@@ -5,7 +5,7 @@ if TYPE_CHECKING:
     import torch
     import torch.fx
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
-    from ..fx_graph import FxGraph
+    from ..fx_graph import FxGraph, ProxyArgs
 
 
 @dataclass
@@ -43,5 +43,5 @@ class Variable:
         raise NotImplementedError
 
     @abstractmethod
-    def as_proxy(self) -> 'torch.fx.Proxy':
+    def as_proxy(self) -> "ProxyArgs":
         raise NotImplementedError

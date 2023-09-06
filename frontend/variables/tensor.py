@@ -5,7 +5,7 @@ import torch.fx
 from frontend.pycode_generator import GuardFnCodegen, GraphFnCodegen
 from .base import Variable
 from ..pycode_writer import new_name
-from ..fx_graph import FxGraph
+from ..fx_graph import FxGraph, ProxyArgs
 
 
 class TensorVar(Variable):
@@ -78,7 +78,7 @@ class TensorVar(Variable):
                                         extract_code_at_start)
         return var
 
-    def as_proxy(self) -> torch.fx.Proxy:
+    def as_proxy(self) -> ProxyArgs:
         return self.proxy
 
     def guard_check(self, value: torch.Tensor) -> bool:

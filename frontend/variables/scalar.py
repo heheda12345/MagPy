@@ -1,18 +1,20 @@
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Union
 
 import torch.fx
 from .base import Variable
 from ..pycode_writer import get_float_string
+from ..fx_graph import ProxyArgs
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
-    from ..fx_graph import FxGraph
+
+ScalarType = Union[int, float, bool, str]
 
 
 class ScalarVar(Variable):
-    value: Any
+    value: ScalarType
 
     def __init__(self,
-                 value: Any,
+                 value: ScalarType,
                  need_guard_check: bool,
                  extract_code_at_start: str = "") -> None:
         super().__init__(need_guard_check, extract_code_at_start)
@@ -37,11 +39,11 @@ class ScalarVar(Variable):
 
     @classmethod
     def from_value(cls,
-                   value: Any,
+                   value: ScalarType,
                    need_guard_check: bool,
                    _fx_graph: "torch.fx.Graph",
                    extract_code_at_start: str = "") -> "ScalarVar":
         return cls(value, need_guard_check, extract_code_at_start)
 
-    def as_proxy(self) -> torch.fx.Proxy:
-        raise NotImplementedError
+    def as_proxy(self) -> ProxyArgs:
+        return self.value

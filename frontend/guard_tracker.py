@@ -36,9 +36,12 @@ class State:
     def proxy_args_kwargs(
         self, args: list[Any], kwargs: dict[str, Any]
     ) -> tuple[tuple[torch.fx.Proxy, ...], dict[str, torch.fx.Proxy]]:
-        proxy_args = tuple(self.objects.get(arg).as_proxy() for arg in args)
+        proxy_args = tuple(
+            self.objects.get(arg, allow_unexist_const=True).as_proxy()
+            for arg in args)
         proxy_kwargs = {
-            key: self.objects.get(arg).as_proxy() for key, arg in kwargs.items()
+            key: self.objects.get(arg, allow_unexist_const=True).as_proxy()
+            for key, arg in kwargs.items()
         }
         return proxy_args, proxy_kwargs
 

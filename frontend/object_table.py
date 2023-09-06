@@ -1,6 +1,6 @@
-from typing import Any
+from typing import Any, get_args
 from .variables.base import Variable
-from .variables.scalar import ScalarVar
+from .variables.scalar import ScalarVar, ScalarType
 
 
 class ObjectTable:
@@ -21,8 +21,15 @@ class ObjectTable:
     def get_all(self) -> list[Variable]:
         return list(self.objs.values()) + self.objs_no_id
 
-    def get(self, value: Any) -> Variable:
+    def get(self, value: Any, allow_unexist_const: bool = False) -> Variable:
         if isinstance(value, int) and value >= -5 and value <= 256:
             return ScalarVar(value, False)
-        else:
+        elif id(value) in self.objs:
             return self.objs[id(value)]
+        elif allow_unexist_const and isinstance(value, get_args(ScalarType)):
+            return ScalarVar(value, False)
+        else:
+            raise RuntimeError(f"Object {value} not found in object table")
+
+    def contains(self, value: Any) -> bool:
+        return id(value) in self.objs
