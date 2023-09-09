@@ -58,7 +58,6 @@ class PyCodeWriter:
         self.indent = indent
 
     def write(self, code_str: str) -> None:
-        print("writing: indent", self.indent)
         code = code_str.splitlines()
         for line in code:
             self.wl(line)

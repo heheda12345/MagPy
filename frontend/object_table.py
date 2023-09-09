@@ -1,6 +1,8 @@
 from typing import Any, get_args
 from .variables.base import Variable
 from .variables.scalar import ScalarVar, ScalarType
+from .variables.null import NullVar
+from .utils import NullObject
 
 
 class ObjectTable:
@@ -26,10 +28,13 @@ class ObjectTable:
             return ScalarVar(value, False)
         elif id(value) in self.objs:
             return self.objs[id(value)]
-        elif allow_unexist_const and isinstance(value, get_args(ScalarType)):
-            return ScalarVar(value, False)
-        else:
-            raise RuntimeError(f"Object {value} not found in object table")
+        elif allow_unexist_const:
+            if isinstance(value, get_args(ScalarType)):
+                return ScalarVar(value, False)
+            elif isinstance(value, NullObject):
+                return NullVar(False)
+
+        raise RuntimeError(f"Object {value} not found in object table")
 
     def contains(self, value: Any) -> bool:
         return id(value) in self.objs

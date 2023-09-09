@@ -2,6 +2,24 @@ import inspect
 import dis
 from typing import Any
 from .bytecode_writter import get_code_keys
+import random
+
+
+class NullObject:
+    '''
+    The stack should be the following when meth is unbound
+    NULL | meth | arg1 | ... | argN
+    But as we cannot push NULL into the stack, we push a NullObject instead.
+    NullObject | meth | arg1 | ... | argN
+    We simulate the behavior of unbound method by calling arg0(arg1, ..., argN)
+    '''
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        print("calling unbound method", args[0], args[1:], kwargs)
+        return args[0](*args[1:], **kwargs)
+
+
+null_object = NullObject()
 
 
 def print_bytecode() -> None:
@@ -21,3 +39,19 @@ def print_bytecode() -> None:
 
 def is_scalar(value: Any) -> bool:
     return type(value) in {int, float, bool, str}
+
+
+random_state = None
+
+
+def new_random_key() -> int:
+    global random_state
+    cur_state = random.getstate()
+    if random_state is None:
+        random.seed(23333)
+        random_state = random.getstate()
+    random.setstate(random_state)
+    new_key = random.randint(0, 10000)
+    random_state = random.getstate()
+    random.setstate(cur_state)
+    return new_key

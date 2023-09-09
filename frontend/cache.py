@@ -31,6 +31,7 @@ class CachedGraph:
     start_stack_size: int
     end_stack_size: int
     return_values: list[StorePos]
+    key: int
 
 
 TOTAL_SIZE = 0

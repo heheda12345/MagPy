@@ -4,10 +4,12 @@ import traceback
 from types import FrameType, CodeType
 from typing import Any, Tuple, Callable
 import logging
-from .c_api import set_eval_frame, set_skip_files, guard_match, c_reset
+import torch
+from .c_api import set_eval_frame, set_skip_files, guard_match, c_reset, set_null_object
 from .bytecode_writter import rewrite_bytecode
 from .tracer import enable_trace, disable_trace, get_trace_func
 from .cache import enable_cache
+from .utils import null_object
 
 logging.basicConfig(
     format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s',
@@ -17,7 +19,8 @@ logging.basicConfig(
 def preprocess_frame(frame: FrameType,
                      frame_id: int) -> Tuple[CodeType, Callable[..., Any]]:
     try:
-        print(f"preprocess frame {frame.f_code.co_filename}", frame_id)
+        print(f"preprocess frame {frame.f_code.co_filename}", frame_id,
+              hex(id(frame)))
         enable_cache(frame_id)
         new_code = rewrite_bytecode(frame.f_code, frame_id)
         trace_func = get_trace_func(frame_id)
@@ -65,6 +68,7 @@ def compile(f: Callable[..., Any]) -> Callable[..., Any]:
     global init
     if not init:
         set_skip_files(set())
+        set_null_object(null_object)
         init = True
         import builtins
         setattr(builtins, "guard_match", guard_match)
@@ -74,7 +78,8 @@ def compile(f: Callable[..., Any]) -> Callable[..., Any]:
     def _fn(*args: Any, **kwargs: Any) -> Any:
         prior = set_eval_frame((preprocess_frame, postprocess_frame))
         try:
-            return f(*args, **kwargs)
+            fn = f.forward if isinstance(f, torch.nn.Module) else f
+            return fn(*args, **kwargs)
         except Exception as e:
             print("exception in _fn:", e, type(e))
             raise e

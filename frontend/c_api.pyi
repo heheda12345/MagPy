@@ -54,3 +54,7 @@ def c_reset() -> None:
 def stack_effect(op: int, oparg: int,
                  jump: Optional[bool]) -> tuple[int, int, int, bool, bool]:
     pass
+
+
+def set_null_object(obj: Any) -> None:
+    pass

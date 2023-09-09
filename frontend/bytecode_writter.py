@@ -312,8 +312,7 @@ def add_callsite(
         assert graph.end_stack_size == end_stack_size
 
     prepare_stack_insts = [
-        ci("STORE_FAST", f"__stack__{i}")
-        for i in range(start_stack_size - 1, -1, -1)
+        ci("STORE_FAST", f"__stack__{i}") for i in range(start_stack_size)
     ]
     call_guard_insts = [
         *prepare_stack_insts,
@@ -339,7 +338,7 @@ def add_callsite(
             ci("LOAD_FAST", "__graph_fn"),
             ci("LOAD_GLOBAL", "locals"),
             ci("CALL_FUNCTION", 0),
-            ci("CALL_FUNCTION", 1, comment="call graph_fn"),
+            ci("CALL_FUNCTION", 1, comment=f"call graph_fn (key={graph.key})"),
         ]
         if len(graph.return_values) == 0:
             insts.append(ci("POP_TOP"))

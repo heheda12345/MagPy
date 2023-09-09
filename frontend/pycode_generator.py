@@ -1,4 +1,5 @@
-from typing import Tuple
+from typing import Tuple, Any
+from itertools import chain
 import torch
 import torch.fx
 from .pycode_writer import PyCodeWriter, new_name, is_valid_name
@@ -16,12 +17,16 @@ class GraphFnCodegen:
     imports: set[str]
     graph_inputs: list[str]
     graph_outputs: list[torch.fx.Proxy]
+    objs: dict[str, Any]  # name -> var
+    key: int
 
-    def __init__(self) -> None:
+    def __init__(self, key: int) -> None:
         self.outputs = []
         self.imports = set()
         self.graph_inputs = []
         self.graph_outputs = []
+        self.objs = {}
+        self.key = key
 
     def output(self, name_in_graph_fn: str, store_pos: StorePos,
                code: str) -> None:
@@ -32,12 +37,14 @@ class GraphFnCodegen:
 
     def get_code(self) -> str:
         writer = PyCodeWriter()
-        writer.wl(f"def ___make_graph_fn(compiled_graph):")
+        writer.wl(
+            f"def ___make_graph_fn({', '.join(chain(('compiled_graph',), self.objs.keys()) )}):"
+        )
         writer.block_start()
         gen_imports(writer, self.imports)
         writer.wl(f"def fn(locals):")
         writer.block_start()
-        writer.wl(f"print('running graph_fn', locals)")
+        writer.wl(f"print('running graph_fn (key = {self.key})', locals)")
         # TODO: simplify
         writer.wl(f"graph_out = compiled_graph({', '.join(self.graph_inputs)})")
         writer.wl(f"print('graph_out', graph_out)")
@@ -65,16 +72,27 @@ class GraphFnCodegen:
     def add_graph_input(self, extract_code: str) -> None:
         self.graph_inputs.append(extract_code)
 
+    def add_var(self, var: Any, name: str = "") -> str:
+        if name == "" or not is_valid_name(name):
+            name = new_name("var")
+        elif name in self.objs:
+            name = new_name(name)
+
+        self.objs[name] = var
+        return name
+
 
 class GuardFnCodegen:
     checks: list[str]
     imports: set[str]
     vars: dict[str, Variable]  # name -> var
+    key: int
 
-    def __init__(self) -> None:
+    def __init__(self, key: int) -> None:
         self.checks = []
         self.imports = set()
         self.vars = {}
+        self.key = key
 
     def add_check(self, check: str) -> None:
         self.checks.append(check)
@@ -91,7 +109,7 @@ class GuardFnCodegen:
         writer.block_start()
         writer.write(f"try:")
         writer.block_start()
-        writer.wl(f"print('running guard_fn', locals)")
+        writer.wl(f"print('running guard_fn (key = {self.key})', locals)")
         if len(self.checks) == 0:
             writer.wl(f"ok = True")
         else:

@@ -11,7 +11,7 @@ from .c_api import get_value_stack_from_top, get_value_stack_size
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache, StorePos, StoreInStack, StoreInLocal
 from . import variables as vs
-from .utils import is_scalar
+from .utils import is_scalar, new_random_key
 from .object_table import ObjectTable
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
 from .fx_graph import FxGraph, fx_graph_functions
@@ -120,11 +120,12 @@ class GuardTracker:
         if end_pc == -1:
             end_pc = self.code.get_next_orig_pc(self.frame.f_lasti)
         print("commiting", self.state.start_pc, end_pc)
-        guard_codegen = GuardFnCodegen()
+        key = new_random_key()
+        guard_codegen = GuardFnCodegen(key=key)
         for var in self.state.objects.get_all():
             var.make_guard(guard_codegen)
         guard_code = guard_codegen.get_code()
-        graph_codegen = GraphFnCodegen()
+        graph_codegen = GraphFnCodegen(key=key)
         for node in self.state.fx_graph.result_graph.nodes:
             if node.op == "placeholder":
                 var = node.meta["var"]
@@ -160,7 +161,8 @@ class GuardTracker:
         print(py_code)
         exec(py_code, self.frame.f_globals, out)
         guard_fn = out["___make_guard_fn"](*guard_codegen.vars.values())
-        graph_fn = out["___make_graph_fn"](compiled_graph)
+        graph_fn = out["___make_graph_fn"](compiled_graph,
+                                           *graph_codegen.objs.values())
 
         print("guard_fn:", guard_fn)
         print("pc:", self.state.start_pc, end_pc)
@@ -175,6 +177,7 @@ class GuardTracker:
                 start_stack_size=self.state.start_stack_size,
                 end_stack_size=stack_size,
                 return_values=graph_codegen.get_return_values(),
+                key=key,
             ))
         self.state.is_empty = True
 
@@ -233,6 +236,17 @@ class GuardTracker:
 
     def LOAD_CONST(self, _inst: Instruction) -> None:
         pass
+
+    # heheda: we need to make sure that no unbound LOAD_METHOD is called by python runtime to avoid NULL in stack
+    def LOAD_METHOD(self, inst: Instruction) -> None:
+        self_obj = get_value_stack_from_top(self.frame, 0)
+        method = getattr(self_obj, inst.argval)
+        self_var = self.state.objects.get(self_obj)
+        if self_var.need_guard_check:
+            method_var = vs.make_var_from_value(
+                method, True, self.state.fx_graph,
+                f"({self_var.extract_code_at_start}).{inst.argval}")
+            self.state.objects.add(method_var, method)
 
     def RETURN_VALUE(self, _inst: Instruction) -> None:
         self.restart("return value")

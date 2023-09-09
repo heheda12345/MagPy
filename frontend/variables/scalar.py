@@ -1,4 +1,4 @@
-from typing import Any, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Union
 
 import torch.fx
 from .base import Variable

@@ -40,6 +40,7 @@ static PyObject *(*previous_eval_frame)(PyThreadState *tstate,
                                         int throw_flag) = NULL;
 static size_t cache_entry_extra_index = -1;
 static std::vector<int *> frame_id_list;
+static PyObject *null_object = NULL;
 static void ignored(void *obj) {}
 
 frontend_csrc::ProgramCache program_cache;
@@ -290,6 +291,18 @@ static PyObject *set_skip_files(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
+static PyObject *set_null_object(PyObject *self, PyObject *args) {
+    PyObject *obj;
+    if (!PyArg_ParseTuple(args, "O", &obj)) {
+        PRINT_PYERR
+        PyErr_SetString(PyExc_TypeError,
+                        "invalid parameter in set_null_object");
+    }
+    Py_INCREF(obj);
+    null_object = obj;
+    Py_RETURN_NONE;
+}
+
 static PyObject *get_value_stack_from_top(PyObject *self, PyObject *args) {
     PyFrameObject *frame = NULL;
     int index = 0;
@@ -300,6 +313,9 @@ static PyObject *get_value_stack_from_top(PyObject *self, PyObject *args) {
         return NULL;
     }
     PyObject *value = frame->f_stacktop[-index - 1];
+    if (value == NULL) {
+        value = null_object;
+    }
     Py_INCREF(value);
     return value;
 }
@@ -425,6 +441,7 @@ static PyObject *stack_effect_py(PyObject *self, PyObject *args) {
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame, METH_VARARGS, NULL},
     {"set_skip_files", set_skip_files, METH_VARARGS, NULL},
+    {"set_null_object", set_null_object, METH_VARARGS, NULL},
     {"get_value_stack_from_top", get_value_stack_from_top, METH_VARARGS, NULL},
     {"get_value_stack_size", get_value_stack_size, METH_VARARGS, NULL},
     {"guard_match", guard_match, METH_VARARGS, NULL},
