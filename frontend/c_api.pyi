@@ -12,7 +12,7 @@ def set_skip_files(skip_file: set[str]) -> None:
     pass
 
 
-def get_value_stack_from_top(frame: FrameType, index: int) -> list[Any]:
+def get_value_stack_from_top(frame: FrameType, index: int) -> Any:
     pass
 
 

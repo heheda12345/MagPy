@@ -12,10 +12,10 @@ from .c_api import get_value_stack_from_top, get_value_stack_size
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache, StoreInStack, StoreInLocal
 from . import variables as vs
-from .utils import is_scalar, new_random_key, has_force_graph_break
+from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject
 from .object_table import ObjectTable
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
-from .fx_graph import FxGraph, fx_graph_functions
+from .fx_graph import FxGraph, fx_graph_functions, get_frame_root, is_leaf_module
 from .bytecode_analysis import livevars_analysis
 
 
@@ -27,15 +27,17 @@ class State:
     fx_graph: FxGraph
     proxy_waiting_ids: list[torch.fx.Proxy]
     stored_locals: set[str]
+    submodule_paths: dict[str, torch.nn.Module]
 
-    def __init__(self) -> None:
+    def __init__(self, root: torch.nn.Module) -> None:
         self.objects = ObjectTable()
         self.start_pc = -1
         self.start_stack_size = -1
         self.is_empty = True
-        self.fx_graph = FxGraph()
+        self.fx_graph = FxGraph(root)
         self.proxy_waiting_ids = []
         self.stored_locals = set()
+        self.submodule_paths = {mod: name for name, mod in root.named_modules()}
 
     def proxy_args_kwargs(
         self, args: list[Any], kwargs: dict[str, Any]
@@ -51,16 +53,28 @@ class State:
 
     def record_function(self, func: Callable[..., Any], args: List[Any],
                         kwargs: Dict[str, Any]) -> None:
-        proxy = self.fx_graph.create_proxy(
-            "call_function",
-            func,
-            *self.proxy_args_kwargs(args, kwargs),
-        )
-        self.proxy_waiting_ids.append(proxy)
+        if isinstance(func, torch.nn.Module):
+            if func in self.submodule_paths and is_leaf_module(func):
+                proxy = self.fx_graph.create_proxy(
+                    "call_module",
+                    self.submodule_paths[func],
+                    *self.proxy_args_kwargs(args, kwargs),
+                )
+                self.proxy_waiting_ids.append(proxy)
+            else:
+                raise NotImplementedError
+        else:
+            proxy = self.fx_graph.create_proxy(
+                "call_function",
+                func,
+                *self.proxy_args_kwargs(args, kwargs),
+            )
+            self.proxy_waiting_ids.append(proxy)
 
     @classmethod
-    def from_frame(cls, frame: FrameType, read_stack: bool) -> 'State':
-        state = cls()
+    def from_frame(cls, frame: FrameType, read_stack: bool,
+                   frame_root: torch.nn.Module) -> 'State':
+        state = cls(frame_root)
         if read_stack:
             state.start_stack_size = get_value_stack_size(frame)
             for i in range(state.start_stack_size):
@@ -77,17 +91,19 @@ class GuardTracker:
     frame: FrameType
     state: State
     have_error: bool
+    frame_root: torch.nn.Module
 
     def __init__(self, frame: FrameType, frame_id: int):
         self.code = load_code(frame_id)
         self.frame = frame
         self.frame_id = frame_id
+        self.frame_root = get_frame_root(frame_id)
         self.init_state(
             read_stack=False
         )  # stack pointer is not initialized at the creation of a stack frame
 
     def init_state(self, read_stack: bool = True) -> None:
-        self.state = State.from_frame(self.frame, read_stack)
+        self.state = State.from_frame(self.frame, read_stack, self.frame_root)
         self.have_error = False
 
     def record(
@@ -218,8 +234,10 @@ class GuardTracker:
         args: List[Any],
         kwargs: Dict[str, Any],
     ) -> None:
+        print("call_function", func, args, kwargs)
         if self.has_tensor_arg(args, kwargs):
-            if func in fx_graph_functions():
+            if func in fx_graph_functions() or isinstance(
+                    func, torch.nn.Module):
                 self.state.record_function(func, args, kwargs)
             else:
                 raise NotImplementedError
@@ -253,6 +271,22 @@ class GuardTracker:
                 method, True, self.state.fx_graph,
                 f"({self_var.extract_code_at_start}).{inst.argval}")
             self.state.objects.add(method_var, method)
+
+    def CALL_METHOD(self, inst: Instruction) -> None:
+        num_args = inst.argval
+        args = [
+            get_value_stack_from_top(self.frame, i)
+            for i in range(num_args - 1, -1, -1)
+        ]
+        kwargs: dict[str, Any] = {}
+        self_val = get_value_stack_from_top(self.frame, num_args)
+        meth_val = get_value_stack_from_top(self.frame, num_args + 1)
+        if isinstance(meth_val, NullObject):
+            # Stack layout: ... | NULL | callable | arg1 | ... | argN
+            self.call_function(self_val, args, kwargs)
+        else:
+            # Stack layout: ... | method | self | arg1 | ... | argN
+            self.call_function(meth_val, [self_val] + args, kwargs)
 
     def RETURN_VALUE(self, _inst: Instruction) -> None:
         self.restart("return value")

@@ -82,7 +82,7 @@ class TensorVar(Variable):
     def as_proxy(self) -> ProxyArgs:
         return self.proxy
 
-    def guard_check(self, value: torch.Tensor) -> bool:
+    def tensor_guard_check(self, value: torch.Tensor) -> bool:
         print("checking", value)
         return isinstance(value, torch.Tensor) and self.dtype == value.dtype and self.device == value.device and \
             self.layout == value.layout and self.ndim == value.ndim and \
@@ -97,7 +97,8 @@ class TensorVar(Variable):
     def make_guard_inner(self, codegen: GuardFnCodegen) -> None:
         name_in_codegen = codegen.add_var(self)
         codegen.add_check(
-            f"{name_in_codegen}.guard_check({self.extract_code_at_start})")
+            f"{name_in_codegen}.tensor_guard_check({self.extract_code_at_start})"
+        )
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen") -> None:

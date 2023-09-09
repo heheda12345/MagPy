@@ -10,35 +10,41 @@ from .bytecode_writter import rewrite_bytecode
 from .tracer import enable_trace, disable_trace, get_trace_func
 from .cache import enable_cache
 from .utils import null_object
+from .fx_graph import set_frame_root
 
 logging.basicConfig(
     format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s',
     level=logging.INFO)
 
 
-def preprocess_frame(frame: FrameType,
-                     frame_id: int) -> Tuple[CodeType, Callable[..., Any]]:
-    try:
-        print(f"preprocess frame {frame.f_code.co_filename}", frame_id,
-              hex(id(frame)))
-        enable_cache(frame_id)
-        new_code = rewrite_bytecode(frame.f_code, frame_id)
-        trace_func = get_trace_func(frame_id)
-    except Exception as e:
-        print("exception in preprocess:", e, type(e))
-        print(traceback.format_exc())
-        raise e
-    return (new_code, trace_func)
+def get_process_frame(
+        f: Callable[..., Any]) -> Tuple[Callable[..., Any], Callable[..., Any]]:
 
+    def preprocess_frame(frame: FrameType,
+                         frame_id: int) -> Tuple[CodeType, Callable[..., Any]]:
+        try:
+            print(f"preprocess frame {frame.f_code.co_filename}", frame_id,
+                  hex(id(frame)))
+            enable_cache(frame_id)
+            set_frame_root(frame_id, f)
+            new_code = rewrite_bytecode(frame.f_code, frame_id)
+            trace_func = get_trace_func(frame_id)
+        except Exception as e:
+            print("exception in preprocess:", e, type(e))
+            print(traceback.format_exc())
+            raise e
+        return (new_code, trace_func)
 
-def postprocess_frame(frame: FrameType) -> None:
-    try:
-        print(f"postprocess frame {frame.f_code.co_filename}")
-    except Exception as e:
-        print("exception in postprocess:", e, type(e))
-        print(traceback.format_exc())
-        raise e
-    return None
+    def postprocess_frame(frame: FrameType) -> None:
+        try:
+            print(f"postprocess frame {frame.f_code.co_filename}")
+        except Exception as e:
+            print("exception in postprocess:", e, type(e))
+            print(traceback.format_exc())
+            raise e
+        return None
+
+    return (preprocess_frame, postprocess_frame)
 
 
 LOAD_OPCODES = list(
@@ -76,7 +82,8 @@ def compile(f: Callable[..., Any]) -> Callable[..., Any]:
         setattr(builtins, "disable_trace", disable_trace)
 
     def _fn(*args: Any, **kwargs: Any) -> Any:
-        prior = set_eval_frame((preprocess_frame, postprocess_frame))
+        pre, post = get_process_frame(f)
+        prior = set_eval_frame((pre, post))
         try:
             fn = f.forward if isinstance(f, torch.nn.Module) else f
             return fn(*args, **kwargs)
@@ -100,3 +107,5 @@ def reset() -> None:
     guard_tracker.reset()
     from . import utils
     utils.reset()
+    from . import fx_graph
+    fx_graph.reset()
