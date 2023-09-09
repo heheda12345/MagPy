@@ -55,3 +55,50 @@ def new_random_key() -> int:
     random_state = random.getstate()
     random.setstate(cur_state)
     return new_key
+
+
+class ForceGraphBreaker:
+    breaks: dict[int, set[int]]  # frame_id -> list of pc
+
+    def __init__(self) -> None:
+        self.breaks = {}
+
+    def add(self, frame_id: int, pc: int) -> None:
+        if frame_id not in self.breaks:
+            self.breaks[frame_id] = set()
+        self.breaks[frame_id].add(pc)
+
+    def need_break(self, frame_id: int, pc: int) -> bool:
+        if frame_id not in self.breaks:
+            return False
+        return pc in self.breaks[frame_id]
+
+
+graph_breaker = None
+
+
+def add_force_graph_break(frame_id: int, pc: int) -> None:
+    global graph_breaker
+    if graph_breaker is None:
+        graph_breaker = ForceGraphBreaker()
+    graph_breaker.add(frame_id, pc)
+
+
+def has_force_graph_break(frame_id: int, pc: int) -> bool:
+    global graph_breaker
+    # fast path
+    if graph_breaker is None:
+        return False
+    return graph_breaker.need_break(frame_id, pc)
+
+
+def clear_force_graph_break() -> None:
+    global graph_breaker
+    graph_breaker = None
+
+
+def reset() -> None:
+    global graph_breaker
+    graph_breaker = None
+    global random_state
+    random_state = None

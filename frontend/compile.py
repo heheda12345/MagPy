@@ -98,3 +98,5 @@ def reset() -> None:
     cache.reset()
     from . import guard_tracker
     guard_tracker.reset()
+    from . import utils
+    utils.reset()

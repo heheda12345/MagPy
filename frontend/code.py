@@ -108,14 +108,16 @@ class ProcessedCode:
 
         return self.pc_guarded_to_origin[pc]
 
-    def get_orig_inst(self, lasti: int) -> Optional[Instruction]:
+    def get_orig_inst(self, lasti: int) -> tuple[int, Optional[Instruction]]:
         pc = lasti // 2
         assert pc in self.pc_guarded_to_origin, (
             "pc %d not in pc_guarded_to_origin" % pc)
         origin_pc = self.pc_guarded_to_origin[pc]
-        if origin_pc == -1:
-            return None  # is a helper opcode inside tracing region
-        return self.original_insts[self.pc_guarded_to_origin[pc]]
+        if origin_pc == -1:  # is a helper opcode inside tracing region
+            inst = None
+        else:
+            inst = self.original_insts[self.pc_guarded_to_origin[pc]]
+        return origin_pc, inst
 
     def get_next_orig_pc(self, lasti: int) -> int:
         pc = lasti // 2

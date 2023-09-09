@@ -6,12 +6,13 @@ import itertools
 import torch
 import torch.fx
 import operator
+import dis
 from .code import ProcessedCode, load_code
 from .c_api import get_value_stack_from_top, get_value_stack_size
 from .instruction import Instruction, ci
-from .cache import CachedGraph, get_frame_cache, StorePos, StoreInStack, StoreInLocal
+from .cache import CachedGraph, get_frame_cache, StoreInStack, StoreInLocal
 from . import variables as vs
-from .utils import is_scalar, new_random_key
+from .utils import is_scalar, new_random_key, has_force_graph_break
 from .object_table import ObjectTable
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
 from .fx_graph import FxGraph, fx_graph_functions
@@ -96,15 +97,20 @@ class GuardTracker:
         assert frame == self.frame
         self.process_last_inst()
 
-        inst = self.code.get_orig_inst(self.frame.f_lasti)
+        pc, inst = self.code.get_orig_inst(self.frame.f_lasti)
         if inst is None:
-            self.restart(f"running injected code (pc={self.frame.f_lasti})")
+            self.restart(
+                f"running injected code (f_lasti={self.frame.f_lasti})")
+            return
+        if has_force_graph_break(frame_id, pc):
+            assert inst.opcode != dis.opmap["LOAD_METHOD"]
+            self.restart(f"force graph break (pc = {pc})")
             return
         # call init_state after is_inject_code check to avoid frequent init_state
         if self.have_error:
             self.init_state()
         if self.state.start_pc == -1:
-            self.state.start_pc = self.code.get_orig_pc(self.frame.f_lasti)
+            self.state.start_pc = pc
             assert self.state.start_pc >= 0
         if hasattr(self, inst.opname):
             getattr(self, inst.opname)(inst)
