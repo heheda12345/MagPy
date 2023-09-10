@@ -387,20 +387,20 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
 }
 
 static PyObject *reset(PyObject *self, PyObject *args) {
-    for (int *frame_id : frame_id_list) {
-        delete frame_id;
-    }
-    frame_id_list.clear();
-
+    // as we cannot recover the frame_id assigned by _PyCode_GetExtra, we only
+    // clear the cache of each frame, and keeps the program_cache vector
     for (frontend_csrc::FrameCache &frame_cache : program_cache) {
         for (frontend_csrc::Cache *entry : frame_cache) {
+            if (entry == nullptr) {
+                continue;
+            }
             Py_DECREF(entry->check_fn);
             Py_DECREF(entry->graph_fn);
             delete entry;
         }
+        frame_cache.clear();
+        frame_cache.push_back(nullptr);
     }
-    program_cache.clear();
-    frame_count = 0;
     Py_RETURN_NONE;
 }
 

@@ -30,8 +30,6 @@ def test_call_method(caplog):
         run_and_check(compiled_model, [HIT, HIT], 2, caplog, expect_result, x)
 
 
-# FIXME: have bug in csrc.get_frame_id when has two model instance, so this test fails now
-'''
 def test_module(caplog):
     reset()
     with torch.no_grad():
@@ -41,4 +39,9 @@ def test_module(caplog):
         compiled_model = compile(model)
         run_and_check(compiled_model, [MISS], 1, caplog, expect_result, x)
         run_and_check(compiled_model, [HIT], 1, caplog, expect_result, x)
-'''
+
+
+if __name__ == "__main__":
+    caplog = logging.getLogger(__name__)
+    test_call_method(caplog)
+    test_module(caplog)
