@@ -1,9 +1,9 @@
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Union, Optional
 
 import torch.fx
 from .base import Variable
 from ..pycode_writer import get_float_string
-from ..fx_graph import ProxyArgs
+from ..fx_graph import ProxyArgs, FxGraph
 from ..cache import StorePos
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -43,7 +43,7 @@ class ScalarVar(Variable):
     def from_value(cls,
                    value: ScalarType,
                    need_guard_check: bool,
-                   _fx_graph: "torch.fx.Graph",
+                   _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: str = "") -> "ScalarVar":
         return cls(value, need_guard_check, extract_code_at_start)
 

@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from abc import abstractmethod
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Optional
+from ..fx_graph import FxGraph
 from ..cache import StorePos
 if TYPE_CHECKING:
-    import torch
     import torch.fx
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
     from ..fx_graph import FxGraph, ProxyArgs
@@ -27,7 +27,7 @@ class Variable:
     def from_value(self,
                    value: Any,
                    need_guard_check: bool,
-                   fx_graph: "FxGraph",
+                   fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: str = "") -> 'Variable':
         raise NotImplementedError
 

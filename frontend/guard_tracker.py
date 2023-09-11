@@ -294,6 +294,11 @@ class GuardTracker:
     def STORE_FAST(self, inst: Instruction) -> None:
         self.state.stored_locals.add(inst.argval)
 
+    def BINARY_SUBSCR(self, inst: Instruction) -> None:
+        obj1 = get_value_stack_from_top(self.frame, 1)
+        obj2 = get_value_stack_from_top(self.frame, 0)
+        self.call_function(operator.getitem, [obj1, obj2], {})
+
 
 trackers: list[GuardTracker] = []
 

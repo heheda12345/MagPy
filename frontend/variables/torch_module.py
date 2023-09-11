@@ -1,11 +1,10 @@
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Union, Optional
 
 import torch.fx
 
 from frontend.pycode_generator import GuardFnCodegen
 from .base import Variable
-from ..pycode_writer import get_float_string
-from ..fx_graph import ProxyArgs
+from ..fx_graph import FxGraph
 from ..cache import StorePos
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -28,7 +27,7 @@ class TorchModuleVar(Variable):
     def from_value(cls,
                    value: torch.nn.Module,
                    need_guard_check: bool,
-                   _fx_graph: "torch.fx.Graph",
+                   _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: str = "") -> "TorchModuleVar":
         return cls(value, need_guard_check, extract_code_at_start)
 

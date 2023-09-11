@@ -44,3 +44,34 @@ def test_with_scalar(caplog):
     result = tensor_add_int(a, b)
     run_and_check(compiled_tensor_add_int, [MISS], 2, caplog, result, a, b)
     run_and_check(compiled_tensor_add_int, [HIT], 2, caplog, result, a, b)
+
+
+def tensor_subscr_const(a):
+    return a[0] + 1
+
+
+def tensor_subscr_scalar(a, b):
+    return a[b] + 1
+
+
+def tensor_subscr_none(a):
+    return a[None] + 1
+
+
+def test_subscr(caplog):
+    reset()
+    compiled_tensor_subscr_const = compile(tensor_subscr_const)
+    compiled_tensor_subscr_scalar = compile(tensor_subscr_scalar)
+    compiled_tensor_subscr_none = compile(tensor_subscr_none)
+    a = torch.full((2,), 1.0)
+    b = 0
+    result = tensor_subscr_const(a)
+    run_and_check(compiled_tensor_subscr_const, [MISS], 1, caplog, result, a)
+    run_and_check(compiled_tensor_subscr_const, [HIT], 1, caplog, result, a)
+    result = tensor_subscr_scalar(a, b)
+    run_and_check(compiled_tensor_subscr_scalar, [MISS], 2, caplog, result, a,
+                  b)
+    run_and_check(compiled_tensor_subscr_scalar, [HIT], 2, caplog, result, a, b)
+    result = tensor_subscr_none(a)
+    run_and_check(compiled_tensor_subscr_none, [MISS], 3, caplog, result, a)
+    run_and_check(compiled_tensor_subscr_none, [HIT], 3, caplog, result, a)

@@ -70,8 +70,9 @@ class TensorVar(Variable):
     def from_value(cls,
                    value: torch.Tensor,
                    need_guard_check: bool,
-                   fx_graph: 'FxGraph',
+                   fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: str = "") -> 'TensorVar':
+        assert fx_graph is not None
         name = new_name('tensor')
         assert extract_code_at_start != ""
         proxy = fx_graph.create_proxy("placeholder", name, (), {}, name)

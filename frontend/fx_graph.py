@@ -18,7 +18,7 @@ def fx_graph_functions() -> set[Callable[..., Any]]:
         operator.mod,
         operator.add,
         operator.sub,
-        # operator.getitem,
+        operator.getitem,
         operator.lshift,
         operator.rshift,
         operator.and_,

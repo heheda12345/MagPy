@@ -1,7 +1,6 @@
 from typing import Any, get_args
 from .variables.base import Variable
-from .variables.scalar import ScalarVar, ScalarType
-from .variables.null import NullVar
+from .variables import CONST_TYPES, ScalarVar, make_var_from_value
 from .utils import NullObject
 
 
@@ -28,11 +27,8 @@ class ObjectTable:
             return ScalarVar(value, False)
         elif id(value) in self.objs:
             return self.objs[id(value)]
-        elif allow_unexist_const:
-            if isinstance(value, get_args(ScalarType)):
-                return ScalarVar(value, False)
-            elif isinstance(value, NullObject):
-                return NullVar(False)
+        elif allow_unexist_const and isinstance(value, get_args(CONST_TYPES)):
+            return make_var_from_value(value, False)
 
         raise RuntimeError(f"Object {value} not found in object table")
 
