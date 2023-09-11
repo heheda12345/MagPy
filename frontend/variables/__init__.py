@@ -5,8 +5,7 @@ from .scalar import ScalarVar
 from typing import Optional
 from .tensor import TensorVar
 from .torch_module import TorchModuleVar
-from .null import NullVar
-from .none import NoneVar
+from .const import NullVar, NoneVar
 from ..fx_graph import FxGraph
 from ..utils import NullObject
 
