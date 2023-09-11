@@ -27,16 +27,22 @@ class State:
     proxy_waiting_ids: list[torch.fx.Proxy]
     stored_locals: set[str]
     submodule_paths: dict[str, torch.nn.Module]
+    written: bool
 
     def __init__(self, root: torch.nn.Module) -> None:
         self.objects = ObjectTable()
         self.start_pc = -1
         self.start_stack_size = -1
         self.is_empty = True
-        self.fx_graph = FxGraph(root)
+
+        def get_mark_written_fn(state: 'State') -> Callable[[], None]:
+            return lambda: setattr(state, "written", True)
+
+        self.fx_graph = FxGraph(root, get_mark_written_fn(self))
         self.proxy_waiting_ids = []
         self.stored_locals = set()
         self.submodule_paths = {mod: name for name, mod in root.named_modules()}
+        self.written = False
 
     def proxy_args_kwargs(
         self, args: list[Any], kwargs: dict[str, Any]
@@ -52,12 +58,15 @@ class State:
 
     def record_function(self, func: Callable[..., Any], args: List[Any],
                         kwargs: Dict[str, Any]) -> None:
+        pargs, pkwargs = self.proxy_args_kwargs(args, kwargs)
+        self.written = True
         if isinstance(func, torch.nn.Module):
             if func in self.submodule_paths and is_leaf_module(func):
                 proxy = self.fx_graph.create_proxy(
                     "call_module",
                     self.submodule_paths[func],
-                    *self.proxy_args_kwargs(args, kwargs),
+                    pargs,
+                    pkwargs,
                 )
                 self.proxy_waiting_ids.append(proxy)
             else:
@@ -66,7 +75,8 @@ class State:
             proxy = self.fx_graph.create_proxy(
                 "call_function",
                 func,
-                *self.proxy_args_kwargs(args, kwargs),
+                pargs,
+                pkwargs,
             )
             self.proxy_waiting_ids.append(proxy)
 
@@ -81,7 +91,17 @@ class State:
                 var = vs.make_var_from_value(value, True, state.fx_graph,
                                              f"locals['__stack__{i}']")
                 state.objects.add(var, value)
+        # state.written may be assigned inside make_var_from_value
+        state.written = False
         return state
+
+    def add_object(self, var: vs.Variable, value: Any) -> None:
+        self.written = True
+        self.objects.add(var, value)
+
+    def add_stored_locals(self, name: str) -> None:
+        self.written = True
+        self.stored_locals.add(name)
 
 
 class GuardTracker:
@@ -102,6 +122,8 @@ class GuardTracker:
         )  # stack pointer is not initialized at the creation of a stack frame
 
     def init_state(self, read_stack: bool = True) -> None:
+        if hasattr(self, "state"):
+            self.state.written = False
         self.state = State.from_frame(self.frame, read_stack, self.frame_root)
         self.have_error = False
 
@@ -132,13 +154,18 @@ class GuardTracker:
             self.state.start_pc = pc
             assert self.state.start_pc >= 0
         if hasattr(self, inst.opname):
-            getattr(self, inst.opname)(inst)
+            try:
+                getattr(self, inst.opname)(inst)
+            except Exception as e:
+                self.restart(f"Exception during processing {inst.opname}: {e}")
             if not self.have_error:
                 self.state.is_empty = False
+                self.state.written = False
         else:
             self.restart(f"unknown opcode {inst.opname}")
 
     def commit(self) -> None:
+        assert not self.state.written
         if self.state.is_empty:
             return
         assert self.state.start_pc >= 0
@@ -271,7 +298,7 @@ class GuardTracker:
             obj = self.frame.f_locals[inst.argval]
             var = vs.make_var_from_value(obj, True, self.state.fx_graph,
                                          f'locals["{inst.argval}"]')
-            self.state.objects.add(var, obj)
+            self.state.add_object(var, obj)
 
     # heheda: we need to make sure that no unbound LOAD_METHOD is called by python runtime to avoid NULL in stack
     def LOAD_METHOD(self, inst: Instruction) -> None:
@@ -286,7 +313,7 @@ class GuardTracker:
             except Exception as e:
                 self.restart(f"Exception during LOAD_METHOD: {e}")
                 return
-            self.state.objects.add(method_var, method)
+            self.state.add_object(method_var, method)
 
     def CALL_METHOD(self, inst: Instruction) -> None:
         num_args = inst.argval
@@ -308,7 +335,7 @@ class GuardTracker:
         self.restart("return value")
 
     def STORE_FAST(self, inst: Instruction) -> None:
-        self.state.stored_locals.add(inst.argval)
+        self.state.add_stored_locals(inst.argval)
 
 
 trackers: list[GuardTracker] = []

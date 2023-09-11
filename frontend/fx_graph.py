@@ -58,11 +58,14 @@ class FxGraph:
     root: torch.nn.Module
     result_graph: torch.fx.Graph
     tracer: torch.fx.Tracer
+    mark_written_fn: Callable[[], None]
 
-    def __init__(self, root: torch.nn.Module) -> None:
+    def __init__(self, root: torch.nn.Module,
+                 mark_written_fn: Callable[[], None]) -> None:
         self.root = root
         self.result_graph = torch.fx.Graph(root)
         self.tracer = torch.fx.proxy.GraphAppendingTracer(self.result_graph)
+        self.mark_written_fn = mark_written_fn
 
     def create_proxy(
         self,
@@ -75,6 +78,7 @@ class FxGraph:
         proxy_factory_fn: Optional[Callable[[torch.fx.Node],
                                             torch.fx.Proxy]] = None
     ) -> torch.fx.Proxy:
+        self.mark_written_fn()
         return self.tracer.create_proxy(kind, target, args, kwargs, name,
                                         type_expr, proxy_factory_fn)
 
