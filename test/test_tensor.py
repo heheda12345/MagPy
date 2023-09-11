@@ -81,6 +81,11 @@ def tensor_subscr_slice(a):
     return (s1, s2, s3, s4, s5, s6, s7, s9, s10, s11, s12)
 
 
+# TODO
+def tensor_subscr_tuple(a):
+    return a[1, 2] + 1
+
+
 def test_subscr(caplog):
     reset()
     compiled_tensor_subscr_const = compile(tensor_subscr_const)
@@ -89,6 +94,7 @@ def test_subscr(caplog):
     compiled_tensor_subscr_tensor = compile(tensor_subscr_tensor)
     compiled_tensor_subscr_slice = compile(tensor_subscr_slice)
     compiled_tensor_subscr_ellipsis = compile(tensor_subscr_ellipsis)
+    compiled_tensor_subscr_tuple = compile(tensor_subscr_tuple)
     a = torch.full((3, 3), 1.0)
     b = 0
     idx = torch.tensor([1, 2])
@@ -116,7 +122,11 @@ def test_subscr(caplog):
     run_and_check(compiled_tensor_subscr_slice, [MISS], 5, caplog, result, a)
     run_and_check(compiled_tensor_subscr_slice, [HIT], 5, caplog, result, a)
 
-    # TODO: support ellipsis after supporting tuple
+    # TODO: support ellipsis and tuple after supporting tuple
     # result = tensor_subscr_ellipsis(a)
-    # run_and_check(compiled_tensor_subscr_none, [MISS], 4, caplog, result, a)
-    # run_and_check(compiled_tensor_subscr_none, [HIT], 4, caplog, result, a)
+    # run_and_check(compiled_tensor_subscr_none, [MISS], 6, caplog, result, a)
+    # run_and_check(compiled_tensor_subscr_none, [HIT], 6, caplog, result, a)
+    #
+    # result = tensor_subscr_tuple(a)
+    # run_and_check(compiled_tensor_subscr_none, [MISS], 7, caplog, result, a)
+    # run_and_check(compiled_tensor_subscr_none, [HIT], 7, caplog, result, a)
