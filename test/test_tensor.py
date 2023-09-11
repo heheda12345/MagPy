@@ -130,3 +130,18 @@ def test_subscr(caplog):
     # result = tensor_subscr_tuple(a)
     # run_and_check(compiled_tensor_subscr_none, [MISS], 7, caplog, result, a)
     # run_and_check(compiled_tensor_subscr_none, [HIT], 7, caplog, result, a)
+
+
+def tensor_functional(a):
+    return torch.nn.functional.relu(a) + 1
+
+
+def test_tensor_functional(caplog):
+    reset()
+    compiled_tensor_functional = compile(tensor_functional)
+    a = torch.randn((3, 3))
+    expect_result = tensor_functional(a)
+    run_and_check(compiled_tensor_functional, [MISS], 1, caplog, expect_result,
+                  a)
+    run_and_check(compiled_tensor_functional, [HIT], 1, caplog, expect_result,
+                  a)

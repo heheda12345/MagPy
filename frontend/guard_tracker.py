@@ -26,6 +26,7 @@ class State:
     fx_graph: FxGraph
     proxy_waiting_ids: list[torch.fx.Proxy]
     stored_locals: set[str]
+    stored_globals: set[str]
     submodule_paths: dict[str, torch.nn.Module]
     written: bool
 
@@ -41,6 +42,7 @@ class State:
         self.fx_graph = FxGraph(root, get_mark_written_fn(self))
         self.proxy_waiting_ids = []
         self.stored_locals = set()
+        self.stored_globals = set()
         self.submodule_paths = {mod: name for name, mod in root.named_modules()}
         self.written = False
 
@@ -102,6 +104,10 @@ class State:
     def add_stored_locals(self, name: str) -> None:
         self.written = True
         self.stored_locals.add(name)
+
+    def add_stored_globals(self, name: str) -> None:
+        self.written = True
+        self.stored_globals.add(name)
 
 
 class GuardTracker:
@@ -265,17 +271,21 @@ class GuardTracker:
         args: List[Any],
         kwargs: Dict[str, Any],
     ) -> None:
-        print("call_function", func, args, kwargs)
         if self.has_tensor_arg(args, kwargs):
             if func in fx_graph_functions() or isinstance(
                     func, torch.nn.Module):
                 self.state.record_function(func, args, kwargs)
-            else:
-                raise NotImplementedError
+                return
+            func_var = self.state.objects.get_or_none(func)
+            if func_var is not None:
+                assert isinstance(func_var, vs.FunctionVar)
+                if func_var.src == vs.ObjectSrc.TORCH:
+                    self.state.record_function(func, args, kwargs)
+                    return
+
         elif self.all_scalar_arg(args, kwargs):
-            pass
-        else:
-            raise NotImplementedError
+            return
+        raise NotImplementedError
 
     def BINARY_ADD(self, _inst: Instruction) -> None:
         obj1 = get_value_stack_from_top(self.frame, 1)
@@ -300,20 +310,39 @@ class GuardTracker:
                                          f'locals["{inst.argval}"]')
             self.state.add_object(var, obj)
 
+    def LOAD_GLOBAL(self, inst: Instruction) -> None:
+        if inst.argval not in self.state.stored_globals:
+            obj = self.frame.f_globals[inst.argval]
+            var = vs.make_var_from_value(obj, True, self.state.fx_graph,
+                                         f'globals()["{inst.argval}"]')
+            self.state.add_object(var, obj)
+
     # heheda: we need to make sure that no unbound LOAD_METHOD is called by python runtime to avoid NULL in stack
     def LOAD_METHOD(self, inst: Instruction) -> None:
         self_obj = get_value_stack_from_top(self.frame, 0)
         method = getattr(self_obj, inst.argval)
         self_var = self.state.objects.get(self_obj)
-        if self_var.need_guard_check:
-            try:
-                method_var = vs.make_var_from_value(
-                    method, True, self.state.fx_graph,
-                    f"({self_var.extract_code_at_start}).{inst.argval}")
-            except Exception as e:
-                self.restart(f"Exception during LOAD_METHOD: {e}")
-                return
-            self.state.add_object(method_var, method)
+        method_var = vs.make_var_from_value(
+            method, self_var.need_guard_check, self.state.fx_graph,
+            f"({self_var.extract_code_at_start}).{inst.argval}"
+            if self_var.need_guard_check else "")
+        if isinstance(self_var, vs.ModuleVar) and isinstance(
+                method_var, vs.FunctionVar):
+            method_var.src = self_var.src
+        self.state.add_object(method_var, method)
+
+    def LOAD_ATTR(self, inst: Instruction) -> None:
+        obj = get_value_stack_from_top(self.frame, 0)
+        attr = getattr(obj, inst.argval)
+        obj_var = self.state.objects.get(obj)
+        attr_var = vs.make_var_from_value(
+            attr, obj_var.need_guard_check, self.state.fx_graph,
+            f"({obj_var.extract_code_at_start}).{inst.argval}"
+            if obj_var.need_guard_check else "")
+        if isinstance(obj_var, vs.ModuleVar):
+            if isinstance(attr_var, vs.ModuleVar):
+                attr_var.src = obj_var.src
+        self.state.add_object(attr_var, attr)
 
     def CALL_METHOD(self, inst: Instruction) -> None:
         num_args = inst.argval

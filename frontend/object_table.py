@@ -1,4 +1,4 @@
-from typing import Any, get_args
+from typing import Any, get_args, Optional
 from .variables.base import Variable
 from .variables import CONST_TYPES, ScalarVar, make_var_from_value
 from .utils import NullObject
@@ -29,8 +29,13 @@ class ObjectTable:
             return self.objs[id(value)]
         elif allow_unexist_const and isinstance(value, get_args(CONST_TYPES)):
             return make_var_from_value(value, False)
-
         raise RuntimeError(f"Object {value} not found in object table")
+
+    def get_or_none(self, value: Any) -> Optional[Variable]:
+        if id(value) in self.objs:
+            return self.objs[id(value)]
+        else:
+            return None
 
     def contains(self, value: Any) -> bool:
         return id(value) in self.objs

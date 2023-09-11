@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Union, Optional
+from typing import TYPE_CHECKING, Union, Optional, Callable, Any
 
 import torch.fx
 from types import ModuleType
@@ -103,28 +103,26 @@ class SliceVar(Variable):
         return slice(self.start, self.stop, self.step)
 
 
-class ModuleSrc(Enum):
+class ObjectSrc(Enum):
     USER_DEFINED = 0
     TORCH = 1
 
 
-torch_modules = set([torch, torch.nn, torch.nn.functional])
+torch_modules = set([torch])
 
 
 class ModuleVar(Variable):
     module: ModuleType
-    src: ModuleSrc
+    src: ObjectSrc
 
     def __init__(self,
                  module: ModuleType,
-                 src: ModuleSrc,
+                 src: ObjectSrc,
                  need_guard_check: bool,
                  extract_code_at_start: str = "") -> None:
         super().__init__(need_guard_check, extract_code_at_start)
         self.module = module
         self.src = src
-        if src == ModuleSrc.USER_DEFINED:
-            raise NotImplementedError("not tested yet")
 
     def make_guard_inner(self, codegen: "GuardFnCodegen") -> None:
         codegen.add_check(
@@ -143,7 +141,39 @@ class ModuleVar(Variable):
                    _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: str = "") -> "ModuleVar":
         if value in torch_modules:
-            src = ModuleSrc.TORCH
+            src = ObjectSrc.TORCH
         else:
-            src = ModuleSrc.USER_DEFINED
+            src = ObjectSrc.USER_DEFINED
         return cls(value, src, need_guard_check, extract_code_at_start)
+
+
+class FunctionVar(Variable):
+    func: Callable[..., Any]
+    src: ObjectSrc
+
+    def __init__(self,
+                 func: Callable[..., Any],
+                 src: ObjectSrc,
+                 need_guard_check: bool,
+                 extract_code_at_start: str = "") -> None:
+        super().__init__(need_guard_check, extract_code_at_start)
+        self.func = func
+        self.src = src
+
+    def make_guard_inner(self, codegen: "GuardFnCodegen") -> None:
+        codegen.add_check(
+            f"id({self.extract_code_at_start}) == {id(self.func)}")
+
+    def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
+                    codegen: "GraphFnCodegen") -> None:
+        name_in_codegen = codegen.add_var(self.func, f"_{self.func.__name__}")
+        codegen.output(name_in_graph_fn, store_pos, name_in_codegen)
+
+    @classmethod
+    def from_value(cls,
+                   value: Callable[..., Any],
+                   need_guard_check: bool,
+                   _fx_graph: Optional[FxGraph] = None,
+                   extract_code_at_start: str = "") -> "FunctionVar":
+        return cls(value, ObjectSrc.USER_DEFINED, need_guard_check,
+                   extract_code_at_start)
