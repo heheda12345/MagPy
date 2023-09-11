@@ -5,7 +5,7 @@ from .scalar import ScalarVar
 from typing import Optional
 from .tensor import TensorVar
 from .torch_module import TorchModuleVar
-from .const import NullVar, NoneVar
+from .const import NullVar, NoneVar, SliceVar
 from ..fx_graph import FxGraph
 from ..utils import NullObject
 
@@ -14,10 +14,11 @@ ty2var: dict[type[Any], type[Variable]] = {
     int: ScalarVar,
     torch.Tensor: TensorVar,
     NullObject: NullVar,
-    type(None): NoneVar
+    type(None): NoneVar,
+    slice: SliceVar
 }
 
-CONST_TYPES = Union[int, float, bool, str, NullObject, None]
+CONST_TYPES = Union[int, float, bool, str, NullObject, None, slice]
 
 
 def make_var_from_value(value: Any,

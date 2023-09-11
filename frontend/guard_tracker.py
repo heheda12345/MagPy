@@ -299,6 +299,9 @@ class GuardTracker:
         obj2 = get_value_stack_from_top(self.frame, 0)
         self.call_function(operator.getitem, [obj1, obj2], {})
 
+    def BUILD_SLICE(self, _inst: Instruction) -> None:
+        pass
+
 
 trackers: list[GuardTracker] = []
 
