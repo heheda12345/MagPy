@@ -251,15 +251,23 @@ class GuardTracker:
         obj2 = get_value_stack_from_top(self.frame, 0)
         self.call_function(operator.add, [obj1, obj2], {})
 
+    def BINARY_SUBSCR(self, inst: Instruction) -> None:
+        obj1 = get_value_stack_from_top(self.frame, 1)
+        obj2 = get_value_stack_from_top(self.frame, 0)
+        self.call_function(operator.getitem, [obj1, obj2], {})
+
+    def BUILD_SLICE(self, _inst: Instruction) -> None:
+        pass
+
+    def LOAD_CONST(self, _inst: Instruction) -> None:
+        pass
+
     def LOAD_FAST(self, inst: Instruction) -> None:
         if inst.argval not in self.state.stored_locals:
             obj = self.frame.f_locals[inst.argval]
             var = vs.make_var_from_value(obj, True, self.state.fx_graph,
                                          f'locals["{inst.argval}"]')
             self.state.objects.add(var, obj)
-
-    def LOAD_CONST(self, _inst: Instruction) -> None:
-        pass
 
     # heheda: we need to make sure that no unbound LOAD_METHOD is called by python runtime to avoid NULL in stack
     def LOAD_METHOD(self, inst: Instruction) -> None:
@@ -293,14 +301,6 @@ class GuardTracker:
 
     def STORE_FAST(self, inst: Instruction) -> None:
         self.state.stored_locals.add(inst.argval)
-
-    def BINARY_SUBSCR(self, inst: Instruction) -> None:
-        obj1 = get_value_stack_from_top(self.frame, 1)
-        obj2 = get_value_stack_from_top(self.frame, 0)
-        self.call_function(operator.getitem, [obj1, obj2], {})
-
-    def BUILD_SLICE(self, _inst: Instruction) -> None:
-        pass
 
 
 trackers: list[GuardTracker] = []
