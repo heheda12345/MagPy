@@ -1,6 +1,5 @@
 from types import FrameType
 from typing import Dict, Any, Callable, List
-from abc import ABC, abstractmethod
 import logging
 import itertools
 import torch
@@ -124,13 +123,18 @@ class GuardTracker:
             return
         # call init_state after is_inject_code check to avoid frequent init_state
         if self.have_error:
-            self.init_state()
+            try:
+                self.init_state()
+            except Exception as e:
+                self.restart(f"Exception during init: {e}")
+                return
         if self.state.start_pc == -1:
             self.state.start_pc = pc
             assert self.state.start_pc >= 0
         if hasattr(self, inst.opname):
             getattr(self, inst.opname)(inst)
-            self.state.is_empty = False
+            if not self.have_error:
+                self.state.is_empty = False
         else:
             self.restart(f"unknown opcode {inst.opname}")
 
@@ -275,9 +279,13 @@ class GuardTracker:
         method = getattr(self_obj, inst.argval)
         self_var = self.state.objects.get(self_obj)
         if self_var.need_guard_check:
-            method_var = vs.make_var_from_value(
-                method, True, self.state.fx_graph,
-                f"({self_var.extract_code_at_start}).{inst.argval}")
+            try:
+                method_var = vs.make_var_from_value(
+                    method, True, self.state.fx_graph,
+                    f"({self_var.extract_code_at_start}).{inst.argval}")
+            except Exception as e:
+                self.restart(f"Exception during LOAD_METHOD: {e}")
+                return
             self.state.objects.add(method_var, method)
 
     def CALL_METHOD(self, inst: Instruction) -> None:

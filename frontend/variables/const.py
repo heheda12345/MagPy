@@ -1,6 +1,8 @@
 from typing import TYPE_CHECKING, Union, Optional
 
 import torch.fx
+from types import ModuleType
+from enum import Enum
 from .base import Variable
 from ..pycode_writer import get_float_string
 from ..fx_graph import ProxyArgs, FxGraph
@@ -99,3 +101,49 @@ class SliceVar(Variable):
 
     def as_proxy(self) -> ProxyArgs:
         return slice(self.start, self.stop, self.step)
+
+
+class ModuleSrc(Enum):
+    USER_DEFINED = 0
+    TORCH = 1
+
+
+torch_modules = set([torch, torch.nn, torch.nn.functional])
+
+
+class ModuleVar(Variable):
+    module: ModuleType
+    src: ModuleSrc
+
+    def __init__(self,
+                 module: ModuleType,
+                 src: ModuleSrc,
+                 need_guard_check: bool,
+                 extract_code_at_start: str = "") -> None:
+        super().__init__(need_guard_check, extract_code_at_start)
+        self.module = module
+        self.src = src
+        if src == ModuleSrc.USER_DEFINED:
+            raise NotImplementedError("not tested yet")
+
+    def make_guard_inner(self, codegen: "GuardFnCodegen") -> None:
+        codegen.add_check(
+            f"id({self.extract_code_at_start}) == {id(self.module)}")
+
+    def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
+                    codegen: "GraphFnCodegen") -> None:
+        name_in_codegen = codegen.add_var(self.module,
+                                          f"MODULE_{self.module.__name__}")
+        codegen.output(name_in_graph_fn, store_pos, name_in_codegen)
+
+    @classmethod
+    def from_value(cls,
+                   value: ModuleType,
+                   need_guard_check: bool,
+                   _fx_graph: Optional[FxGraph] = None,
+                   extract_code_at_start: str = "") -> "ModuleVar":
+        if value in torch_modules:
+            src = ModuleSrc.TORCH
+        else:
+            src = ModuleSrc.USER_DEFINED
+        return cls(value, src, need_guard_check, extract_code_at_start)

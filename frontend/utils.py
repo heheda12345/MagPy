@@ -97,6 +97,12 @@ def clear_force_graph_break() -> None:
     graph_breaker = None
 
 
+class UnknownTypeError(Exception):
+
+    def __init__(self, ty: type[Any]) -> None:
+        super().__init__(f"Unknown type {ty}")
+
+
 def reset() -> None:
     global graph_breaker
     graph_breaker = None
