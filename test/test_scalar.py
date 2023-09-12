@@ -1,5 +1,7 @@
 import pytest
 from frontend.compile import compile, reset
+from frontend.utils import add_force_graph_break
+from frontend.c_api import get_next_frame_id
 import logging
 from common.checker import run_and_check, HIT, MISS
 
@@ -37,11 +39,14 @@ def test_perfect(caplog):
 def test_graph_break(caplog):
     reset()
     compiled_graph_break0 = compile(graph_break0)
-    compiled_graph_break1 = compile(graph_break1)
+    add_force_graph_break(get_next_frame_id(), 4)
     run_and_check(compiled_graph_break0, [MISS], 1, caplog, 2, 3)
     run_and_check(compiled_graph_break0, [HIT], 1, caplog, 2, 3)
     run_and_check(compiled_graph_break0, [MISS], 2, caplog, 2, 4)
     run_and_check(compiled_graph_break0, [HIT], 2, caplog, 2, 4)
+
+    compiled_graph_break1 = compile(graph_break1)
+    add_force_graph_break(get_next_frame_id(), 4)
     run_and_check(compiled_graph_break1, [MISS], 4, caplog, 2, 1)
     run_and_check(compiled_graph_break1, [HIT, HIT], 4, caplog, 2, 1)
     run_and_check(compiled_graph_break1, [MISS, HIT], 5, caplog, 2, 2)
@@ -80,11 +85,84 @@ def test_perfect_float(caplog):
 
 def test_graph_break_float(caplog):
     reset()
+    add_force_graph_break(get_next_frame_id(), 4)
     compiled_graph_break0 = compile(graph_break0_float)
-    compiled_graph_break1 = compile(graph_break1_float)
     run_and_check(compiled_graph_break0, [MISS], 1, caplog, 2.0, 3.0)
     run_and_check(compiled_graph_break0, [HIT], 1, caplog, 2.0, 3.0)
     run_and_check(compiled_graph_break0, [MISS], 2, caplog, 2.5, 4.0)
     run_and_check(compiled_graph_break0, [HIT], 2, caplog, 2.5, 4.0)
+
+    add_force_graph_break(get_next_frame_id(), 4)
+    compiled_graph_break1 = compile(graph_break1_float)
     run_and_check(compiled_graph_break1, [MISS], 4, caplog, 2.0, 1.0)
     run_and_check(compiled_graph_break1, [HIT, HIT], 4, caplog, 2.0, 1.0)
+
+
+def binary_add(a, b):
+    return a + b
+
+
+def binary_subtract(a, b):
+    return a - b
+
+
+def binary_multiply(a, b):
+    return a * b
+
+
+def binary_floor_divide(a, b):
+    return a // b
+
+
+def binary_true_divide(a, b):
+    return a / b
+
+
+def binary_mod(a, b):
+    return a % b
+
+
+def binary_power(a, b):
+    return a**b
+
+
+def binary_lshift(a, b):
+    return a << b
+
+
+def binary_rshift(a, b):
+    return a >> b
+
+
+def binary_and(a, b):
+    return a & b
+
+
+def binary_xor(a, b):
+    return a ^ b
+
+
+def binary_or(a, b):
+    return a | b
+
+
+def test_binary_op(caplog):
+    reset()
+    funcs = [
+        binary_add, binary_subtract, binary_multiply, binary_floor_divide,
+        binary_true_divide, binary_mod, binary_power, binary_lshift,
+        binary_rshift, binary_and, binary_xor, binary_or
+    ]
+    compiled_funcs = [compile(func) for func in funcs]
+    cache_cnt = 0
+    for func, compiled_func in zip(funcs, compiled_funcs):
+        for a in [1, 2, 3]:
+            for b in [1, 2, 3]:
+                cache_cnt += 1
+                run_and_check(compiled_func, [MISS], cache_cnt, caplog,
+                              func(a, b), a, b)
+    for func, compiled_func in zip(funcs, compiled_funcs):
+        for a in [1, 2, 3]:
+            for b in [1, 2, 3]:
+                run_and_check(compiled_func, [HIT], cache_cnt, caplog,
+                              func(a, b), a, b)

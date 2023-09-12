@@ -298,10 +298,46 @@ class GuardTracker:
             return
         raise NotImplementedError
 
-    def BINARY_ADD(self, _inst: Instruction) -> None:
+    def binary_operation(self, func: Callable[..., Any]) -> None:
         obj1 = get_value_stack_from_top(self.frame, 1)
         obj2 = get_value_stack_from_top(self.frame, 0)
-        self.call_function(operator.add, [obj1, obj2], {})
+        self.call_function(func, [obj1, obj2], {})
+
+    def BINARY_ADD(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.add)
+
+    def BINARY_SUBTRACT(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.sub)
+
+    def BINARY_MULTIPLY(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.mul)
+
+    def BINARY_FLOOR_DIVIDE(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.floordiv)
+
+    def BINARY_TRUE_DIVIDE(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.truediv)
+
+    def BINARY_MODULO(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.mod)
+
+    def BINARY_POWER(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.pow)
+
+    def BINARY_LSHIFT(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.lshift)
+
+    def BINARY_RSHIFT(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.rshift)
+
+    def BINARY_AND(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.and_)
+
+    def BINARY_XOR(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.xor)
+
+    def BINARY_OR(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.or_)
 
     def BINARY_SUBSCR(self, inst: Instruction) -> None:
         obj1 = get_value_stack_from_top(self.frame, 1)
