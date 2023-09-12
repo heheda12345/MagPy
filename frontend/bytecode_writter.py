@@ -235,10 +235,11 @@ def fix_instructions_for_assemble(instructions: List[Instruction],
     fix_vars(instructions, code_options)
     fix_constants(instructions, code_options)
     dirty = True
+    update_offsets(instructions)
     while dirty:
-        update_offsets(instructions)
         devirtualize_jumps(instructions)
         dirty = fix_extended_args(instructions) > 0
+        update_offsets(instructions)
     remove_extra_line_nums(instructions)
 
 

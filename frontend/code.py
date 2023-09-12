@@ -64,20 +64,25 @@ class ProcessedCode:
         self.original_pc = {}
         pc = -1
         for inst in original_insts:
+            print(inst, inst.offset)
+        print('----')
+        for inst in guard_insts:
+            print(inst, inst.offset)
+        for inst in original_insts:
             assert inst.offset is not None
         for inst in guard_insts:
             assert inst.offset is not None
         for inst in reversed(original_insts):
             if inst.opname != "EXTENDED_ARG":
                 pc = cast(int, inst.offset) // 2  # mypy: no-strict-optional
-            self.original_pc[inst] = pc
+                self.original_pc[inst] = pc
 
         self.guarded_pc = {}
         pc = -1
         for inst in reversed(guard_insts):
             if inst.opname != "EXTENDED_ARG":
                 pc = cast(int, inst.offset) // 2
-            self.guarded_pc[inst] = pc
+                self.guarded_pc[inst] = pc
 
         self.pc_guarded_to_origin = {}
         for inst in guard_insts:
@@ -103,6 +108,9 @@ class ProcessedCode:
         returns -2 if the lasti is outside tracing region
         '''
         pc = lasti // 2
+        while pc < len(self.guard_insts
+                      ) and self.guard_insts[pc].opname == "EXTENDED_ARG":
+            pc += 1
         if pc not in self.pc_guarded_to_origin:
             return -2
 
@@ -110,6 +118,9 @@ class ProcessedCode:
 
     def get_orig_inst(self, lasti: int) -> tuple[int, Optional[Instruction]]:
         pc = lasti // 2
+        while pc < len(self.guard_insts
+                      ) and self.guard_insts[pc].opname == "EXTENDED_ARG":
+            pc += 1
         assert pc in self.pc_guarded_to_origin, (
             "pc %d not in pc_guarded_to_origin" % pc)
         origin_pc = self.pc_guarded_to_origin[pc]
@@ -121,6 +132,9 @@ class ProcessedCode:
 
     def get_next_orig_pc(self, lasti: int) -> int:
         pc = lasti // 2
+        while pc < len(self.guard_insts
+                      ) and self.guard_insts[pc].opname == "EXTENDED_ARG":
+            pc += 1
         if pc not in self.next_original_pc:
             raise ValueError("pc %d not in next_original_pc" % pc)
 
