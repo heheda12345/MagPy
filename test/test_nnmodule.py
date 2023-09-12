@@ -1,6 +1,7 @@
 import pytest
 from frontend.compile import compile, reset
 from frontend.utils import add_force_graph_break
+from frontend.c_api import get_next_frame_id
 import logging
 import torch
 from common.checker import run_and_check, HIT, MISS
@@ -24,7 +25,7 @@ def test_call_method(caplog):
         model = Model().eval()
         x = torch.randn(1, 10)
         expect_result = model(x)
-        add_force_graph_break(0, 3)
+        add_force_graph_break(get_next_frame_id(), 3)
         compiled_model = compile(model)
         run_and_check(compiled_model, [MISS], 2, caplog, expect_result, x)
         run_and_check(compiled_model, [HIT, HIT], 2, caplog, expect_result, x)

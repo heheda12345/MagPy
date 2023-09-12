@@ -58,3 +58,7 @@ def stack_effect(op: int, oparg: int,
 
 def set_null_object(obj: Any) -> None:
     pass
+
+
+def get_next_frame_id() -> int:
+    pass

@@ -456,6 +456,11 @@ static PyMethodDef _methods[] = {
          Py_RETURN_NONE;
      },
      METH_VARARGS, NULL},
+    {"get_next_frame_id",
+     [](PyObject *self, PyObject *args) {
+         return PyLong_FromLong(frame_count);
+     },
+     METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
