@@ -64,11 +64,6 @@ class ProcessedCode:
         self.original_pc = {}
         pc = -1
         for inst in original_insts:
-            print(inst, inst.offset)
-        print('----')
-        for inst in guard_insts:
-            print(inst, inst.offset)
-        for inst in original_insts:
             assert inst.offset is not None
         for inst in guard_insts:
             assert inst.offset is not None

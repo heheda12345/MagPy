@@ -3,7 +3,7 @@ from types import ModuleType
 import torch
 from .base import Variable
 from .scalar import ScalarVar
-from .tensor import TensorVar
+from .tensor import TensorVar, TorchParamVar
 from .torch_module import TorchModuleVar
 from .const import NullVar, NoneVar, SliceVar, ModuleVar, FunctionVar, ObjectSrc
 from ..fx_graph import FxGraph
@@ -16,6 +16,7 @@ ty2var: dict[type[Any], type[Variable]] = {
     NullObject: NullVar,
     type(None): NoneVar,
     slice: SliceVar,
+    torch.nn.Parameter: TorchParamVar,
 }
 
 CONST_TYPES = Union[int, float, bool, str, NullObject, None, slice]
@@ -43,5 +44,5 @@ def make_var_from_value(value: Any,
 __all__ = [
     'make_var_from_value', 'Variable', 'ScalarVar', 'TensorVar',
     'TorchModuleVar', 'NullVar', 'NoneVar', "ModuleVar", "FunctionVar",
-    "ObjectSrc"
+    "TorchParamVar", "ObjectSrc"
 ]

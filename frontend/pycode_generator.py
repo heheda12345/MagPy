@@ -44,13 +44,14 @@ class GraphFnCodegen:
         gen_imports(writer, self.imports)
         writer.wl(f"def fn(locals):")
         writer.block_start()
-        writer.wl(f"print('running graph_fn (key = {self.key})', locals)")
+        writer.wl(
+            f"print('running graph_fn (key = {self.key})', locals.keys())")
         # TODO: simplify
         writer.wl(f"graph_out = compiled_graph({', '.join(self.graph_inputs)})")
-        writer.wl(f"print('graph_out', graph_out)")
+        # writer.wl(f"print('graph_out', graph_out)")
         for target_name, _, code in self.outputs:
             writer.wl(f"{target_name} = {code}")
-        writer.wl(f"print('graph_fn done', locals)")
+        # writer.wl(f"print('graph_fn done', locals)")
         graph_retures = ", ".join(
             [f"{target_name}" for target_name, _, _ in self.outputs])
         writer.wl(f"return {graph_retures}")
@@ -109,7 +110,8 @@ class GuardFnCodegen:
         writer.block_start()
         writer.write(f"try:")
         writer.block_start()
-        writer.wl(f"print('running guard_fn (key = {self.key})', locals)")
+        writer.wl(
+            f"print('running guard_fn (key = {self.key})', locals.keys())")
         if len(self.checks) == 0:
             writer.wl(f"ok = True")
         else:

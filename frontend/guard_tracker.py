@@ -14,7 +14,7 @@ from . import variables as vs
 from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject
 from .object_table import ObjectTable
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
-from .fx_graph import FxGraph, fx_graph_functions, get_frame_root, is_leaf_module
+from .fx_graph import FxGraph, fx_graph_functions, get_frame_root, is_leaf_module, ProxyArgs
 from .bytecode_analysis import livevars_analysis
 
 
@@ -28,6 +28,7 @@ class State:
     stored_locals: set[str]
     stored_globals: set[str]
     submodule_paths: dict[str, torch.nn.Module]
+    subparam_paths: dict[str, torch.nn.Parameter]
     written: bool
 
     def __init__(self, root: torch.nn.Module) -> None:
@@ -44,16 +45,26 @@ class State:
         self.stored_locals = set()
         self.stored_globals = set()
         self.submodule_paths = {mod: name for name, mod in root.named_modules()}
+        self.subparam_paths = {
+            param: name for name, param in root.named_parameters()
+        }
         self.written = False
 
     def proxy_args_kwargs(
         self, args: list[Any], kwargs: dict[str, Any]
     ) -> tuple[tuple[torch.fx.Proxy, ...], dict[str, torch.fx.Proxy]]:
+
+        def as_proxy(var: vs.Variable) -> ProxyArgs:
+            if isinstance(var, vs.TorchParamVar):
+                return self.fx_graph.create_proxy(
+                    "get_attr", self.subparam_paths[var.param], (), {})
+            return var.as_proxy()
+
         proxy_args = tuple(
-            self.objects.get(arg, allow_unexist_const=True).as_proxy()
+            as_proxy(self.objects.get(arg, allow_unexist_const=True))
             for arg in args)
         proxy_kwargs = {
-            key: self.objects.get(arg, allow_unexist_const=True).as_proxy()
+            key: as_proxy(self.objects.get(arg, allow_unexist_const=True))
             for key, arg in kwargs.items()
         }
         return proxy_args, proxy_kwargs

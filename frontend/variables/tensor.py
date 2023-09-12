@@ -84,7 +84,6 @@ class TensorVar(Variable):
         return self.proxy
 
     def tensor_guard_check(self, value: torch.Tensor) -> bool:
-        print("checking", value)
         return isinstance(value, torch.Tensor) and self.dtype == value.dtype and self.device == value.device and \
             self.layout == value.layout and self.ndim == value.ndim and \
             self.requires_grad == value.requires_grad and \
@@ -105,3 +104,34 @@ class TensorVar(Variable):
                     codegen: "GraphFnCodegen") -> None:
         name_in_graph_output = codegen.add_graph_output(self.proxy)
         codegen.output(name_in_graph_fn, store_pos, name_in_graph_output)
+
+
+class TorchParamVar(Variable):
+    param: torch.nn.Parameter
+
+    def __init__(self,
+                 param: torch.nn.Parameter,
+                 need_guard_check: bool,
+                 extract_code_at_start: str = "") -> None:
+        super().__init__(need_guard_check, extract_code_at_start)
+        assert extract_code_at_start != ""
+        self.param = param
+
+    @classmethod
+    def from_value(cls,
+                   value: torch.nn.Parameter,
+                   need_guard_check: bool,
+                   _fx_graph: Optional[FxGraph] = None,
+                   extract_code_at_start: str = "") -> "TorchParamVar":
+        return cls(value, need_guard_check, extract_code_at_start)
+
+    def make_guard_inner(self, codegen: GuardFnCodegen) -> None:
+        codegen.add_check(
+            f"id({self.extract_code_at_start}) == {id(self.param)}")
+
+    def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
+                    codegen: "GraphFnCodegen") -> None:
+        codegen.output(name_in_graph_fn, store_pos, self.extract_code_at_start)
+
+    def as_proxy(self) -> "ProxyArgs":
+        raise ValueError("TorchParamVar.as_proxy should not be called")

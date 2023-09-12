@@ -19,6 +19,17 @@ class Model(torch.nn.Module):
         return z
 
 
+class ModelParam(torch.nn.Module):
+
+    def __init__(self):
+        super(ModelParam, self).__init__()
+        self.param = torch.nn.Parameter(torch.randn(5, 5))
+
+    def forward(self, x):
+        y = self.param + x
+        return y
+
+
 def test_call_method(caplog):
     reset()
     with torch.no_grad():
@@ -36,6 +47,17 @@ def test_module(caplog):
     with torch.no_grad():
         model = Model().eval()
         x = torch.randn(1, 10)
+        expect_result = model(x)
+        compiled_model = compile(model)
+        run_and_check(compiled_model, [MISS], 1, caplog, expect_result, x)
+        run_and_check(compiled_model, [HIT], 1, caplog, expect_result, x)
+
+
+def test_module_param(caplog):
+    reset()
+    with torch.no_grad():
+        model = ModelParam().eval()
+        x = torch.randn(1, 5)
         expect_result = model(x)
         compiled_model = compile(model)
         run_and_check(compiled_model, [MISS], 1, caplog, expect_result, x)
