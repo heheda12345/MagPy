@@ -276,6 +276,12 @@ class GuardTracker:
     def all_scalar_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
         return all(is_scalar(i) for i in itertools.chain(args, kwargs.values()))
 
+    @classmethod
+    def has_tuple_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
+        return any(
+            isinstance(i, tuple)
+            for i in itertools.chain(args, kwargs.values()))
+
     def call_function(
         self,
         func: Callable[..., Any],
@@ -295,6 +301,8 @@ class GuardTracker:
                     return
 
         elif self.all_scalar_arg(args, kwargs):
+            return
+        elif self.has_tuple_arg(args, kwargs):
             return
         raise NotImplementedError
 
