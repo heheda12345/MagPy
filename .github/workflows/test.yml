@@ -18,10 +18,12 @@ jobs:
         run: |
           source ~/venv/frontend-env/bin/activate
           pip install --force-reinstall .
+          cd scripts && BUILD_DIR=~/frontend ./compile_longobj.sh && cd ..
       - name: Test with pytest
         run: |
           source /opt/spack/share/spack/setup-env.sh
           spack load cuda@11.8.0 /jb4mlxg
+          spack load python@3.9.12%gcc@=11.3.0
           source ~/venv/frontend-env/bin/activate
           pip install --upgrade -r requirements.txt -f https://download.pytorch.org/whl/torch_stable.html
-          pytest -vs test
+          LD_PRELOAD=~/frontend/ldlong.v3.9.12.so pytest -vs test
