@@ -19,11 +19,12 @@ if [ ! -f $BUILD_DIR/ldlong.${TAG}.so ]; then
     SCRIPT_DIR=`pwd`
     pushd $CPYTHON_DIR
     git checkout $TAG
+    git checkout -- ${CPYTHON_DIR}/Objects/longobject.c
     ./configure '--without-pydebug' '--enable-shared' '--without-ensurepip' '--with-openssl=/usr' '--with-dbmliborder=gdbm' '--with-system-expat' '--with-system-ffi' '--enable-loadable-sqlite-extensions' 'CFLAGS=-fPIC'
     make clean
     make -j
     git apply ${SCRIPT_DIR}/longobject.${TAG}.patch
-    gcc -c -Wno-unused-result -Wsign-compare -DNDEBUG -g -fwrapv -O3 -Wall -fPIC   -std=c99 -Wextra -Wno-unused-result -Wno-unused-parameter -Wno-missing-field-initializers -Werror=implicit-function-declaration -fvisibility=hidden -I${CPYTHON_DIR}/Include/internal -I${CPYTHON_DIR} -I${CPYTHON_DIR}/Include -DPy_BUILD_CORE -o ${BUILD_DIR}/ldlong.o ${CPYTHON_DIR}/Objects/longobject.${TAG}.c
+    gcc -c -Wno-unused-result -Wsign-compare -DNDEBUG -g -fwrapv -O3 -Wall -fPIC   -std=c99 -Wextra -Wno-unused-result -Wno-unused-parameter -Wno-missing-field-initializers -Werror=implicit-function-declaration -fvisibility=hidden -I${CPYTHON_DIR}/Include/internal -I${CPYTHON_DIR} -I${CPYTHON_DIR}/Include -DPy_BUILD_CORE -o ${BUILD_DIR}/ldlong.o ${CPYTHON_DIR}/Objects/longobject.c
     gcc -shared ${BUILD_DIR}/ldlong.o -o ${BUILD_DIR}/ldlong.${TAG}.so -ldl
     git checkout -- ${CPYTHON_DIR}/Objects/longobject.c
     popd

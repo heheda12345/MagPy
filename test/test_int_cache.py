@@ -1,4 +1,7 @@
+def fn(a, b, c, d):
+    return a + b, c + d
+
+
 def test_int_cache():
-    a = 1
-    b = 1
+    a, b = fn(1, 4, 2, 3)
     assert id(a) != id(b)
