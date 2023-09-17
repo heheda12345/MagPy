@@ -1,7 +1,9 @@
 import inspect
 import dis
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from .bytecode_writter import get_code_keys
+if TYPE_CHECKING:
+    from .instruction import Instruction
 import random
 
 
@@ -39,6 +41,10 @@ def print_bytecode() -> None:
 
 def is_scalar(value: Any) -> bool:
     return type(value) in {int, float, bool, str}
+
+
+def is_call_bytecode(inst: 'Instruction') -> bool:
+    return inst.opname.startswith("CALL_")
 
 
 random_state = None

@@ -189,7 +189,7 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     Py_DECREF(postprocess);
     Py_DECREF(trace_func);
 
-    set_eval_frame_callback(callback);
+    // set_eval_frame_callback(callback);
     return result;
 }
 
@@ -229,20 +229,12 @@ inline static void enable_eval_frame_default(PyThreadState *tstate) {
 }
 
 static PyObject *increse_working_threads(PyThreadState *tstate) {
-    active_working_threads = active_working_threads + 1;
-    if (active_working_threads > 0) {
-        enable_eval_frame_shim(tstate);
-    }
+    enable_eval_frame_shim(tstate);
     Py_RETURN_NONE;
 }
 
 static PyObject *decrese_working_threads(PyThreadState *tstate) {
-    if (active_working_threads > 0) {
-        active_working_threads = active_working_threads - 1;
-        if (active_working_threads == 0) {
-            enable_eval_frame_default(tstate);
-        }
-    }
+    enable_eval_frame_default(tstate);
     Py_RETURN_NONE;
 }
 

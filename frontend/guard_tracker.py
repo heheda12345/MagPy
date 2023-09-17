@@ -7,11 +7,11 @@ import torch.fx
 import operator
 import dis
 from .code import ProcessedCode, load_code
-from .c_api import get_value_stack_from_top, get_value_stack_size
+from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache, StoreInStack, StoreInLocal
 from . import variables as vs
-from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject
+from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode
 from .object_table import ObjectTable
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
 from .fx_graph import FxGraph, fx_graph_functions, get_frame_root, is_leaf_module, ProxyArgs
@@ -147,6 +147,7 @@ class GuardTracker:
     def record(
             self, frame: FrameType, frame_id: int
     ) -> None:  # pass frame and frame_id only for assertion
+        # print("frame_id:", frame_id, "self.frame_id:", self.frame_id)
         assert frame_id == self.frame_id
         assert frame == self.frame
         self.process_last_inst()
@@ -155,6 +156,10 @@ class GuardTracker:
         if inst is None:
             self.restart(
                 f"running injected code (f_lasti={self.frame.f_lasti})")
+            if self.code.get_inst(self.frame.f_lasti).opname == 'RETURN_VALUE':
+                if trackers[-1] == self:
+                    pop_tracker(self.frame_id)
+                set_eval_frame(None)
             return
         if has_force_graph_break(frame_id, pc):
             assert inst.opcode != dis.opmap["LOAD_METHOD"]
@@ -296,7 +301,13 @@ class GuardTracker:
 
         elif self.all_scalar_arg(args, kwargs):
             return
-        raise NotImplementedError
+
+        self.restart(f"call_function {func}")
+
+        from .tracer import get_process_frame
+        preprocess_frame, post_process_frame = get_process_frame(func, True)
+        prior = set_eval_frame((preprocess_frame, post_process_frame))
+        assert prior is None
 
     def binary_operation(self, func: Callable[..., Any]) -> None:
         obj1 = get_value_stack_from_top(self.frame, 1)
@@ -391,6 +402,16 @@ class GuardTracker:
                 attr_var.src = obj_var.src
         self.state.add_object(attr_var, attr)
 
+    def CALL_FUNCTION(self, inst: Instruction) -> None:
+        num_args = inst.argval
+        args = [
+            get_value_stack_from_top(self.frame, i)
+            for i in range(num_args - 1, -1, -1)
+        ]
+        kwargs: dict[str, Any] = {}
+        func = get_value_stack_from_top(self.frame, num_args)
+        self.call_function(func, args, kwargs)
+
     def CALL_METHOD(self, inst: Instruction) -> None:
         num_args = inst.argval
         args = [
@@ -407,9 +428,6 @@ class GuardTracker:
             # Stack layout: ... | method | self | arg1 | ... | argN
             self.call_function(meth_val, [self_val] + args, kwargs)
 
-    def RETURN_VALUE(self, _inst: Instruction) -> None:
-        self.restart("return value")
-
     def STORE_FAST(self, inst: Instruction) -> None:
         self.state.add_stored_locals(inst.argval)
 
@@ -418,18 +436,23 @@ trackers: list[GuardTracker] = []
 
 
 def push_tracker(frame: FrameType, frame_id: int) -> None:
-    print("init tracker", frame_id, "frame", hex(id(frame)), "frame_id",
-          frame_id)
     trackers.append(GuardTracker(frame, frame_id))
+    print("push tracker", frame_id, "frame", hex(id(frame)), "frame_id",
+          frame_id, "all", [t.frame_id for t in trackers])
 
 
 def pop_tracker(frame_id: int) -> None:
+    print("before pop_tracker", [t.frame_id for t in trackers])
     to_pop = trackers.pop()
     assert to_pop.state.is_empty
     assert to_pop.frame_id == frame_id
 
 
 def record(frame: FrameType, frame_id: int) -> None:
+    if frame_id != trackers[-1].frame_id:
+        last_inst = trackers[-1].code.get_inst(trackers[-1].frame.f_lasti)
+        if is_call_bytecode(last_inst):
+            push_tracker(frame, frame_id)
     trackers[-1].record(frame, frame_id)
 
 

@@ -417,7 +417,8 @@ def add_name(code_options: Dict[str, Any], varnames: List[str],
     code_options["co_nlocals"] = len(code_options["co_varnames"])
 
 
-def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
+def rewrite_bytecode(code: types.CodeType, frame_id: int,
+                     is_callee: bool) -> types.CodeType:
     original_instructions = get_instructions(code)
     instructions = copy.deepcopy(original_instructions)
     virtualize_jumps(instructions)
@@ -429,14 +430,19 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
     # list of (start_pc, traced_instructions)
     run_traced_insts: list[tuple[int, list[Instruction]]] = []
     in_trace_insts = []
-    final_insts = [
-        ci("LOAD_GLOBAL", "disable_trace"),
-        ci("LOAD_CONST", frame_id),
-        ci("CALL_FUNCTION", 1),
-        ci("POP_TOP"),
-        ci("RETURN_VALUE")
-    ]
-    in_trace_insts.extend(final_insts[:3])
+    if is_callee:
+        final_insts = [
+            ci("RETURN_VALUE"),
+        ]
+    else:
+        final_insts = [
+            ci("LOAD_GLOBAL", "disable_trace"),
+            ci("LOAD_CONST", frame_id),
+            ci("CALL_FUNCTION", 1),
+            ci("POP_TOP"),
+            ci("RETURN_VALUE")
+        ]
+    in_trace_insts.extend(final_insts)
     new_names_all: dict[str, set[str]] = {"varnames": set(), "names": set()}
     for start_pc, callsite_id in frame_cache.callsite_id.items():
         cached_graphs = frame_cache.cached_graphs[start_pc]
@@ -462,6 +468,15 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
     run_traced_insts.reverse()
     for start_pc, traced_code in run_traced_insts:
         instructions.extend(traced_code)
+    if is_callee:
+        disable_trace_at_start = [
+            ci("LOAD_GLOBAL", "disable_trace"),
+            ci("LOAD_CONST", frame_id),
+            ci("CALL_FUNCTION", 1),
+            ci("POP_TOP"),
+        ]
+        in_trace_insts.extend(disable_trace_at_start[:-1])
+        instructions = disable_trace_at_start + instructions
     instructions.extend(final_insts)
     print("guarded code")
     print(format_insts(instructions))
