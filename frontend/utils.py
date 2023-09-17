@@ -1,10 +1,11 @@
 import inspect
 import dis
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Callable
+import random
+import operator
 from .bytecode_writter import get_code_keys
 if TYPE_CHECKING:
     from .instruction import Instruction
-import random
 
 
 class NullObject:
@@ -17,7 +18,7 @@ class NullObject:
     '''
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        print("calling unbound method", args[0], args[1:], kwargs)
+        print("calling unbound method")
         return args[0](*args[1:], **kwargs)
 
 
@@ -45,6 +46,54 @@ def is_scalar(value: Any) -> bool:
 
 def is_call_bytecode(inst: 'Instruction') -> bool:
     return inst.opname.startswith("CALL_")
+
+
+fx_graph_functions: set[Callable[..., Any]] = {
+    operator.pos,
+    operator.neg,
+    operator.not_,
+    operator.invert,
+    operator.pow,
+    operator.mul,
+    operator.matmul,
+    operator.floordiv,
+    operator.truediv,
+    operator.mod,
+    operator.add,
+    operator.sub,
+    operator.getitem,
+    operator.lshift,
+    operator.rshift,
+    operator.and_,
+    operator.or_,
+    operator.xor,
+    # operator.ipow,
+    # operator.imul,
+    # operator.imatmul,
+    # operator.ifloordiv,
+    # operator.itruediv,
+    # operator.imod,
+    # operator.iadd,
+    # operator.isub,
+    # operator.ilshift,
+    # operator.irshift,
+    # operator.iand,
+    # operator.ixor,
+    # operator.ior,
+}
+
+
+def is_user_defined_func(func: Callable[..., Any]) -> bool:
+    if func in fx_graph_functions:
+        return False
+    module = inspect.getmodule(func)
+    if module is None:
+        return True
+    module_pack = module.__package__
+    if module_pack is None:
+        return True
+    root_module = module_pack.split('.')[0]
+    return root_module not in ('math', 'builtins', 'torch', 'numpy')
 
 
 random_state = None

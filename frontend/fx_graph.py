@@ -1,45 +1,6 @@
 from typing import Any, Callable, Dict, Optional, Tuple, Union
-import operator
 import torch
 import torch.fx
-
-
-def fx_graph_functions() -> set[Callable[..., Any]]:
-    fns: set[Callable[..., Any]] = {
-        operator.pos,
-        operator.neg,
-        operator.not_,
-        operator.invert,
-        operator.pow,
-        operator.mul,
-        operator.matmul,
-        operator.floordiv,
-        operator.truediv,
-        operator.mod,
-        operator.add,
-        operator.sub,
-        operator.getitem,
-        operator.lshift,
-        operator.rshift,
-        operator.and_,
-        operator.or_,
-        operator.xor,
-        # operator.ipow,
-        # operator.imul,
-        # operator.imatmul,
-        # operator.ifloordiv,
-        # operator.itruediv,
-        # operator.imod,
-        # operator.iadd,
-        # operator.isub,
-        # operator.ilshift,
-        # operator.irshift,
-        # operator.iand,
-        # operator.ixor,
-        # operator.ior,
-    }
-    return fns
-
 
 BaseArgumentTypes = Union[
     str,

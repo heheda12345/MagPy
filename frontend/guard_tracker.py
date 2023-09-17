@@ -11,10 +11,10 @@ from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_fram
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache, StoreInStack, StoreInLocal
 from . import variables as vs
-from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode
+from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, is_user_defined_func
 from .object_table import ObjectTable
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
-from .fx_graph import FxGraph, fx_graph_functions, get_frame_root, is_leaf_module, ProxyArgs
+from .fx_graph import FxGraph, get_frame_root, is_leaf_module, ProxyArgs
 from .bytecode_analysis import livevars_analysis
 
 
@@ -287,9 +287,15 @@ class GuardTracker:
         args: List[Any],
         kwargs: Dict[str, Any],
     ) -> None:
-        if self.has_tensor_arg(args, kwargs):
-            if func in fx_graph_functions() or isinstance(
-                    func, torch.nn.Module):
+        if is_user_defined_func(func):
+            self.restart(f"call_function {func}")
+            from .tracer import get_process_frame
+            preprocess_frame, post_process_frame = get_process_frame(func, True)
+            prior = set_eval_frame((preprocess_frame, post_process_frame))
+            assert prior is None
+            return
+        elif self.has_tensor_arg(args, kwargs):
+            if func in fx_graph_functions or isinstance(func, torch.nn.Module):
                 self.state.record_function(func, args, kwargs)
                 return
             func_var = self.state.objects.get_or_none(func)
@@ -301,13 +307,6 @@ class GuardTracker:
 
         elif self.all_scalar_arg(args, kwargs):
             return
-
-        self.restart(f"call_function {func}")
-
-        from .tracer import get_process_frame
-        preprocess_frame, post_process_frame = get_process_frame(func, True)
-        prior = set_eval_frame((preprocess_frame, post_process_frame))
-        assert prior is None
 
     def binary_operation(self, func: Callable[..., Any]) -> None:
         obj1 = get_value_stack_from_top(self.frame, 1)

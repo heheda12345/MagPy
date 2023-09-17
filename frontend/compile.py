@@ -2,9 +2,11 @@ import dis
 import sys
 import traceback
 from types import FrameType, CodeType
-from typing import Any, Tuple, Callable
+from typing import Any, Tuple, Callable, cast
 import logging
+import inspect
 import torch
+from . import tracer, utils
 from .c_api import set_eval_frame, set_skip_files, guard_match, c_reset, set_null_object
 from .bytecode_writter import rewrite_bytecode
 from .tracer import enable_trace, disable_trace, get_trace_func, get_process_frame
@@ -42,7 +44,12 @@ init = False
 def compile(f: Callable[..., Any]) -> Callable[..., Any]:
     global init
     if not init:
-        set_skip_files(set())
+        nn_module = inspect.getmodule(torch.nn.Module)
+        assert nn_module is not None
+        set_skip_files(
+            set({
+                cast(str, nn_module.__file__), tracer.__file__, utils.__file__
+            }))
         set_null_object(null_object)
         init = True
         import builtins
