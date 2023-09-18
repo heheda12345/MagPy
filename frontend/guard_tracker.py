@@ -1,5 +1,6 @@
 from types import FrameType
 from typing import Dict, Any, Callable, List
+import inspect
 import logging
 import itertools
 import torch
@@ -11,11 +12,12 @@ from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_fram
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache, StoreInStack, StoreInLocal
 from . import variables as vs
-from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, is_user_defined_func
+from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, is_user_defined_func, UnknownTypeError
 from .object_table import ObjectTable
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
 from .fx_graph import FxGraph, get_frame_root, is_leaf_module, ProxyArgs
 from .bytecode_analysis import livevars_analysis
+from .variables.tuple import TupleVar
 
 
 class State:
@@ -67,6 +69,7 @@ class State:
             key: as_proxy(self.objects.get(arg, allow_unexist_const=True))
             for key, arg in kwargs.items()
         }
+
         return proxy_args, proxy_kwargs
 
     def record_function(self, func: Callable[..., Any], args: List[Any],
@@ -220,8 +223,17 @@ class GuardTracker:
         # TODO: can be optimized by only reproduce the modified variables
         stack_size = get_value_stack_size(self.frame)
         for i in range(stack_size):
+            # print("tuple comes to here")
             value = get_value_stack_from_top(self.frame, i)
             var = self.state.objects.get(value, allow_unexist_const=True)
+            # if isinstance(var, TupleVar):
+            #     j = 0
+            #     for sub_value in var.value:
+            #         sub_obj = self.state.objects.get(sub_value, allow_unexist_const=True)
+            #         sub_obj.make_output(f"__stack__{j}", StoreInStack(j), graph_codegen)
+            #         j += 1
+            # else:
+            #     var.make_output(f"__stack__{i}", StoreInStack(i), graph_codegen)
             var.make_output(f"__stack__{i}", StoreInStack(i), graph_codegen)
         graph_code = graph_codegen.get_code()
         compiled_graph = self.state.fx_graph.compile(
@@ -281,6 +293,12 @@ class GuardTracker:
     def all_scalar_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
         return all(is_scalar(i) for i in itertools.chain(args, kwargs.values()))
 
+    @classmethod
+    def has_tuple_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
+        return any(
+            isinstance(i, tuple)
+            for i in itertools.chain(args, kwargs.values()))
+
     def call_function(
         self,
         func: Callable[..., Any],
@@ -307,6 +325,9 @@ class GuardTracker:
 
         elif self.all_scalar_arg(args, kwargs):
             return
+        elif self.has_tuple_arg(args, kwargs):
+            return
+        raise NotImplementedError
 
     def binary_operation(self, func: Callable[..., Any]) -> None:
         obj1 = get_value_stack_from_top(self.frame, 1)
@@ -369,7 +390,15 @@ class GuardTracker:
 
     def LOAD_GLOBAL(self, inst: Instruction) -> None:
         if inst.argval not in self.state.stored_globals:
-            obj = self.frame.f_globals[inst.argval]
+            try:
+                if inst.argval in self.frame.f_globals:
+                    obj = self.frame.f_globals[inst.argval]
+                else:  # try first search in __builtins__
+                    obj = getattr(self.frame.f_globals['__builtins__'],
+                                  str(inst.argval))
+            except Exception as e:
+                raise UnknownTypeError(inst.argval)
+
             var = vs.make_var_from_value(obj, True, self.state.fx_graph,
                                          f'globals()["{inst.argval}"]')
             self.state.add_object(var, obj)
@@ -429,6 +458,13 @@ class GuardTracker:
 
     def STORE_FAST(self, inst: Instruction) -> None:
         self.state.add_stored_locals(inst.argval)
+
+    # def BUILD_TUPLE(self, inst: Instruction) -> None:
+    #     # maybe need to implement
+    #     pass
+
+    # def LIST_TO_TUPLE(self, inst: Instruction) -> None:
+    #     pass
 
 
 trackers: list[GuardTracker] = []
