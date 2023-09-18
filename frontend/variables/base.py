@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from abc import abstractmethod
 from typing import Any, TYPE_CHECKING, Optional
 from ..fx_graph import FxGraph
-from ..cache import StorePos
+from ..store_pos import StorePos, unknown_pos
 if TYPE_CHECKING:
     import torch.fx
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -12,15 +12,15 @@ if TYPE_CHECKING:
 @dataclass
 class Variable:
     need_guard_check: bool
-    extract_code_at_start: str = ""
+    extract_code_at_start: StorePos = unknown_pos
 
     def __init__(self,
                  need_guard_check: bool,
-                 extract_code_at_start: str = "") -> None:
+                 extract_code_at_start: StorePos = unknown_pos) -> None:
         self.need_guard_check = need_guard_check
         self.extract_code_at_start = extract_code_at_start
         if need_guard_check:
-            assert extract_code_at_start != ""
+            assert extract_code_at_start != unknown_pos
 
     @classmethod
     @abstractmethod
@@ -28,7 +28,7 @@ class Variable:
                    value: Any,
                    need_guard_check: bool,
                    fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: str = "") -> 'Variable':
+                   extract_code_at_start: StorePos = unknown_pos) -> 'Variable':
         raise NotImplementedError
 
     def make_guard(self, codegen: "GuardFnCodegen") -> None:

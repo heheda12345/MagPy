@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Optional, Tuple, Any
 from .base import Variable
 from ..fx_graph import ProxyArgs, FxGraph
-from ..cache import StorePos
+from ..store_pos import StorePos, unknown_pos
 import torch
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -12,7 +12,7 @@ class TupleVar(Variable):
     def __init__(self,
                  value: tuple[Any, ...],
                  need_guard_check: bool,
-                 extract_code_at_start: str = "") -> None:
+                 extract_code_at_start: StorePos = unknown_pos) -> None:
         super().__init__(need_guard_check, extract_code_at_start)
         self.value = value
 
@@ -32,7 +32,7 @@ class TupleVar(Variable):
                    value: Tuple[Any, ...],
                    need_guard_check: bool,
                    _fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: str = "") -> "TupleVar":
+                   extract_code_at_start: StorePos = unknown_pos) -> "TupleVar":
         return cls(value, need_guard_check, extract_code_at_start)
 
     def as_proxy(self) -> ProxyArgs:

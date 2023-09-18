@@ -3,7 +3,7 @@ from itertools import chain
 import torch
 import torch.fx
 from .pycode_writer import PyCodeWriter, new_name, is_valid_name
-from .cache import StorePos
+from .store_pos import StorePos
 from .variables import Variable
 
 
@@ -15,7 +15,7 @@ def gen_imports(writer: PyCodeWriter, imports: set[str]) -> None:
 class GraphFnCodegen:
     outputs: list[Tuple[str, StorePos, str]]
     imports: set[str]
-    graph_inputs: list[str]
+    graph_inputs: list[StorePos]
     graph_outputs: list[torch.fx.Proxy]
     objs: dict[str, Any]  # name -> var
     key: int
@@ -47,8 +47,9 @@ class GraphFnCodegen:
         writer.wl(
             f"print('running graph_fn (key = {self.key})', locals.keys())")
         # TODO: simplify
-        writer.wl(f"graph_out = compiled_graph({', '.join(self.graph_inputs)})")
-        # writer.wl(f"print('graph_out', graph_out)")
+        writer.wl(
+            f"graph_out = compiled_graph({', '.join([str(x) for x in self.graph_inputs])})"
+        )  # writer.wl(f"print('graph_out', graph_out)")
         for target_name, _, code in self.outputs:
             writer.wl(f"{target_name} = {code}")
         # writer.wl(f"print('graph_fn done', locals)")
@@ -70,7 +71,7 @@ class GraphFnCodegen:
     def get_graph_outputs(self) -> list[torch.fx.Proxy]:
         return self.graph_outputs
 
-    def add_graph_input(self, extract_code: str) -> None:
+    def add_graph_input(self, extract_code: StorePos) -> None:
         self.graph_inputs.append(extract_code)
 
     def add_var(self, var: Any, name: str = "") -> str:

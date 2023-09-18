@@ -2,24 +2,7 @@ from typing import Callable, Any
 from dataclasses import dataclass
 from .instruction import Instruction
 from .c_api import add_to_cache
-
-
-class StorePos:
-    pass
-
-
-class StoreInStack(StorePos):
-    idx: int
-
-    def __init__(self, idx: int) -> None:
-        self.idx = idx
-
-
-class StoreInLocal(StorePos):
-    name: str
-
-    def __init__(self, name: str) -> None:
-        self.name = name
+from .store_pos import StorePos
 
 
 @dataclass

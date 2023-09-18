@@ -4,7 +4,7 @@ import torch.fx
 from .base import Variable
 from ..pycode_writer import get_float_string
 from ..fx_graph import ProxyArgs, FxGraph
-from ..cache import StorePos
+from ..store_pos import StorePos, unknown_pos
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
 
@@ -17,7 +17,7 @@ class ScalarVar(Variable):
     def __init__(self,
                  value: ScalarType,
                  need_guard_check: bool,
-                 extract_code_at_start: str = "") -> None:
+                 extract_code_at_start: StorePos = unknown_pos) -> None:
         super().__init__(need_guard_check, extract_code_at_start)
         self.value = value
 
@@ -40,11 +40,12 @@ class ScalarVar(Variable):
             codegen.output(name_in_graph_fn, store_pos, str(self.value))
 
     @classmethod
-    def from_value(cls,
-                   value: ScalarType,
-                   need_guard_check: bool,
-                   _fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: str = "") -> "ScalarVar":
+    def from_value(
+            cls,
+            value: ScalarType,
+            need_guard_check: bool,
+            _fx_graph: Optional[FxGraph] = None,
+            extract_code_at_start: StorePos = unknown_pos) -> "ScalarVar":
         return cls(value, need_guard_check, extract_code_at_start)
 
     def as_proxy(self) -> ProxyArgs:

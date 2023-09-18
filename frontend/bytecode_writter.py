@@ -8,7 +8,8 @@ import copy
 from .bytecode_analysis import stacksize_analysis
 from .instruction import Instruction, convert_instruction, ci, format_insts
 from .code import save_code
-from .cache import get_frame_cache, CachedGraph, StorePos, StoreInStack, StoreInLocal
+from .cache import get_frame_cache, CachedGraph
+from .store_pos import StorePos, StoreInStack, StoreInLocal
 
 
 def get_code_keys() -> List[str]:
@@ -424,6 +425,7 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int,
     virtualize_jumps(instructions)
     for original_inst, inst in zip(original_instructions, instructions):
         inst.original_inst = original_inst
+    instructions[0].is_start = True
     print(format_insts(instructions))
     strip_extended_args(instructions)
     frame_cache = get_frame_cache(frame_id)
@@ -457,6 +459,7 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int,
     for i, inst in enumerate(instructions):
         if inst.opname == "RETURN_VALUE":
             instructions[i] = ci("JUMP_ABSOLUTE", target=final_insts[0])
+            instructions[i].is_end = True
             next_original_pc.append((original_instructions[i], instructions[i]))
             in_trace_insts.append(instructions[i])
     run_traced_insts.sort(key=lambda x: x[0], reverse=True)

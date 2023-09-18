@@ -15,16 +15,19 @@ class ObjectTable:
         self.objs_no_id = []
 
     def add(self, var: Variable, value: Any) -> None:
-        if isinstance(value, int) and value >= -5 and value <= 256:
+        if isinstance(value, bool):
             self.objs_no_id.append(var)
         else:
             self.objs[id(value)] = var
+
+    def add_by_id(self, var: Variable, idx: int) -> None:
+        self.objs[idx] = var
 
     def get_all(self) -> list[Variable]:
         return list(self.objs.values()) + self.objs_no_id
 
     def get(self, value: Any, allow_unexist_const: bool = False) -> Variable:
-        if isinstance(value, int) and value >= -5 and value <= 256:
+        if isinstance(value, bool):
             return ScalarVar(value, False)
         elif id(value) in self.objs:
             return self.objs[id(value)]

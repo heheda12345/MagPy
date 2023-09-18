@@ -6,7 +6,7 @@ from frontend.pycode_generator import GuardFnCodegen, GraphFnCodegen
 from .base import Variable
 from ..pycode_writer import new_name
 from ..fx_graph import FxGraph, ProxyArgs
-from ..cache import StorePos
+from ..store_pos import StorePos, unknown_pos
 
 
 class TensorVar(Variable):
@@ -37,7 +37,7 @@ class TensorVar(Variable):
                  size: Optional[tuple[Optional[int], ...]] = None,
                  stride: Optional[tuple[Optional[int], ...]] = None,
                  is_contiguous: Optional[bool] = None,
-                 extract_code_at_start: str = "") -> None:
+                 extract_code_at_start: StorePos = unknown_pos) -> None:
         super().__init__(need_guard_check, extract_code_at_start)
         self.proxy = proxy
         self.dtype = dtype
@@ -53,11 +53,12 @@ class TensorVar(Variable):
         self.class_type = class_type
 
     @classmethod
-    def from_tensor_and_proxy(cls,
-                              tensor: torch.Tensor,
-                              proxy: torch.fx.Proxy,
-                              need_guard_check: bool,
-                              extract_code_at_start: str = "") -> 'TensorVar':
+    def from_tensor_and_proxy(
+            cls,
+            tensor: torch.Tensor,
+            proxy: torch.fx.Proxy,
+            need_guard_check: bool,
+            extract_code_at_start: StorePos = unknown_pos) -> 'TensorVar':
         var = cls(proxy, tensor.dtype, tensor.device, tensor.layout,
                   tensor.ndim, tensor.requires_grad, tensor.is_quantized,
                   tensor.is_sparse, type(tensor),
@@ -67,14 +68,15 @@ class TensorVar(Variable):
         return var
 
     @classmethod
-    def from_value(cls,
-                   value: torch.Tensor,
-                   need_guard_check: bool,
-                   fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: str = "") -> 'TensorVar':
+    def from_value(
+            cls,
+            value: torch.Tensor,
+            need_guard_check: bool,
+            fx_graph: Optional[FxGraph] = None,
+            extract_code_at_start: StorePos = unknown_pos) -> 'TensorVar':
         assert fx_graph is not None
         name = new_name('tensor')
-        assert extract_code_at_start != ""
+        assert extract_code_at_start != unknown_pos
         proxy = fx_graph.create_proxy("placeholder", name, (), {}, name)
         var = cls.from_tensor_and_proxy(value, proxy, need_guard_check,
                                         extract_code_at_start)
@@ -112,17 +114,18 @@ class TorchParamVar(Variable):
     def __init__(self,
                  param: torch.nn.Parameter,
                  need_guard_check: bool,
-                 extract_code_at_start: str = "") -> None:
+                 extract_code_at_start: StorePos = unknown_pos) -> None:
         super().__init__(need_guard_check, extract_code_at_start)
-        assert extract_code_at_start != ""
+        assert extract_code_at_start != unknown_pos
         self.param = param
 
     @classmethod
-    def from_value(cls,
-                   value: torch.nn.Parameter,
-                   need_guard_check: bool,
-                   _fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: str = "") -> "TorchParamVar":
+    def from_value(
+            cls,
+            value: torch.nn.Parameter,
+            need_guard_check: bool,
+            _fx_graph: Optional[FxGraph] = None,
+            extract_code_at_start: StorePos = unknown_pos) -> "TorchParamVar":
         return cls(value, need_guard_check, extract_code_at_start)
 
     def make_guard_inner(self, codegen: GuardFnCodegen) -> None:
@@ -131,7 +134,8 @@ class TorchParamVar(Variable):
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen") -> None:
-        codegen.output(name_in_graph_fn, store_pos, self.extract_code_at_start)
+        codegen.output(name_in_graph_fn, store_pos,
+                       str(self.extract_code_at_start))
 
     def as_proxy(self) -> "ProxyArgs":
         raise ValueError("TorchParamVar.as_proxy should not be called")

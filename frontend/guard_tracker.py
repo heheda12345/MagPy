@@ -1,5 +1,5 @@
 from types import FrameType
-from typing import Dict, Any, Callable, List
+from typing import Dict, Any, Callable, List, Optional
 import inspect
 import logging
 import itertools
@@ -7,10 +7,13 @@ import torch
 import torch.fx
 import operator
 import dis
+import traceback
+import copy
 from .code import ProcessedCode, load_code
 from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame
 from .instruction import Instruction, ci
-from .cache import CachedGraph, get_frame_cache, StoreInStack, StoreInLocal
+from .cache import CachedGraph, get_frame_cache
+from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, unknown_pos
 from . import variables as vs
 from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, is_user_defined_func, UnknownTypeError
 from .object_table import ObjectTable
@@ -32,6 +35,7 @@ class State:
     submodule_paths: dict[str, torch.nn.Module]
     subparam_paths: dict[str, torch.nn.Parameter]
     written: bool
+    defer_restart: Optional[str]  # None if no need to restart
 
     def __init__(self, root: torch.nn.Module) -> None:
         self.objects = ObjectTable()
@@ -51,6 +55,7 @@ class State:
             param: name for name, param in root.named_parameters()
         }
         self.written = False
+        self.defer_restart = None
 
     def proxy_args_kwargs(
         self, args: list[Any], kwargs: dict[str, Any]
@@ -105,7 +110,7 @@ class State:
             for i in range(state.start_stack_size):
                 value = get_value_stack_from_top(frame, i)
                 var = vs.make_var_from_value(value, True, state.fx_graph,
-                                             f"locals['__stack__{i}']")
+                                             StoreInLocal(f"__stack__{i}"))
                 state.objects.add(var, value)
         # state.written may be assigned inside make_var_from_value
         state.written = False
@@ -123,6 +128,62 @@ class State:
         self.written = True
         self.stored_globals.add(name)
 
+    def store_pos_in_callee(self, pos: StorePos) -> StorePos:
+        if isinstance(pos, StoreInLocal):
+            raise NotImplementedError
+        elif isinstance(pos, StoreInStack):
+            raise ValueError("cannot store in stack in callee")
+        elif isinstance(pos, StoreInGlobal):
+            return pos
+        elif isinstance(pos, StoreInAttr):
+            return StoreInAttr(self.store_pos_in_callee(pos.self_obj),
+                               pos.attr_name)
+        else:
+            raise NotImplementedError
+
+    def merge_call(self, state: 'State', return_value: Any) -> None:
+        self.written = True
+        self.defer_restart = None
+
+        def merge_call_guard():
+            # print("objects", self.objects, state.objects.get_all())
+            for idx, var in state.objects.objs.items():
+                if var.need_guard_check:
+                    if isinstance(var.extract_code_at_start,
+                                  (StoreInLocal, StoreInStack)):
+                        continue
+                    elif isinstance(var.extract_code_at_start, StoreInGlobal):
+                        self.objects.add(var, idx)
+                    elif isinstance(var.extract_code_at_start, StoreInAttr):
+                        new_var = copy.copy(var)
+                        new_var.store_pos = self.store_pos_in_callee(
+                            var.extract_code_at_start)
+                        self.objects.add(new_var, idx)
+                    else:
+                        raise NotImplementedError
+
+        def merge_fx_graph():
+            for node in state.fx_graph.result_graph.nodes:
+                if node.op != 'output':
+                    raise NotImplementedError
+
+        def merge_output():
+            var = state.objects.get(return_value, allow_unexist_const=True)
+            new_var = copy.copy(var)
+            if var.extract_code_at_start != unknown_pos:
+                new_var.extract_code_at_start = self.store_pos_in_callee(
+                    var.store_pos)
+            self.objects.add(new_var, return_value)
+
+        if len(state.objects.objs_no_id) > 0:
+            raise NotImplementedError
+        merge_call_guard()
+        merge_fx_graph()
+        merge_output()
+
+    def mark_defer_restart(self, reason: str) -> None:
+        self.defer_restart = reason
+
 
 class GuardTracker:
     code: ProcessedCode
@@ -131,12 +192,17 @@ class GuardTracker:
     state: State
     have_error: bool
     frame_root: torch.nn.Module
+    caller: Optional['GuardTracker']
 
-    def __init__(self, frame: FrameType, frame_id: int):
+    def __init__(self,
+                 frame: FrameType,
+                 frame_id: int,
+                 caller: Optional['GuardTracker'] = None):
         self.code = load_code(frame_id)
         self.frame = frame
         self.frame_id = frame_id
         self.frame_root = get_frame_root(frame_id)
+        self.caller = caller
         self.init_state(
             read_stack=False
         )  # stack pointer is not initialized at the creation of a stack frame
@@ -174,6 +240,7 @@ class GuardTracker:
                 self.init_state()
             except Exception as e:
                 self.restart(f"Exception during init: {e}")
+                print(traceback.format_exc())
                 return
         if self.state.start_pc == -1:
             self.state.start_pc = pc
@@ -197,7 +264,8 @@ class GuardTracker:
         end_pc = self.code.get_orig_pc(self.frame.f_lasti)
         if end_pc == -1:
             end_pc = self.code.get_next_orig_pc(self.frame.f_lasti)
-        print("commiting", self.state.start_pc, end_pc)
+        print("commiting", self.state.start_pc, end_pc,
+              self.code.original_insts[end_pc])
         key = new_random_key()
         guard_codegen = GuardFnCodegen(key=key)
         for var in self.state.objects.get_all():
@@ -266,6 +334,13 @@ class GuardTracker:
                 return_values=graph_codegen.get_return_values(),
                 key=key,
             ))
+
+        if self.state.start_pc == 0 and self.code.original_insts[
+                end_pc].opname == "RETURN_VALUE" and self.caller is not None:
+            print("callee is full graph, merge to caller")
+            assert stack_size == 1
+            self.caller.state.merge_call(
+                self.state, get_value_stack_from_top(self.frame, 0))
         self.state.is_empty = True
 
     def process_last_inst(self) -> None:
@@ -277,6 +352,8 @@ class GuardTracker:
                 raise NotImplementedError
             self.state.objects.add(var, value)
         self.state.proxy_waiting_ids.clear()
+        if self.state.defer_restart is not None:
+            self.restart("defered restart " + self.state.defer_restart)
 
     def restart(self, restart_reason: str) -> None:
         logging.info(f"restart: {restart_reason}")
@@ -306,11 +383,12 @@ class GuardTracker:
         kwargs: Dict[str, Any],
     ) -> None:
         if is_user_defined_func(func):
-            self.restart(f"call_function {func}")
+            self.state.mark_defer_restart(f"call_function {func}")
             from .tracer import get_process_frame
             preprocess_frame, post_process_frame = get_process_frame(func, True)
             prior = set_eval_frame((preprocess_frame, post_process_frame))
             assert prior is None
+            assert self.state.written == False
             return
         elif self.has_tensor_arg(args, kwargs):
             if func in fx_graph_functions or isinstance(func, torch.nn.Module):
@@ -385,7 +463,7 @@ class GuardTracker:
         if inst.argval not in self.state.stored_locals:
             obj = self.frame.f_locals[inst.argval]
             var = vs.make_var_from_value(obj, True, self.state.fx_graph,
-                                         f'locals["{inst.argval}"]')
+                                         StoreInLocal(inst.argval))
             self.state.add_object(var, obj)
 
     def LOAD_GLOBAL(self, inst: Instruction) -> None:
@@ -400,7 +478,7 @@ class GuardTracker:
                 raise UnknownTypeError(inst.argval)
 
             var = vs.make_var_from_value(obj, True, self.state.fx_graph,
-                                         f'globals()["{inst.argval}"]')
+                                         StoreInGlobal(inst.argval))
             self.state.add_object(var, obj)
 
     # heheda: we need to make sure that no unbound LOAD_METHOD is called by python runtime to avoid NULL in stack
@@ -410,8 +488,8 @@ class GuardTracker:
         self_var = self.state.objects.get(self_obj)
         method_var = vs.make_var_from_value(
             method, self_var.need_guard_check, self.state.fx_graph,
-            f"({self_var.extract_code_at_start}).{inst.argval}"
-            if self_var.need_guard_check else "")
+            StoreInAttr(self_var.extract_code_at_start, inst.argval)
+            if self_var.need_guard_check else unknown_pos)
         if isinstance(self_var, vs.ModuleVar) and isinstance(
                 method_var, vs.FunctionVar):
             method_var.src = self_var.src
@@ -423,8 +501,8 @@ class GuardTracker:
         obj_var = self.state.objects.get(obj)
         attr_var = vs.make_var_from_value(
             attr, obj_var.need_guard_check, self.state.fx_graph,
-            f"({obj_var.extract_code_at_start}).{inst.argval}"
-            if obj_var.need_guard_check else "")
+            StoreInAttr(obj_var.extract_code_at_start, inst.argval)
+            if obj_var.need_guard_check else unknown_pos)
         if isinstance(obj_var, vs.ModuleVar):
             if isinstance(attr_var, vs.ModuleVar):
                 attr_var.src = obj_var.src
@@ -471,7 +549,11 @@ trackers: list[GuardTracker] = []
 
 
 def push_tracker(frame: FrameType, frame_id: int) -> None:
-    trackers.append(GuardTracker(frame, frame_id))
+    if len(trackers) > 0:
+        caller = trackers[-1]
+    else:
+        caller = None
+    trackers.append(GuardTracker(frame, frame_id, caller))
     print("push tracker", frame_id, "frame", hex(id(frame)), "frame_id",
           frame_id, "all", [t.frame_id for t in trackers])
 

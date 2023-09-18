@@ -6,8 +6,8 @@ from enum import Enum
 from .base import Variable
 from ..pycode_writer import get_float_string
 from ..fx_graph import ProxyArgs, FxGraph
-from ..cache import StorePos
 from ..utils import NullObject, null_object
+from ..store_pos import StorePos, unknown_pos
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
 
@@ -16,7 +16,7 @@ class NoneVar(Variable):
 
     def __init__(self,
                  need_guard_check: bool,
-                 extract_code_at_start: str = "") -> None:
+                 extract_code_at_start: StorePos = unknown_pos) -> None:
         super().__init__(need_guard_check, extract_code_at_start)
 
     def make_guard_inner(self, codegen: "GuardFnCodegen") -> None:
@@ -31,7 +31,7 @@ class NoneVar(Variable):
                    value: None,
                    need_guard_check: bool,
                    _fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: str = "") -> "NoneVar":
+                   extract_code_at_start: StorePos = unknown_pos) -> "NoneVar":
         return cls(need_guard_check, extract_code_at_start)
 
     def as_proxy(self) -> ProxyArgs:
@@ -42,7 +42,7 @@ class NullVar(Variable):
 
     def __init__(self,
                  need_guard_check: bool,
-                 extract_code_at_start: str = "") -> None:
+                 extract_code_at_start: StorePos = unknown_pos) -> None:
         super().__init__(need_guard_check, extract_code_at_start)
 
     def make_guard_inner(self, codegen: "GuardFnCodegen") -> None:
@@ -58,7 +58,7 @@ class NullVar(Variable):
                    value: NullObject,
                    need_guard_check: bool,
                    _fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: str = "") -> "NullVar":
+                   extract_code_at_start: StorePos = unknown_pos) -> "NullVar":
         return cls(need_guard_check, extract_code_at_start)
 
     def as_proxy(self) -> ProxyArgs:
@@ -75,7 +75,7 @@ class SliceVar(Variable):
                  stop: Optional[int],
                  step: Optional[int],
                  need_guard_check: bool,
-                 extract_code_at_start: str = "") -> None:
+                 extract_code_at_start: StorePos = unknown_pos) -> None:
         super().__init__(need_guard_check, extract_code_at_start)
         self.start = start
         self.stop = stop
@@ -95,7 +95,7 @@ class SliceVar(Variable):
                    value: slice,
                    need_guard_check: bool,
                    _fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: str = "") -> "SliceVar":
+                   extract_code_at_start: StorePos = unknown_pos) -> "SliceVar":
         return cls(value.start, value.stop, value.step, need_guard_check,
                    extract_code_at_start)
 
@@ -119,7 +119,7 @@ class ModuleVar(Variable):
                  module: ModuleType,
                  src: ObjectSrc,
                  need_guard_check: bool,
-                 extract_code_at_start: str = "") -> None:
+                 extract_code_at_start: StorePos = unknown_pos) -> None:
         super().__init__(need_guard_check, extract_code_at_start)
         self.module = module
         self.src = src
@@ -135,11 +135,12 @@ class ModuleVar(Variable):
         codegen.output(name_in_graph_fn, store_pos, name_in_codegen)
 
     @classmethod
-    def from_value(cls,
-                   value: ModuleType,
-                   need_guard_check: bool,
-                   _fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: str = "") -> "ModuleVar":
+    def from_value(
+            cls,
+            value: ModuleType,
+            need_guard_check: bool,
+            _fx_graph: Optional[FxGraph] = None,
+            extract_code_at_start: StorePos = unknown_pos) -> "ModuleVar":
         if value in torch_modules:
             src = ObjectSrc.TORCH
         else:
@@ -155,7 +156,7 @@ class FunctionVar(Variable):
                  func: Callable[..., Any],
                  src: ObjectSrc,
                  need_guard_check: bool,
-                 extract_code_at_start: str = "") -> None:
+                 extract_code_at_start: StorePos = unknown_pos) -> None:
         super().__init__(need_guard_check, extract_code_at_start)
         self.func = func
         self.src = src
@@ -170,10 +171,11 @@ class FunctionVar(Variable):
         codegen.output(name_in_graph_fn, store_pos, name_in_codegen)
 
     @classmethod
-    def from_value(cls,
-                   value: Callable[..., Any],
-                   need_guard_check: bool,
-                   _fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: str = "") -> "FunctionVar":
+    def from_value(
+            cls,
+            value: Callable[..., Any],
+            need_guard_check: bool,
+            _fx_graph: Optional[FxGraph] = None,
+            extract_code_at_start: StorePos = unknown_pos) -> "FunctionVar":
         return cls(value, ObjectSrc.USER_DEFINED, need_guard_check,
                    extract_code_at_start)
