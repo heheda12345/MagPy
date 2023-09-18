@@ -30,7 +30,7 @@ class ObjectTable:
             return self.objs[id(value)]
         elif allow_unexist_const and isinstance(value, get_args(CONST_TYPES)):
             return make_var_from_value(value, False)
-        elif isinstance(value, Tuple):
+        elif isinstance(value, tuple):
             return TupleVar(value, False)
         raise RuntimeError(f"Object {value} not found in object table")
 

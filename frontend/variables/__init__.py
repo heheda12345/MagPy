@@ -18,7 +18,7 @@ ty2var: dict[type[Any], type[Variable]] = {
     type(None): NoneVar,
     slice: SliceVar,
     torch.nn.Parameter: TorchParamVar,
-    Tuple: TupleVar,
+    tuple: TupleVar,
 }
 
 CONST_TYPES = Union[int, float, bool, str, NullObject, None, slice]
@@ -40,8 +40,9 @@ def make_var_from_value(value: Any,
     elif callable(value):
         return FunctionVar.from_value(value, need_guard_check, fx_graph,
                                       extract_code_at_start)
-    elif isinstance(value, Tuple):
-        return TupleVar.from_value(value, need_guard_check, fx_graph, extract_code_at_start)
+    elif isinstance(value, tuple):
+        return TupleVar.from_value(value, need_guard_check, fx_graph,
+                                   extract_code_at_start)
     raise UnknownTypeError(type(value))
 
 

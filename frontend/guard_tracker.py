@@ -61,7 +61,7 @@ class State:
                 return self.fx_graph.create_proxy(
                     "get_attr", self.subparam_paths[var.param], (), {})
             return var.as_proxy()
-                
+
         proxy_args = tuple(
             as_proxy(self.objects.get(arg, allow_unexist_const=True))
             for arg in args)
@@ -224,7 +224,6 @@ class GuardTracker:
             # if isinstance(var, TupleVar):
             #     j = 0
             #     for sub_value in var.value:
-                    
             #         sub_obj = self.state.objects.get(sub_value, allow_unexist_const=True)
             #         sub_obj.make_output(f"__stack__{j}", StoreInStack(j), graph_codegen)
             #         j += 1
@@ -302,7 +301,9 @@ class GuardTracker:
         kwargs: Dict[str, Any],
     ) -> None:
         func_module = inspect.getmodule(func)
-        if self.has_tensor_arg(args, kwargs) or func_module == torch or func_module == torch.nn or func_module == torch.nn.functional:
+        if self.has_tensor_arg(
+                args, kwargs
+        ) or func_module == torch or func_module == torch.nn or func_module == torch.nn.functional:
             if func in fx_graph_functions() or isinstance(
                     func, torch.nn.Module):
                 self.state.record_function(func, args, kwargs)
@@ -386,8 +387,9 @@ class GuardTracker:
             try:
                 if inst.argval in self.frame.f_globals:
                     obj = self.frame.f_globals[inst.argval]
-                else: # try first search in __builtins__
-                    obj = getattr(self.frame.f_globals['__builtins__'], str(inst.argval))
+                else:  # try first search in __builtins__
+                    obj = getattr(self.frame.f_globals['__builtins__'],
+                                  str(inst.argval))
             except Exception as e:
                 raise UnknownTypeError(inst.argval)
 
@@ -444,12 +446,12 @@ class GuardTracker:
     def STORE_FAST(self, inst: Instruction) -> None:
         self.state.add_stored_locals(inst.argval)
 
-    def BUILD_TUPLE(self, inst: Instruction) -> None:
-        # maybe need to implement 
-        pass
+    # def BUILD_TUPLE(self, inst: Instruction) -> None:
+    #     # maybe need to implement
+    #     pass
 
-    def LIST_TO_TUPLE(self, inst: Instruction) -> None:
-        pass
+    # def LIST_TO_TUPLE(self, inst: Instruction) -> None:
+    #     pass
 
 
 trackers: list[GuardTracker] = []
