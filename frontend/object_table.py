@@ -1,4 +1,4 @@
-from typing import Any, get_args, Optional
+from typing import Any, get_args, Optional, Tuple
 from .variables.base import Variable
 from .variables import CONST_TYPES, ScalarVar, make_var_from_value
 from .variables.tuple import TupleVar
@@ -30,7 +30,7 @@ class ObjectTable:
             return self.objs[id(value)]
         elif allow_unexist_const and isinstance(value, get_args(CONST_TYPES)):
             return make_var_from_value(value, False)
-        elif isinstance(value, tuple):
+        elif isinstance(value, Tuple):
             return TupleVar(value, False)
         raise RuntimeError(f"Object {value} not found in object table")
 

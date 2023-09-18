@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Optional, Tuple, Any
 from .base import Variable
 from ..fx_graph import ProxyArgs, FxGraph
 from ..cache import StorePos
+import torch
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
 
@@ -20,6 +21,10 @@ class TupleVar(Variable):
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen") -> None:
+        # print(f"come to make output:{self.value}")
+        # for sub_value in self.value:
+        #     if isinstance(sub_value, torch.Tensor):
+        #         id(sub_value)
         codegen.output(name_in_graph_fn, store_pos, str(self.value))
 
     @classmethod

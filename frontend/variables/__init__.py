@@ -1,4 +1,4 @@
-from typing import Any, Union, Optional
+from typing import Any, Union, Optional, Tuple
 from types import ModuleType
 import torch
 from .base import Variable
@@ -6,6 +6,7 @@ from .scalar import ScalarVar
 from .tensor import TensorVar, TorchParamVar
 from .torch_module import TorchModuleVar
 from .const import NullVar, NoneVar, SliceVar, ModuleVar, FunctionVar, ObjectSrc
+from .tuple import TupleVar
 from ..fx_graph import FxGraph
 from ..utils import NullObject, UnknownTypeError
 
@@ -17,6 +18,7 @@ ty2var: dict[type[Any], type[Variable]] = {
     type(None): NoneVar,
     slice: SliceVar,
     torch.nn.Parameter: TorchParamVar,
+    Tuple: TupleVar,
 }
 
 CONST_TYPES = Union[int, float, bool, str, NullObject, None, slice]
@@ -38,6 +40,8 @@ def make_var_from_value(value: Any,
     elif callable(value):
         return FunctionVar.from_value(value, need_guard_check, fx_graph,
                                       extract_code_at_start)
+    elif isinstance(value, Tuple):
+        return TupleVar.from_value(value, need_guard_check, fx_graph, extract_code_at_start)
     raise UnknownTypeError(type(value))
 
 
