@@ -63,8 +63,6 @@ frame_root: dict[int, torch.nn.Module] = {}
 
 
 def set_frame_root(frame_id: int, root: Any) -> None:
-    if frame_id in frame_root:
-        return
     if isinstance(root, torch.nn.Module):
         root_module = root
     elif hasattr(root, '__self__') and isinstance(root.__self__,

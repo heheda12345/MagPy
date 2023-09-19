@@ -360,8 +360,8 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
             Py_DECREF(valid);
 #ifdef LOG_CACHE
             std::stringstream ss;
-            ss << "guard cache hit: frame_id " << frame_id << " callsite_id "
-               << callsite_id;
+            ss << "\033[31mguard cache hit: frame_id " << frame_id
+               << " callsite_id " << callsite_id << "\033[0m";
             pylog(ss.str());
 #endif
             Py_INCREF(entry->graph_fn);
@@ -371,8 +371,8 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
     }
 #ifdef LOG_CACHE
     std::stringstream ss;
-    ss << "guard cache miss: frame_id " << frame_id << " callsite_id "
-       << callsite_id;
+    ss << "\033[31mguard cache miss: frame_id " << frame_id << " callsite_id "
+       << callsite_id << "\033[0m";
     pylog(ss.str());
 #endif
     return PyTuple_Pack(2, PyLong_FromLong(-1), Py_None);

@@ -291,7 +291,7 @@ def get_instructions(code: types.CodeType) -> List[Instruction]:
 
 
 def add_callsite(
-    orignal_insts: List[Instruction], final_inst: Instruction,
+    orignal_insts: List[Instruction], is_callee: bool,
     cached_graphs: List[CachedGraph], frame_id: int, callsite_id: int,
     start_pc: int
 ) -> tuple[list[Instruction], list[Instruction], dict[str, list[str]]]:
@@ -370,7 +370,17 @@ def add_callsite(
             ])
             in_trace_insts.extend(insts[-2:])
         else:
-            insts.append(ci("RETURN_VALUE"))
+            if is_callee:
+                insts.extend([
+                    ci("LOAD_GLOBAL", "enable_trace"),
+                    ci("LOAD_CONST", frame_id),
+                    ci("CALL_FUNCTION", 1),
+                    ci("POP_TOP"),
+                    ci("RETURN_VALUE")
+                ])
+                in_trace_insts.extend(insts[-3:])
+            else:
+                insts.append(ci("RETURN_VALUE"))
         possible_matches.append(insts)
     restore_stack_insts = [
         ci("LOAD_FAST", f"__stack__{i}")
@@ -449,7 +459,7 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int,
     for start_pc, callsite_id in frame_cache.callsite_id.items():
         cached_graphs = frame_cache.cached_graphs[start_pc]
         callsite_code, new_in_trace_insts, new_names = add_callsite(
-            instructions, final_insts[-1], cached_graphs, frame_id, callsite_id,
+            instructions, is_callee, cached_graphs, frame_id, callsite_id,
             start_pc)
         run_traced_insts.append((start_pc, callsite_code))
         in_trace_insts.extend(new_in_trace_insts)

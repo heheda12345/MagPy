@@ -1,9 +1,11 @@
 import inspect
 import dis
 from typing import Any, TYPE_CHECKING, Callable
+from types import FrameType
 import random
 import operator
 from .bytecode_writter import get_code_keys
+from .c_api import get_value_stack_from_top, get_value_stack_size
 if TYPE_CHECKING:
     from .instruction import Instruction
 
@@ -156,6 +158,11 @@ class UnknownTypeError(Exception):
 
     def __init__(self, ty: type[Any]) -> None:
         super().__init__(f"Unknown type {ty}")
+
+
+def get_all_objects_in_stack(frame: FrameType):
+    stack_size = get_value_stack_size(frame)
+    return [get_value_stack_from_top(frame, i) for i in range(stack_size)]
 
 
 def reset() -> None:

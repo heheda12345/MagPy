@@ -15,7 +15,7 @@ from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
 from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, unknown_pos
 from . import variables as vs
-from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, is_user_defined_func, UnknownTypeError
+from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack
 from .object_table import ObjectTable
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
 from .fx_graph import FxGraph, get_frame_root, is_leaf_module, ProxyArgs
@@ -36,6 +36,7 @@ class State:
     subparam_paths: dict[str, torch.nn.Parameter]
     written: bool
     defer_restart: Optional[str]  # None if no need to restart
+    stack_objs: Optional[list[Any]] = None
 
     def __init__(self, root: torch.nn.Module) -> None:
         self.objects = ObjectTable()
@@ -56,6 +57,7 @@ class State:
         }
         self.written = False
         self.defer_restart = None
+        self.stack_objs = None
 
     def proxy_args_kwargs(
         self, args: list[Any], kwargs: dict[str, Any]
@@ -91,7 +93,10 @@ class State:
                 )
                 self.proxy_waiting_ids.append(proxy)
             else:
-                raise NotImplementedError
+                print(id(func))
+                for k, v in self.submodule_paths.items():
+                    print(id(k), v, k)
+                raise NotImplementedError(func)
         else:
             proxy = self.fx_graph.create_proxy(
                 "call_function",
@@ -128,20 +133,28 @@ class State:
         self.written = True
         self.stored_globals.add(name)
 
-    def store_pos_in_callee(self, pos: StorePos) -> StorePos:
+    def store_pos_in_callee(self, pos: StorePos, idx: int) -> StorePos:
+        if idx in self.objects.objs:
+            var = self.objects.objs[idx]
+            if var.extract_code_at_start == unknown_pos:
+                raise ValueError("unknown callee store pos")
+            return var.extract_code_at_start
         if isinstance(pos, StoreInLocal):
-            raise NotImplementedError
+            raise ValueError("unknown local in callee")
         elif isinstance(pos, StoreInStack):
             raise ValueError("cannot store in stack in callee")
         elif isinstance(pos, StoreInGlobal):
             return pos
         elif isinstance(pos, StoreInAttr):
-            return StoreInAttr(self.store_pos_in_callee(pos.self_obj),
-                               pos.attr_name)
+            return StoreInAttr(
+                self.store_pos_in_callee(pos.self_pos, id(pos.self_obj)),
+                pos.self_obj, pos.attr_name)
         else:
             raise NotImplementedError
 
     def merge_call(self, state: 'State', return_value: Any) -> None:
+        if self.defer_restart == None:  # callee will not perform defer restart
+            return
         self.written = True
         self.defer_restart = None
 
@@ -149,15 +162,17 @@ class State:
             # print("objects", self.objects, state.objects.get_all())
             for idx, var in state.objects.objs.items():
                 if var.need_guard_check:
-                    if isinstance(var.extract_code_at_start,
-                                  (StoreInLocal, StoreInStack)):
+                    if isinstance(var.extract_code_at_start, StoreInLocal):
                         continue
+                    elif isinstance(var.extract_code_at_start, StoreInStack):
+                        raise ValueError(
+                            "full graph should not contain guard in stack")
                     elif isinstance(var.extract_code_at_start, StoreInGlobal):
                         self.objects.add(var, idx)
                     elif isinstance(var.extract_code_at_start, StoreInAttr):
                         new_var = copy.copy(var)
-                        new_var.store_pos = self.store_pos_in_callee(
-                            var.extract_code_at_start)
+                        new_var.extract_code_at_start = self.store_pos_in_callee(
+                            var.extract_code_at_start, idx)
                         self.objects.add(new_var, idx)
                     else:
                         raise NotImplementedError
@@ -168,11 +183,13 @@ class State:
                     raise NotImplementedError
 
         def merge_output():
+            if isinstance(return_value, tuple):
+                raise NotImplementedError
             var = state.objects.get(return_value, allow_unexist_const=True)
             new_var = copy.copy(var)
             if var.extract_code_at_start != unknown_pos:
                 new_var.extract_code_at_start = self.store_pos_in_callee(
-                    var.store_pos)
+                    var.extract_code_at_start, id(return_value))
             self.objects.add(new_var, return_value)
 
         if len(state.objects.objs_no_id) > 0:
@@ -181,8 +198,9 @@ class State:
         merge_fx_graph()
         merge_output()
 
-    def mark_defer_restart(self, reason: str) -> None:
+    def mark_defer_restart(self, reason: str, stack_objs: list[Any]) -> None:
         self.defer_restart = reason
+        self.stack_objs = stack_objs
 
 
 class GuardTracker:
@@ -250,22 +268,25 @@ class GuardTracker:
                 getattr(self, inst.opname)(inst)
             except Exception as e:
                 self.restart(f"Exception during processing {inst.opname}: {e}")
-            if not self.have_error:
+            if not self.have_error and self.state.defer_restart is None:
                 self.state.is_empty = False
                 self.state.written = False
         else:
             self.restart(f"unknown opcode {inst.opname}")
 
-    def commit(self) -> None:
+    def commit(self, break_before_cur_inst: bool) -> None:
         assert not self.state.written
         if self.state.is_empty:
             return
         assert self.state.start_pc >= 0
-        end_pc = self.code.get_orig_pc(self.frame.f_lasti)
+        lasti = self.frame.f_lasti
+        if break_before_cur_inst:
+            lasti -= 2
+        end_pc = self.code.get_orig_pc(lasti)
         if end_pc == -1:
-            end_pc = self.code.get_next_orig_pc(self.frame.f_lasti)
+            end_pc = self.code.get_next_orig_pc(lasti)
         print("commiting", self.state.start_pc, end_pc,
-              self.code.original_insts[end_pc])
+              self.code.original_insts[end_pc], lasti)
         key = new_random_key()
         guard_codegen = GuardFnCodegen(key=key)
         for var in self.state.objects.get_all():
@@ -277,7 +298,7 @@ class GuardTracker:
                 var = node.meta["var"]
                 assert isinstance(var, vs.TensorVar)
                 graph_codegen.add_graph_input(var.extract_code_at_start)
-        current_inst = self.code.get_inst(self.frame.f_lasti)
+        current_inst = self.code.get_inst(lasti)
         # livevars_analysis should return the same result when passing self.code.guard_insts
         # and self.code.original_insts, but as current_inst may not be in original_insts,
         # we pass guard_insts here
@@ -289,10 +310,13 @@ class GuardTracker:
             var.make_output(f"__live_{i}", StoreInLocal(live_var),
                             graph_codegen)
         # TODO: can be optimized by only reproduce the modified variables
-        stack_size = get_value_stack_size(self.frame)
-        for i in range(stack_size):
-            # print("tuple comes to here")
-            value = get_value_stack_from_top(self.frame, i)
+        if break_before_cur_inst:
+            stack_objs = self.state.stack_objs
+            assert stack_objs is not None
+        else:
+            stack_objs = get_all_objects_in_stack(self.frame)
+
+        for i, value in enumerate(stack_objs):
             var = self.state.objects.get(value, allow_unexist_const=True)
             # if isinstance(var, TupleVar):
             #     j = 0
@@ -321,7 +345,7 @@ class GuardTracker:
 
         print("guard_fn:", guard_fn)
         print("pc:", self.state.start_pc, end_pc)
-        print("stack:", self.state.start_stack_size, stack_size)
+        print("stack:", self.state.start_stack_size, len(stack_objs))
 
         get_frame_cache(self.frame_id).add(
             CachedGraph(
@@ -330,7 +354,7 @@ class GuardTracker:
                 self.state.start_pc,
                 end_pc,
                 start_stack_size=self.state.start_stack_size,
-                end_stack_size=stack_size,
+                end_stack_size=len(stack_objs),
                 return_values=graph_codegen.get_return_values(),
                 key=key,
             ))
@@ -338,7 +362,7 @@ class GuardTracker:
         if self.state.start_pc == 0 and self.code.original_insts[
                 end_pc].opname == "RETURN_VALUE" and self.caller is not None:
             print("callee is full graph, merge to caller")
-            assert stack_size == 1
+            assert len(stack_objs) == 1
             self.caller.state.merge_call(
                 self.state, get_value_stack_from_top(self.frame, 0))
         self.state.is_empty = True
@@ -353,12 +377,15 @@ class GuardTracker:
             self.state.objects.add(var, value)
         self.state.proxy_waiting_ids.clear()
         if self.state.defer_restart is not None:
-            self.restart("defered restart " + self.state.defer_restart)
+            self.restart("defered restart " + self.state.defer_restart,
+                         break_before_cur_inst=True)
 
-    def restart(self, restart_reason: str) -> None:
+    def restart(self,
+                restart_reason: str,
+                break_before_cur_inst: bool = False) -> None:
         logging.info(f"restart: {restart_reason}")
         self.have_error = True
-        self.commit()
+        self.commit(break_before_cur_inst)
 
     @classmethod
     def has_tensor_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
@@ -383,7 +410,8 @@ class GuardTracker:
         kwargs: Dict[str, Any],
     ) -> None:
         if is_user_defined_func(func):
-            self.state.mark_defer_restart(f"call_function {func}")
+            stack_objs = get_all_objects_in_stack(self.frame)
+            self.state.mark_defer_restart(f"call_function {func}", stack_objs)
             from .tracer import get_process_frame
             preprocess_frame, post_process_frame = get_process_frame(func, True)
             prior = set_eval_frame((preprocess_frame, post_process_frame))
@@ -488,7 +516,7 @@ class GuardTracker:
         self_var = self.state.objects.get(self_obj)
         method_var = vs.make_var_from_value(
             method, self_var.need_guard_check, self.state.fx_graph,
-            StoreInAttr(self_var.extract_code_at_start, inst.argval)
+            StoreInAttr(self_var.extract_code_at_start, self_obj, inst.argval)
             if self_var.need_guard_check else unknown_pos)
         if isinstance(self_var, vs.ModuleVar) and isinstance(
                 method_var, vs.FunctionVar):
@@ -501,7 +529,7 @@ class GuardTracker:
         obj_var = self.state.objects.get(obj)
         attr_var = vs.make_var_from_value(
             attr, obj_var.need_guard_check, self.state.fx_graph,
-            StoreInAttr(obj_var.extract_code_at_start, inst.argval)
+            StoreInAttr(obj_var.extract_code_at_start, obj, inst.argval)
             if obj_var.need_guard_check else unknown_pos)
         if isinstance(obj_var, vs.ModuleVar):
             if isinstance(attr_var, vs.ModuleVar):
@@ -559,10 +587,11 @@ def push_tracker(frame: FrameType, frame_id: int) -> None:
 
 
 def pop_tracker(frame_id: int) -> None:
-    print("before pop_tracker", [t.frame_id for t in trackers])
+    print("before pop_tracker", [t.frame_id for t in trackers], "frame_id",
+          frame_id)
     to_pop = trackers.pop()
-    assert to_pop.state.is_empty
     assert to_pop.frame_id == frame_id
+    assert to_pop.state.is_empty
 
 
 def record(frame: FrameType, frame_id: int) -> None:

@@ -134,9 +134,9 @@ def stacksize_analysis(instructions: List[Instruction]) -> int:
                     stack_size, stack_effect(inst.opcode, inst.arg, jump=True))
 
     if False:
-        for inst in instructions:
+        for i, inst in enumerate(instructions):
             stack_size = stack_sizes[inst]
-            print(stack_size.low, stack_size.high, inst)
+            print(i, ":", stack_size.low, stack_size.high, inst)
 
     low = min([x.low for x in stack_sizes.values()])
     high = max([x.high for x in stack_sizes.values()])
