@@ -14,6 +14,7 @@ def gen_imports(writer: PyCodeWriter, imports: set[str]) -> None:
 
 class GraphFnCodegen:
     outputs: list[Tuple[str, StorePos, str]]
+    temps: list[Tuple[str, StorePos, str]]
     imports: set[str]
     graph_inputs: list[str]
     graph_outputs: list[torch.fx.Proxy]
@@ -22,6 +23,7 @@ class GraphFnCodegen:
 
     def __init__(self, key: int) -> None:
         self.outputs = []
+        self.temps = []
         self.imports = set()
         self.graph_inputs = []
         self.graph_outputs = []
@@ -31,6 +33,10 @@ class GraphFnCodegen:
     def output(self, name_in_graph_fn: str, store_pos: StorePos,
                code: str) -> None:
         self.outputs.append((name_in_graph_fn, store_pos, code))
+
+    def add_temp(self, name_in_graph_fn: str, store_pos: StorePos,
+                 code: str) -> None:
+        self.temps.append((name_in_graph_fn, store_pos, code))
 
     def add_import(self, module_name: str) -> None:
         self.imports.add(module_name)
@@ -48,6 +54,8 @@ class GraphFnCodegen:
             f"print('running graph_fn (key = {self.key})', locals.keys())")
         # TODO: simplify
         writer.wl(f"graph_out = compiled_graph({', '.join(self.graph_inputs)})")
+        for target_name, _, code in self.temps:
+            writer.wl(f"{target_name} = {code}")
         # writer.wl(f"print('graph_out', graph_out)")
         for target_name, _, code in self.outputs:
             writer.wl(f"{target_name} = {code}")
@@ -121,7 +129,7 @@ class GuardFnCodegen:
         writer.block_end()
         writer.wl(f"except Exception as e:")
         writer.block_start()
-        writer.wl(f"print('exception in graph_fn:', e, type(e))")
+        writer.wl(f"print('exception in guard_fn:', e, type(e))")
         writer.wl(f'import traceback')
         writer.wl(f"print(traceback.format_exc())")
         writer.wl(f"return False")

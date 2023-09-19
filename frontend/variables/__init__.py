@@ -6,7 +6,7 @@ from .scalar import ScalarVar
 from .tensor import TensorVar, TorchParamVar
 from .torch_module import TorchModuleVar
 from .const import NullVar, NoneVar, SliceVar, ModuleVar, FunctionVar, ObjectSrc
-from .tuple import TupleVar
+from .tuple_ import TupleVar
 from ..fx_graph import FxGraph
 from ..utils import NullObject, UnknownTypeError
 
@@ -28,6 +28,7 @@ def make_var_from_value(value: Any,
                         need_guard_check: bool,
                         fx_graph: Optional[FxGraph] = None,
                         extract_code_at_start: str = "") -> Variable:
+    # print(f'make var from value:{type(value)}')
     if type(value) in ty2var:
         return ty2var[type(value)].from_value(value, need_guard_check, fx_graph,
                                               extract_code_at_start)
@@ -41,6 +42,7 @@ def make_var_from_value(value: Any,
         return FunctionVar.from_value(value, need_guard_check, fx_graph,
                                       extract_code_at_start)
     elif isinstance(value, tuple):
+        # print('it should go to tuple')
         return TupleVar.from_value(value, need_guard_check, fx_graph,
                                    extract_code_at_start)
     raise UnknownTypeError(type(value))

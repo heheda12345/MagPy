@@ -1,8 +1,9 @@
 from typing import TYPE_CHECKING, Union, Optional
+from frontend.cache import StorePos
 
 import torch.fx
 
-from frontend.pycode_generator import GuardFnCodegen
+from frontend.pycode_generator import GraphFnCodegen, GuardFnCodegen
 from .base import Variable
 from ..fx_graph import FxGraph
 from ..cache import StorePos
@@ -38,3 +39,7 @@ class TorchModuleVar(Variable):
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen") -> None:
         codegen.output(name_in_graph_fn, store_pos, self.extract_code_at_start)
+
+    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
+                  codegen: GraphFnCodegen) -> None:
+        return super().make_temp(name_in_graph_fn, store_pos, codegen)

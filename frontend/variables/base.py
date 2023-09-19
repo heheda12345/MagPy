@@ -45,5 +45,10 @@ class Variable:
         raise NotImplementedError
 
     @abstractmethod
+    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
+                  codegen: "GraphFnCodegen") -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def as_proxy(self) -> "ProxyArgs":
         raise NotImplementedError

@@ -1,4 +1,5 @@
 from typing import Optional, Any
+from frontend.cache import StorePos
 import torch
 import torch.fx
 
@@ -105,6 +106,11 @@ class TensorVar(Variable):
         name_in_graph_output = codegen.add_graph_output(self.proxy)
         codegen.output(name_in_graph_fn, store_pos, name_in_graph_output)
 
+    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
+                  codegen: "GraphFnCodegen") -> None:
+        name_in_graph_output = codegen.add_graph_output(self.proxy)
+        codegen.add_temp(name_in_graph_fn, store_pos, name_in_graph_output)
+
 
 class TorchParamVar(Variable):
     param: torch.nn.Parameter
@@ -132,6 +138,10 @@ class TorchParamVar(Variable):
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen") -> None:
         codegen.output(name_in_graph_fn, store_pos, self.extract_code_at_start)
+
+    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
+                  codegen: GraphFnCodegen) -> None:
+        return super().make_temp(name_in_graph_fn, store_pos, codegen)
 
     def as_proxy(self) -> "ProxyArgs":
         raise ValueError("TorchParamVar.as_proxy should not be called")
