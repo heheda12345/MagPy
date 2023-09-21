@@ -160,7 +160,7 @@ class UnknownTypeError(Exception):
         super().__init__(f"Unknown type {ty}")
 
 
-def get_all_objects_in_stack(frame: FrameType):
+def get_all_objects_in_stack(frame: FrameType) -> list[Any]:
     stack_size = get_value_stack_size(frame)
     return [get_value_stack_from_top(frame, i) for i in range(stack_size)]
 

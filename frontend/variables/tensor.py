@@ -6,7 +6,7 @@ from frontend.pycode_generator import GuardFnCodegen, GraphFnCodegen
 from .base import Variable
 from ..pycode_writer import new_name
 from ..fx_graph import FxGraph, ProxyArgs
-from ..store_pos import StorePos, unknown_pos
+from ..store_pos import StorePos
 
 
 class TensorVar(Variable):
@@ -37,7 +37,7 @@ class TensorVar(Variable):
                  size: Optional[tuple[Optional[int], ...]] = None,
                  stride: Optional[tuple[Optional[int], ...]] = None,
                  is_contiguous: Optional[bool] = None,
-                 extract_code_at_start: StorePos = unknown_pos) -> None:
+                 extract_code_at_start: list[StorePos] = []) -> None:
         super().__init__(need_guard_check, extract_code_at_start)
         self.proxy = proxy
         self.dtype = dtype
@@ -58,7 +58,7 @@ class TensorVar(Variable):
             tensor: torch.Tensor,
             proxy: torch.fx.Proxy,
             need_guard_check: bool,
-            extract_code_at_start: StorePos = unknown_pos) -> 'TensorVar':
+            extract_code_at_start: list[StorePos] = []) -> 'TensorVar':
         var = cls(proxy, tensor.dtype, tensor.device, tensor.layout,
                   tensor.ndim, tensor.requires_grad, tensor.is_quantized,
                   tensor.is_sparse, type(tensor),
@@ -68,15 +68,14 @@ class TensorVar(Variable):
         return var
 
     @classmethod
-    def from_value(
-            cls,
-            value: torch.Tensor,
-            need_guard_check: bool,
-            fx_graph: Optional[FxGraph] = None,
-            extract_code_at_start: StorePos = unknown_pos) -> 'TensorVar':
+    def from_value(cls,
+                   value: torch.Tensor,
+                   need_guard_check: bool,
+                   fx_graph: Optional[FxGraph] = None,
+                   extract_code_at_start: list[StorePos] = []) -> 'TensorVar':
         assert fx_graph is not None
         name = new_name('tensor')
-        assert extract_code_at_start != unknown_pos
+        assert len(extract_code_at_start) > 0
         proxy = fx_graph.create_proxy("placeholder", name, (), {}, name)
         var = cls.from_tensor_and_proxy(value, proxy, need_guard_check,
                                         extract_code_at_start)
@@ -96,11 +95,10 @@ class TensorVar(Variable):
             hasattr(value, 'stride') and self.stride == value.stride() and \
             hasattr(value, 'is_contiguous') and self.is_contiguous == value.is_contiguous()
 
-    def make_guard_inner(self, codegen: GuardFnCodegen) -> None:
+    def make_guard_inner(self, codegen: "GuardFnCodegen",
+                         pos: StorePos) -> None:
         name_in_codegen = codegen.add_var(self)
-        codegen.add_check(
-            f"{name_in_codegen}.tensor_guard_check({self.extract_code_at_start})"
-        )
+        codegen.add_check(f"{name_in_codegen}.tensor_guard_check({pos})")
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen") -> None:
@@ -114,9 +112,9 @@ class TorchParamVar(Variable):
     def __init__(self,
                  param: torch.nn.Parameter,
                  need_guard_check: bool,
-                 extract_code_at_start: StorePos = unknown_pos) -> None:
+                 extract_code_at_start: list[StorePos] = []) -> None:
         super().__init__(need_guard_check, extract_code_at_start)
-        assert extract_code_at_start != unknown_pos
+        assert len(extract_code_at_start) > 0
         self.param = param
 
     @classmethod
@@ -125,12 +123,12 @@ class TorchParamVar(Variable):
             value: torch.nn.Parameter,
             need_guard_check: bool,
             _fx_graph: Optional[FxGraph] = None,
-            extract_code_at_start: StorePos = unknown_pos) -> "TorchParamVar":
+            extract_code_at_start: list[StorePos] = []) -> "TorchParamVar":
         return cls(value, need_guard_check, extract_code_at_start)
 
-    def make_guard_inner(self, codegen: GuardFnCodegen) -> None:
-        codegen.add_check(
-            f"id({self.extract_code_at_start}) == {id(self.param)}")
+    def make_guard_inner(self, codegen: "GuardFnCodegen",
+                         pos: StorePos) -> None:
+        codegen.add_check(f"id({pos}) == {id(self.param)}")
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen") -> None:

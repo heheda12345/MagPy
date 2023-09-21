@@ -10,10 +10,10 @@ import dis
 import traceback
 import copy
 from .code import ProcessedCode, load_code
-from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame
+from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
-from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, unknown_pos
+from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr
 from . import variables as vs
 from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack
 from .object_table import ObjectTable
@@ -36,7 +36,9 @@ class State:
     subparam_paths: dict[str, torch.nn.Parameter]
     written: bool
     defer_restart: Optional[str]  # None if no need to restart
-    stack_objs: Optional[list[Any]] = None
+    stack_objs: Optional[list[Any]]
+    object_refs: list[Any]  # hold the reference of objects to avoid GC
+    num_new_refs: int
 
     def __init__(self, root: torch.nn.Module) -> None:
         self.objects = ObjectTable()
@@ -58,6 +60,8 @@ class State:
         self.written = False
         self.defer_restart = None
         self.stack_objs = None
+        self.object_refs = []
+        self.num_new_refs = 0
 
     def proxy_args_kwargs(
         self, args: list[Any], kwargs: dict[str, Any]
@@ -104,6 +108,7 @@ class State:
                 pargs,
                 pkwargs,
             )
+            print("call_function", func, pargs, proxy)
             self.proxy_waiting_ids.append(proxy)
 
     @classmethod
@@ -115,7 +120,7 @@ class State:
             for i in range(state.start_stack_size):
                 value = get_value_stack_from_top(frame, i)
                 var = vs.make_var_from_value(value, True, state.fx_graph,
-                                             StoreInLocal(f"__stack__{i}"))
+                                             [StoreInLocal(f"__stack__{i}")])
                 state.objects.add(var, value)
         # state.written may be assigned inside make_var_from_value
         state.written = False
@@ -136,9 +141,7 @@ class State:
     def store_pos_in_callee(self, pos: StorePos, idx: int) -> StorePos:
         if idx in self.objects.objs:
             var = self.objects.objs[idx]
-            if var.extract_code_at_start == unknown_pos:
-                raise ValueError("unknown callee store pos")
-            return var.extract_code_at_start
+            return var.extract_code_at_start[0]
         if isinstance(pos, StoreInLocal):
             raise ValueError("unknown local in callee")
         elif isinstance(pos, StoreInStack):
@@ -158,38 +161,40 @@ class State:
         self.written = True
         self.defer_restart = None
 
-        def merge_call_guard():
+        def merge_call_guard() -> None:
             # print("objects", self.objects, state.objects.get_all())
             for idx, var in state.objects.objs.items():
                 if var.need_guard_check:
-                    if isinstance(var.extract_code_at_start, StoreInLocal):
-                        continue
-                    elif isinstance(var.extract_code_at_start, StoreInStack):
-                        raise ValueError(
-                            "full graph should not contain guard in stack")
-                    elif isinstance(var.extract_code_at_start, StoreInGlobal):
-                        self.objects.add(var, idx)
-                    elif isinstance(var.extract_code_at_start, StoreInAttr):
-                        new_var = copy.copy(var)
-                        new_var.extract_code_at_start = self.store_pos_in_callee(
-                            var.extract_code_at_start, idx)
-                        self.objects.add(new_var, idx)
-                    else:
-                        raise NotImplementedError
+                    new_var = copy.copy(var)
+                    new_var.extract_code_at_start = []
+                    for pos in var.extract_code_at_start:
+                        if isinstance(pos, StoreInLocal):
+                            continue
+                        elif isinstance(pos, StoreInStack):
+                            raise ValueError(
+                                "full graph should not contain guard in stack")
+                        elif isinstance(pos, StoreInGlobal):
+                            new_var.extract_code_at_start.append(pos)
+                        elif isinstance(pos, StoreInAttr):
+                            new_var.extract_code_at_start.append(
+                                self.store_pos_in_callee(pos, idx))
+                        else:
+                            raise NotImplementedError
 
-        def merge_fx_graph():
+        def merge_fx_graph() -> None:
             for node in state.fx_graph.result_graph.nodes:
                 if node.op != 'output':
                     raise NotImplementedError
 
-        def merge_output():
+        def merge_output() -> None:
             if isinstance(return_value, tuple):
                 raise NotImplementedError
             var = state.objects.get(return_value, allow_unexist_const=True)
             new_var = copy.copy(var)
-            if var.extract_code_at_start != unknown_pos:
-                new_var.extract_code_at_start = self.store_pos_in_callee(
-                    var.extract_code_at_start, id(return_value))
+            new_var.extract_code_at_start = []
+            for pos in var.extract_code_at_start:
+                new_var.extract_code_at_start.append(
+                    self.store_pos_in_callee(pos, id(return_value)))
             self.objects.add(new_var, return_value)
 
         if len(state.objects.objs_no_id) > 0:
@@ -263,9 +268,24 @@ class GuardTracker:
         if self.state.start_pc == -1:
             self.state.start_pc = pc
             assert self.state.start_pc >= 0
+        if self.code.get_inst(
+                self.frame.f_lasti).opname in ('SETUP_WITH', 'FOR_ITER',
+                                               'JUMP_IF_TRUE_OR_POP',
+                                               'JUMP_IF_FALSE_OR_POP',
+                                               'SETUP_FINALLY', 'RAISE_VARARGS',
+                                               'SETUP_ASYNC_WITH'):
+            self.state.num_new_refs = -1
+        else:
+            self.state.num_new_refs = stack_effect(
+                inst.opcode,
+                inst.arg or 0,
+                None,
+            )[2]
         if hasattr(self, inst.opname):
             try:
                 getattr(self, inst.opname)(inst)
+                # NOTE: DO NOT write any function call after this line
+                # because frame evaluation function may be set during processing the opcode
             except Exception as e:
                 self.restart(f"Exception during processing {inst.opname}: {e}")
             if not self.have_error and self.state.defer_restart is None:
@@ -297,7 +317,7 @@ class GuardTracker:
             if node.op == "placeholder":
                 var = node.meta["var"]
                 assert isinstance(var, vs.TensorVar)
-                graph_codegen.add_graph_input(var.extract_code_at_start)
+                graph_codegen.add_graph_input(var.extract_code_at_start[0])
         current_inst = self.code.get_inst(lasti)
         # livevars_analysis should return the same result when passing self.code.guard_insts
         # and self.code.original_insts, but as current_inst may not be in original_insts,
@@ -368,6 +388,12 @@ class GuardTracker:
         self.state.is_empty = True
 
     def process_last_inst(self) -> None:
+        if self.state.num_new_refs == -1:
+            self.state.num_new_refs = get_value_stack_size(self.frame)
+        for i in range(self.state.num_new_refs):
+            self.state.object_refs.append(
+                get_value_stack_from_top(self.frame, i))
+        self.state.num_new_refs = 0
         for i, proxy in enumerate(self.state.proxy_waiting_ids):
             value = get_value_stack_from_top(self.frame, i)
             if isinstance(value, torch.Tensor):
@@ -491,7 +517,7 @@ class GuardTracker:
         if inst.argval not in self.state.stored_locals:
             obj = self.frame.f_locals[inst.argval]
             var = vs.make_var_from_value(obj, True, self.state.fx_graph,
-                                         StoreInLocal(inst.argval))
+                                         [StoreInLocal(inst.argval)])
             self.state.add_object(var, obj)
 
     def LOAD_GLOBAL(self, inst: Instruction) -> None:
@@ -506,7 +532,7 @@ class GuardTracker:
                 raise UnknownTypeError(inst.argval)
 
             var = vs.make_var_from_value(obj, True, self.state.fx_graph,
-                                         StoreInGlobal(inst.argval))
+                                         [StoreInGlobal(inst.argval)])
             self.state.add_object(var, obj)
 
     # heheda: we need to make sure that no unbound LOAD_METHOD is called by python runtime to avoid NULL in stack
@@ -515,9 +541,10 @@ class GuardTracker:
         method = getattr(self_obj, inst.argval)
         self_var = self.state.objects.get(self_obj)
         method_var = vs.make_var_from_value(
-            method, self_var.need_guard_check, self.state.fx_graph,
-            StoreInAttr(self_var.extract_code_at_start, self_obj, inst.argval)
-            if self_var.need_guard_check else unknown_pos)
+            method, self_var.need_guard_check, self.state.fx_graph, [
+                StoreInAttr(self_var.extract_code_at_start[0], self_obj,
+                            inst.argval)
+            ] if self_var.need_guard_check else [])
         if isinstance(self_var, vs.ModuleVar) and isinstance(
                 method_var, vs.FunctionVar):
             method_var.src = self_var.src
@@ -529,8 +556,8 @@ class GuardTracker:
         obj_var = self.state.objects.get(obj)
         attr_var = vs.make_var_from_value(
             attr, obj_var.need_guard_check, self.state.fx_graph,
-            StoreInAttr(obj_var.extract_code_at_start, obj, inst.argval)
-            if obj_var.need_guard_check else unknown_pos)
+            [StoreInAttr(obj_var.extract_code_at_start[0], obj, inst.argval)]
+            if obj_var.need_guard_check else [])
         if isinstance(obj_var, vs.ModuleVar):
             if isinstance(attr_var, vs.ModuleVar):
                 attr_var.src = obj_var.src

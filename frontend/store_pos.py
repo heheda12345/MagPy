@@ -48,13 +48,3 @@ class StoreInAttr(StorePos):
 
     def __str__(self) -> str:
         return f"{self.self_pos}.{self.attr_name}"
-
-
-class UnknownStorePos(StorePos):
-
-    def __str__(self) -> str:
-        raise NotImplementedError(
-            "__str__ of UnknownStorePos should not be called")
-
-
-unknown_pos = UnknownStorePos()

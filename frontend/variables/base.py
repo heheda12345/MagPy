@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from abc import abstractmethod
 from typing import Any, TYPE_CHECKING, Optional
 from ..fx_graph import FxGraph
-from ..store_pos import StorePos, unknown_pos
+from ..store_pos import StorePos
 if TYPE_CHECKING:
     import torch.fx
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -12,15 +12,15 @@ if TYPE_CHECKING:
 @dataclass
 class Variable:
     need_guard_check: bool
-    extract_code_at_start: StorePos = unknown_pos
+    extract_code_at_start: list[StorePos]
 
     def __init__(self,
                  need_guard_check: bool,
-                 extract_code_at_start: StorePos = unknown_pos) -> None:
+                 extract_code_at_start: list[StorePos] = []) -> None:
         self.need_guard_check = need_guard_check
         self.extract_code_at_start = extract_code_at_start
         if need_guard_check:
-            assert extract_code_at_start != unknown_pos
+            assert len(extract_code_at_start) > 0
 
     @classmethod
     @abstractmethod
@@ -28,15 +28,18 @@ class Variable:
                    value: Any,
                    need_guard_check: bool,
                    fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: StorePos = unknown_pos) -> 'Variable':
+                   extract_code_at_start: list[StorePos] = []) -> 'Variable':
         raise NotImplementedError
 
     def make_guard(self, codegen: "GuardFnCodegen") -> None:
         if self.need_guard_check:
-            self.make_guard_inner(codegen)
+            assert len(self.extract_code_at_start) > 0
+            for pos in self.extract_code_at_start:
+                self.make_guard_inner(codegen, pos)
 
     @abstractmethod
-    def make_guard_inner(self, codegen: "GuardFnCodegen") -> None:
+    def make_guard_inner(self, codegen: "GuardFnCodegen",
+                         pos: StorePos) -> None:
         raise NotImplementedError
 
     @abstractmethod
