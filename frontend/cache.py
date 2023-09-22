@@ -15,6 +15,7 @@ class CachedGraph:
     end_stack_size: int
     return_values: list[StorePos]
     key: int
+    object_refs: list[Any]
 
 
 TOTAL_SIZE = 0

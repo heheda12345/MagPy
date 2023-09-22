@@ -377,6 +377,7 @@ class GuardTracker:
                 end_stack_size=len(stack_objs),
                 return_values=graph_codegen.get_return_values(),
                 key=key,
+                object_refs=guard_codegen.get_object_refs(),
             ))
 
         if self.state.start_pc == 0 and self.code.original_insts[

@@ -32,7 +32,7 @@ class TorchModuleVar(Variable):
         return cls(value, need_guard_check, extract_code_at_start)
 
     def make_guard_inner(self, codegen: GuardFnCodegen, pos: StorePos) -> None:
-        codegen.add_check(f"id({pos}) == {id(self.module)}")
+        codegen.add_id_check(f"id({pos}) == {id(self.module)}", self.module)
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen") -> None:

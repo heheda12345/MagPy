@@ -89,15 +89,21 @@ class GuardFnCodegen:
     imports: set[str]
     vars: dict[str, Variable]  # name -> var
     key: int
+    object_refs: list[Any]  # the reference to objects for id check
 
     def __init__(self, key: int) -> None:
         self.checks = []
         self.imports = set()
         self.vars = {}
         self.key = key
+        self.object_refs = []
 
     def add_check(self, check: str) -> None:
         self.checks.append(check)
+
+    def add_id_check(self, check: str, obj: Any) -> None:
+        self.add_check(check)
+        self.object_refs.append(obj)
 
     def add_import(self, module_name: str) -> None:
         self.imports.add(module_name)
@@ -141,3 +147,6 @@ class GuardFnCodegen:
 
         self.vars[name] = var
         return name
+
+    def get_object_refs(self) -> list[Any]:
+        return self.object_refs
