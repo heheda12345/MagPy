@@ -76,7 +76,7 @@ class TensorVar(Variable):
         assert fx_graph is not None
         name = new_name('tensor')
         assert len(extract_code_at_start) > 0
-        proxy = fx_graph.create_proxy("placeholder", name, (), {}, name)
+        proxy = fx_graph.create_input(value, name, (), {}, name)
         var = cls.from_tensor_and_proxy(value, proxy, need_guard_check,
                                         extract_code_at_start)
         return var

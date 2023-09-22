@@ -6,6 +6,7 @@ import random
 import operator
 from .bytecode_writter import get_code_keys
 from .c_api import get_value_stack_from_top, get_value_stack_size
+import os
 if TYPE_CHECKING:
     from .instruction import Instruction
 
@@ -170,3 +171,16 @@ def reset() -> None:
     graph_breaker = None
     global random_state
     random_state = None
+
+
+class NO_LD_PRELOAD_CTX:
+    old_ld_preload: str = ''
+
+    def __enter__(self):
+        if 'LD_PRELOAD' in os.environ:
+            self.old_ld_preload = os.environ['LD_PRELOAD']
+            del os.environ['LD_PRELOAD']
+
+    def __exit__(self, *args):
+        if self.old_ld_preload:
+            os.environ['LD_PRELOAD'] = self.old_ld_preload

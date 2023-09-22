@@ -19,10 +19,6 @@ class ObjectTable:
             self.objs_no_id.append(var)
         elif id(value) in self.objs:
             old_var = self.objs[id(value)]
-            print("duplicate id!!!!!!!!!!!!!!!!!!!!!!!!!", value)
-            import torch
-            if isinstance(value, torch.Tensor):
-                print(self.objs[id(value)].extract_code_at_start)
             old_var.extract_code_at_start.extend(var.extract_code_at_start)
             old_var.need_guard_check |= var.need_guard_check
         else:
