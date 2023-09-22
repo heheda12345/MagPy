@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Union, Optional
 import torch.fx
 from .base import Variable
 from ..pycode_writer import get_float_string
-from ..fx_graph import ProxyArgs, FxGraph
+from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -46,5 +46,5 @@ class ScalarVar(Variable):
                    extract_code_at_start: list[StorePos] = []) -> "ScalarVar":
         return cls(value, need_guard_check, extract_code_at_start)
 
-    def as_proxy(self) -> ProxyArgs:
+    def as_fx_node(self) -> NodeArgs:
         return self.value

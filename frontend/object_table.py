@@ -47,5 +47,8 @@ class ObjectTable:
         else:
             return None
 
+    def get_by_id(self, idx: int) -> Variable:
+        return self.objs[idx]
+
     def contains(self, value: Any) -> bool:
         return id(value) in self.objs

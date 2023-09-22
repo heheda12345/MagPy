@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Optional, Tuple, Any
 from .base import Variable
-from ..fx_graph import ProxyArgs, FxGraph
+from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos
 import torch
 if TYPE_CHECKING:
@@ -36,5 +36,5 @@ class TupleVar(Variable):
                    extract_code_at_start: list[StorePos] = []) -> "TupleVar":
         return cls(value, need_guard_check, extract_code_at_start)
 
-    def as_proxy(self) -> ProxyArgs:
+    def as_fx_node(self) -> NodeArgs:
         return self.value

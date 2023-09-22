@@ -5,7 +5,7 @@ from types import ModuleType
 from enum import Enum
 from .base import Variable
 from ..pycode_writer import get_float_string
-from ..fx_graph import ProxyArgs, FxGraph
+from ..fx_graph import NodeArgs, FxGraph
 from ..utils import NullObject, null_object
 from ..store_pos import StorePos
 if TYPE_CHECKING:
@@ -36,7 +36,7 @@ class NoneVar(Variable):
                    extract_code_at_start: list[StorePos] = []) -> "NoneVar":
         return cls(need_guard_check, extract_code_at_start)
 
-    def as_proxy(self) -> ProxyArgs:
+    def as_fx_node(self) -> NodeArgs:
         return None
 
 
@@ -64,7 +64,7 @@ class NullVar(Variable):
                    extract_code_at_start: list[StorePos] = []) -> "NullVar":
         return cls(need_guard_check, extract_code_at_start)
 
-    def as_proxy(self) -> ProxyArgs:
+    def as_fx_node(self) -> NodeArgs:
         raise NotImplementedError()
 
 
@@ -102,7 +102,7 @@ class SliceVar(Variable):
         return cls(value.start, value.stop, value.step, need_guard_check,
                    extract_code_at_start)
 
-    def as_proxy(self) -> ProxyArgs:
+    def as_fx_node(self) -> NodeArgs:
         return slice(self.start, self.stop, self.step)
 
 

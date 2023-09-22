@@ -16,7 +16,7 @@ class GraphFnCodegen:
     outputs: list[Tuple[str, StorePos, str]]
     imports: set[str]
     graph_inputs: list[StorePos]
-    graph_outputs: list[torch.fx.Proxy]
+    graph_outputs: list[torch.fx.Node]
     objs: dict[str, Any]  # name -> var
     key: int
 
@@ -64,11 +64,11 @@ class GraphFnCodegen:
     def get_return_values(self) -> list[StorePos]:
         return [store_pos for _, store_pos, _ in self.outputs]
 
-    def add_graph_output(self, proxy: torch.fx.Proxy) -> str:
-        self.graph_outputs.append(proxy)
+    def add_graph_output(self, fx_node: torch.fx.Node) -> str:
+        self.graph_outputs.append(fx_node)
         return f"graph_out[{len(self.graph_outputs)-1}]"
 
-    def get_graph_outputs(self) -> list[torch.fx.Proxy]:
+    def get_graph_outputs(self) -> list[torch.fx.Node]:
         return self.graph_outputs
 
     def add_graph_input(self, extract_code: StorePos) -> None:

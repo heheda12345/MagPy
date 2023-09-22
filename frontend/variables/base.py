@@ -6,7 +6,7 @@ from ..store_pos import StorePos
 if TYPE_CHECKING:
     import torch.fx
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
-    from ..fx_graph import FxGraph, ProxyArgs
+    from ..fx_graph import FxGraph, NodeArgs
 
 
 @dataclass
@@ -48,5 +48,5 @@ class Variable:
         raise NotImplementedError
 
     @abstractmethod
-    def as_proxy(self) -> "ProxyArgs":
+    def as_fx_node(self) -> "NodeArgs":
         raise NotImplementedError

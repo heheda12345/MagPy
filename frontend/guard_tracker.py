@@ -18,7 +18,7 @@ from . import variables as vs
 from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack
 from .object_table import ObjectTable
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
-from .fx_graph import FxGraph, get_frame_root, is_leaf_module, ProxyArgs
+from .fx_graph import FxGraph, get_frame_root, is_leaf_module, NodeArgs
 from .bytecode_analysis import livevars_analysis
 from .variables.tuple import TupleVar
 
@@ -29,7 +29,7 @@ class State:
     start_stack_size: int
     is_empty: bool
     fx_graph: FxGraph
-    proxy_waiting_ids: list[torch.fx.Proxy]
+    node_waiting_ids: list[torch.fx.Node]
     stored_locals: set[str]
     stored_globals: set[str]
     submodule_paths: dict[str, torch.nn.Module]
@@ -37,6 +37,7 @@ class State:
     written: bool
     defer_restart: Optional[str]  # None if no need to restart
     stack_objs: Optional[list[Any]]
+    callee_output_nodes: dict[int, torch.fx.Node]
     object_refs: list[Any]  # hold the reference of objects to avoid GC
     num_new_refs: int
 
@@ -50,7 +51,7 @@ class State:
             return lambda: setattr(state, "written", True)
 
         self.fx_graph = FxGraph(root, get_mark_written_fn(self))
-        self.proxy_waiting_ids = []
+        self.node_waiting_ids = []
         self.stored_locals = set()
         self.stored_globals = set()
         self.submodule_paths = {mod: name for name, mod in root.named_modules()}
@@ -63,53 +64,54 @@ class State:
         self.object_refs = []
         self.num_new_refs = 0
 
-    def proxy_args_kwargs(
+    def as_node_args_kwargs(
         self, args: list[Any], kwargs: dict[str, Any]
-    ) -> tuple[tuple[torch.fx.Proxy, ...], dict[str, torch.fx.Proxy]]:
+    ) -> tuple[tuple[torch.fx.Node, ...], dict[str, torch.fx.Node]]:
 
-        def as_proxy(var: vs.Variable) -> ProxyArgs:
+        def as_fx_node(var: vs.Variable) -> NodeArgs:
             if isinstance(var, vs.TorchParamVar):
-                return self.fx_graph.create_proxy(
-                    "get_attr", self.subparam_paths[var.param], (), {})
-            return var.as_proxy()
+                return self.fx_graph.create_node("get_attr",
+                                                 self.subparam_paths[var.param],
+                                                 (), {})
+            return var.as_fx_node()
 
-        proxy_args = tuple(
-            as_proxy(self.objects.get(arg, allow_unexist_const=True))
+        node_args = tuple(
+            as_fx_node(self.objects.get(arg, allow_unexist_const=True))
             for arg in args)
-        proxy_kwargs = {
-            key: as_proxy(self.objects.get(arg, allow_unexist_const=True))
+        node_kwargs = {
+            key: as_fx_node(self.objects.get(arg, allow_unexist_const=True))
             for key, arg in kwargs.items()
         }
 
-        return proxy_args, proxy_kwargs
+        return node_args, node_kwargs
 
     def record_function(self, func: Callable[..., Any], args: List[Any],
                         kwargs: Dict[str, Any]) -> None:
-        pargs, pkwargs = self.proxy_args_kwargs(args, kwargs)
+        pargs, pkwargs = self.as_node_args_kwargs(args, kwargs)
         self.written = True
         if isinstance(func, torch.nn.Module):
             if func in self.submodule_paths and is_leaf_module(func):
-                proxy = self.fx_graph.create_proxy(
+                fx_node = self.fx_graph.create_node(
                     "call_module",
                     self.submodule_paths[func],
                     pargs,
                     pkwargs,
                 )
-                self.proxy_waiting_ids.append(proxy)
+                self.node_waiting_ids.append(fx_node)
             else:
                 print(id(func))
                 for k, v in self.submodule_paths.items():
                     print(id(k), v, k)
                 raise NotImplementedError(func)
         else:
-            proxy = self.fx_graph.create_proxy(
+            fx_node = self.fx_graph.create_node(
                 "call_function",
                 func,
                 pargs,
                 pkwargs,
             )
-            print("call_function", func, pargs, proxy)
-            self.proxy_waiting_ids.append(proxy)
+            print("call_function", func, pargs, fx_node)
+            self.node_waiting_ids.append(fx_node)
 
     @classmethod
     def from_frame(cls, frame: FrameType, read_stack: bool,
@@ -349,7 +351,7 @@ class GuardTracker:
             var.make_output(f"__stack__{i}", StoreInStack(i), graph_codegen)
         graph_code = graph_codegen.get_code()
         compiled_graph = self.state.fx_graph.compile(
-            outputs=graph_codegen.get_graph_outputs())
+            output_nodes=graph_codegen.get_graph_outputs())
 
         py_code = f"""\
 {graph_code}
@@ -395,14 +397,14 @@ class GuardTracker:
             self.state.object_refs.append(
                 get_value_stack_from_top(self.frame, i))
         self.state.num_new_refs = 0
-        for i, proxy in enumerate(self.state.proxy_waiting_ids):
+        for i, node in enumerate(self.state.node_waiting_ids):
             value = get_value_stack_from_top(self.frame, i)
             if isinstance(value, torch.Tensor):
-                var = vs.TensorVar.from_tensor_and_proxy(value, proxy, False)
+                var = vs.TensorVar.from_tensor_and_node(value, node, False)
             else:
                 raise NotImplementedError
             self.state.objects.add(var, value)
-        self.state.proxy_waiting_ids.clear()
+        self.state.node_waiting_ids.clear()
         if self.state.defer_restart is not None:
             self.restart("defered restart " + self.state.defer_restart,
                          break_before_cur_inst=True)
