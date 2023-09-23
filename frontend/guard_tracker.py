@@ -694,6 +694,19 @@ class GuardTracker:
         args = args[:-len(kw_names)]
         self.call_function(func, args, kwargs)
 
+    '''
+    not tested due to lack of dict and list type
+    def CALL_FUNCTION_EX(self, inst: Instruction) -> None:
+        offset = inst.argval & 1
+        func = get_value_stack_from_top(self.frame, 1 + offset)
+        args = get_value_stack_from_top(self.frame, offset)
+        if offset == 1:
+            kwargs = get_value_stack_from_top(self.frame, 0)
+        else:
+            kwargs = {}
+        self.call_function(func, args, kwargs)
+    '''
+
     def STORE_FAST(self, inst: Instruction) -> None:
         self.state.add_stored_locals(inst.argval)
 
