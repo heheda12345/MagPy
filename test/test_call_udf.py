@@ -39,6 +39,16 @@ class Model2(torch.nn.Module):
         return self.layer(x) * 2.0
 
 
+class ParamModel(torch.nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.param = torch.nn.Parameter(torch.full((1, 1), 5.0))
+
+    def forward(self, x):
+        return x * self.param
+
+
 def test_call_ud_func_break(caplog):
     reset()
     compiled_call_func = compile(call_func)
@@ -69,6 +79,20 @@ def test_call_ud_model_break(caplog):
     run_and_check(compiled_model, [HIT, HIT, HIT, HIT], 7, caplog, result, a)
 
 
+def test_call_param_module_break(caplog):
+    reset()
+    model = ParamModel()
+    a = torch.full((1, 1), 2.0)
+    result = call_model(model, a)
+    compiled_model = compile(call_model)
+    add_force_graph_break(
+        get_next_frame_id(),
+        2)  # not need +1 because call_model func is called before
+    run_and_check(compiled_model, [MISS, MISS], 4, caplog, result, model, a)
+    run_and_check(compiled_model, [HIT, HIT, HIT, HIT], 4, caplog, result,
+                  model, a)
+
+
 def test_call_ud_func_scalar(caplog):
     reset()
     compiled_call_func = compile(call_func)
@@ -85,3 +109,30 @@ def test_call_ud_func_tensor(caplog):
     result = call_func(a)
     run_and_check(compiled_call_func, [MISS, MISS], 1, caplog, result, a)
     run_and_check(compiled_call_func, [HIT], 1, caplog, result, a)
+
+
+def test_call_ud_module_external(caplog):
+    reset()
+    model = Model()
+    a = torch.full((1, 1), 1.0)
+    result = call_model(model, a)
+    compiled_call_model = compile(call_model)
+    run_and_check(compiled_call_model, [MISS, MISS], 1, caplog, result, model,
+                  a)
+    run_and_check(compiled_call_model, [HIT], 1, caplog, result, model, a)
+
+    model2 = Model2()
+    result = model2(a)
+    compiled_model = compile(model2)
+    run_and_check(compiled_model, [MISS, MISS], 2, caplog, result, a)
+    run_and_check(compiled_model, [HIT], 2, caplog, result, a)
+
+
+def test_call_param_module(caplog):
+    reset()
+    model = ParamModel()
+    a = torch.full((1, 1), 2.0)
+    result = call_model(model, a)
+    compiled_model = compile(call_model)
+    run_and_check(compiled_model, [MISS, MISS], 1, caplog, result, model, a)
+    run_and_check(compiled_model, [HIT], 1, caplog, result, model, a)

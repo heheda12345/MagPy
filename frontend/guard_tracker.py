@@ -29,11 +29,12 @@ class State:
     start_stack_size: int
     is_empty: bool
     fx_graph: FxGraph
+    root: torch.nn.Module
     node_waiting_ids: list[torch.fx.Node]
     stored_locals: set[str]
     stored_globals: set[str]
-    submodule_paths: dict[str, torch.nn.Module]
-    subparam_paths: dict[str, torch.nn.Parameter]
+    submodule_paths: dict[torch.nn.Module, str]
+    subparam_paths: dict[torch.nn.Parameter, str]
     written: bool
     defer_restart: Optional[str]  # None if no need to restart
     stack_objs: Optional[list[Any]]
@@ -50,18 +51,40 @@ class State:
             return lambda: setattr(state, "written", True)
 
         self.fx_graph = FxGraph(root, get_mark_written_fn(self))
+        self.root = root
         self.node_waiting_ids = []
         self.stored_locals = set()
         self.stored_globals = set()
-        self.submodule_paths = {mod: name for name, mod in root.named_modules()}
-        self.subparam_paths = {
-            param: name for name, param in root.named_parameters()
-        }
+        self.submodule_paths = {}
+        self.subparam_paths = {}
+        self.update_subpath(root, "")
+
         self.written = False
         self.defer_restart = None
         self.stack_objs = None
         self.object_refs = []
         self.num_new_refs = 0
+
+    def update_subpath(self, module: torch.nn.Module, prefix: str) -> None:
+
+        def get_name(prefix: str, name: str) -> str:
+            if prefix == "":
+                return name
+            if name == "":
+                return prefix
+            return prefix + "." + name
+
+        for name, mod in module.named_modules():
+            self.submodule_paths[mod] = get_name(prefix, name)
+        for name, param in module.named_parameters():
+            self.subparam_paths[param] = get_name(prefix, name)
+
+    def add_submodule(self, module: torch.nn.Module) -> None:
+        new_module_name = "__external__" + str(len(self.submodule_paths))
+        self.update_subpath(module, new_module_name)
+        self.root.add_module(new_module_name, module)
+        self.update_subpath(module, new_module_name)
+        # self.written = True # not mark as written as graph break may happen
 
     def as_node_args_kwargs(
         self, args: list[Any], kwargs: dict[str, Any]
@@ -89,7 +112,7 @@ class State:
         pargs, pkwargs = self.as_node_args_kwargs(args, kwargs)
         self.written = True
         if isinstance(func, torch.nn.Module):
-            if func in self.submodule_paths and is_leaf_module(func):
+            if is_leaf_module(func):
                 fx_node = self.fx_graph.create_node(
                     "call_module",
                     self.submodule_paths[func],
@@ -98,7 +121,6 @@ class State:
                 )
                 self.node_waiting_ids.append(fx_node)
             else:
-                print(id(func))
                 for k, v in self.submodule_paths.items():
                     print(id(k), v, k)
                 raise NotImplementedError(func)
@@ -181,6 +203,7 @@ class State:
                             raise NotImplementedError
 
         def merge_fx_graph() -> None:
+            print("to merge", state.fx_graph.result_graph)
             replacement_mapping: dict[torch.fx.Node, torch.fx.Node] = {}
 
             def replacement_fn(node: torch.fx.Node) -> torch.fx.Node:
@@ -219,9 +242,31 @@ class State:
                     continue
                 new_node = self.fx_graph.result_graph.node_copy(
                     node, replacement_fn)
-                replacement_mapping[node] = new_node
-                if node.op == "get_attr" or node.op == "call_module" or node.op == "call_method":
+                if node.op == "get_attr":
+                    param_obj = None
+                    for name, obj in state.root.named_parameters():
+                        if name == node.target:
+                            param_obj = obj
+                            break
+                    if param_obj is None:
+                        raise ValueError(
+                            f"cannot find param {node.target} in {state.root}")
+                    name_in_caller = self.subparam_paths[param_obj]
+                    new_node.target = name_in_caller
+                elif node.op == "call_module":
+                    module_obj = None
+                    for name, obj in state.root.named_modules():
+                        if name == node.target:
+                            module_obj = obj
+                            break
+                    if module_obj is None:
+                        raise ValueError(
+                            f"cannot find module {node.target} in {state.root}")
+                    name_in_caller = self.submodule_paths[module_obj]
+                    new_node.target = name_in_caller
+                elif node.op == "call_method":
                     raise NotImplementedError
+                replacement_mapping[node] = new_node
 
         def merge_output() -> None:
             if isinstance(return_value, tuple):
@@ -477,6 +522,10 @@ class GuardTracker:
         args: List[Any],
         kwargs: Dict[str, Any],
     ) -> None:
+        if isinstance(
+                func,
+                torch.nn.Module) and func not in self.state.submodule_paths:
+            self.state.add_submodule(func)
         if is_user_defined_func(func):
             stack_objs = get_all_objects_in_stack(self.frame)
             self.state.mark_defer_restart(f"call_function {func}", stack_objs)
