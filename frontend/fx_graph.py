@@ -73,11 +73,14 @@ class FxGraph:
         return self.create_node("placeholder", target, args, kwargs, name,
                                 type_expr)
 
+    def set_output_nodes(self, output_nodes: list[torch.fx.Node]) -> None:
+        for node in self.result_graph.nodes:
+            assert node.op != "output"
+        self.result_graph.output(tuple(output_nodes))
+
     def compile(
-        self, output_nodes: list[torch.fx.Node]
+        self,
     ) -> Any:  # heheda: shoud be Callable[..., Any], but I cannot pass mypy check
-        self.result_graph.output(output_nodes)
-        print("fx graph:", self.result_graph)
         model = torch.fx.GraphModule(self.root, self.result_graph)
         model.recompile()
         with NO_LD_PRELOAD_CTX():

@@ -37,7 +37,6 @@ class State:
     written: bool
     defer_restart: Optional[str]  # None if no need to restart
     stack_objs: Optional[list[Any]]
-    callee_output_nodes: dict[int, torch.fx.Node]
     object_refs: list[Any]  # hold the reference of objects to avoid GC
     num_new_refs: int
 
@@ -110,7 +109,6 @@ class State:
                 pargs,
                 pkwargs,
             )
-            print("call_function", func, pargs, fx_node)
             self.node_waiting_ids.append(fx_node)
 
     @classmethod
@@ -158,13 +156,12 @@ class State:
             raise NotImplementedError
 
     def merge_call(self, state: 'State', return_value: Any) -> None:
-        if self.defer_restart == None:  # callee will not perform defer restart
+        if self.defer_restart is None:  # callee will not perform defer restart
             return
         self.written = True
         self.defer_restart = None
 
         def merge_call_guard() -> None:
-            # print("objects", self.objects, state.objects.get_all())
             for idx, var in state.objects.objs.items():
                 if var.need_guard_check:
                     new_var = copy.copy(var)
@@ -184,8 +181,46 @@ class State:
                             raise NotImplementedError
 
         def merge_fx_graph() -> None:
+            replacement_mapping: dict[torch.fx.Node, torch.fx.Node] = {}
+
+            def replacement_fn(node: torch.fx.Node) -> torch.fx.Node:
+                return replacement_mapping[node]
+
+            def get_tensor_idx(node: torch.fx.Node) -> int:
+                var = node.meta["var"]
+                idx = var.idx
+                assert isinstance(idx, int) and idx != 0
+                return idx
+
+            def get_original_node(node: torch.fx.Node) -> torch.fx.Node:
+                idx = get_tensor_idx(node)
+                var_in_caller = self.objects.get_by_id(idx)
+                assert isinstance(var_in_caller, vs.TensorVar)
+                return var_in_caller.fx_node
+
             for node in state.fx_graph.result_graph.nodes:
-                if node.op != 'output':
+                if node.op == "placeholder":
+                    replacement_mapping[node] = get_original_node(node)
+                    continue
+                elif node.op == "output":
+                    assert len(node.args) == 1
+                    for arg in node.args[0]:
+                        tensor_idx = get_tensor_idx(arg)
+                        if self.objects.contains_by_id(tensor_idx):
+                            raise NotImplementedError
+                        new_tensor_var = copy.deepcopy(
+                            state.objects.get_by_id(tensor_idx))
+                        assert isinstance(new_tensor_var, vs.TensorVar)
+                        if new_tensor_var.need_guard_check:
+                            raise NotImplementedError
+                        new_tensor_var.extract_code_at_start = []
+                        new_tensor_var.fx_node = replacement_fn(arg)
+                        self.objects.add_by_id(new_tensor_var, tensor_idx)
+                    continue
+                new_node = self.fx_graph.result_graph.node_copy(
+                    node, replacement_fn)
+                replacement_mapping[node] = new_node
+                if node.op == "get_attr" or node.op == "call_module" or node.op == "call_method":
                     raise NotImplementedError
 
         def merge_output() -> None:
@@ -204,6 +239,7 @@ class State:
         merge_call_guard()
         merge_fx_graph()
         merge_output()
+        self.object_refs.extend(state.object_refs)
 
     def mark_defer_restart(self, reason: str, stack_objs: list[Any]) -> None:
         self.defer_restart = reason
@@ -349,38 +385,8 @@ class GuardTracker:
             # else:
             #     var.make_output(f"__stack__{i}", StoreInStack(i), graph_codegen)
             var.make_output(f"__stack__{i}", StoreInStack(i), graph_codegen)
-        graph_code = graph_codegen.get_code()
-        compiled_graph = self.state.fx_graph.compile(
-            output_nodes=graph_codegen.get_graph_outputs())
 
-        py_code = f"""\
-{graph_code}
-{guard_code}
-        """
-        out: Dict[str, Any] = dict()
-        print("RUNNING PY CODE")
-        print(py_code)
-        exec(py_code, self.frame.f_globals, out)
-        guard_fn = out["___make_guard_fn"](*guard_codegen.vars.values())
-        graph_fn = out["___make_graph_fn"](compiled_graph,
-                                           *graph_codegen.objs.values())
-
-        print("guard_fn:", guard_fn)
-        print("pc:", self.state.start_pc, end_pc)
-        print("stack:", self.state.start_stack_size, len(stack_objs))
-
-        get_frame_cache(self.frame_id).add(
-            CachedGraph(
-                guard_fn,
-                graph_fn,
-                self.state.start_pc,
-                end_pc,
-                start_stack_size=self.state.start_stack_size,
-                end_stack_size=len(stack_objs),
-                return_values=graph_codegen.get_return_values(),
-                key=key,
-                object_refs=guard_codegen.get_object_refs(),
-            ))
+        self.state.fx_graph.set_output_nodes(graph_codegen.get_graph_outputs())
 
         if self.state.start_pc == 0 and self.code.original_insts[
                 end_pc].opname == "RETURN_VALUE" and self.caller is not None:
@@ -388,6 +394,39 @@ class GuardTracker:
             assert len(stack_objs) == 1
             self.caller.state.merge_call(
                 self.state, get_value_stack_from_top(self.frame, 0))
+        else:
+            graph_code = graph_codegen.get_code()
+            compiled_graph = self.state.fx_graph.compile()
+
+            py_code = f"""\
+{graph_code}
+{guard_code}
+            """
+            out: Dict[str, Any] = dict()
+            print("RUNNING PY CODE")
+            print(py_code)
+            exec(py_code, self.frame.f_globals, out)
+            guard_fn = out["___make_guard_fn"](*guard_codegen.vars.values())
+            graph_fn = out["___make_graph_fn"](compiled_graph,
+                                               *graph_codegen.objs.values())
+
+            print("guard_fn:", guard_fn)
+            print("pc:", self.state.start_pc, end_pc)
+            print("stack:", self.state.start_stack_size, len(stack_objs))
+
+            get_frame_cache(self.frame_id).add(
+                CachedGraph(
+                    guard_fn,
+                    graph_fn,
+                    self.state.start_pc,
+                    end_pc,
+                    start_stack_size=self.state.start_stack_size,
+                    end_stack_size=len(stack_objs),
+                    return_values=graph_codegen.get_return_values(),
+                    key=key,
+                    object_refs=guard_codegen.get_object_refs(),
+                ))
+
         self.state.is_empty = True
 
     def process_last_inst(self) -> None:

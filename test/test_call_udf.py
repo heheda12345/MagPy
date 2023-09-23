@@ -74,5 +74,14 @@ def test_call_ud_func_scalar(caplog):
     compiled_call_func = compile(call_func)
     a = 1.0
     result = call_func(a)
-    run_and_check(compiled_call_func, [MISS, MISS], 2, caplog, result, a)
-    run_and_check(compiled_call_func, [HIT], 2, caplog, result, a)
+    run_and_check(compiled_call_func, [MISS, MISS], 1, caplog, result, a)
+    run_and_check(compiled_call_func, [HIT], 1, caplog, result, a)
+
+
+def test_call_ud_func_tensor(caplog):
+    reset()
+    compiled_call_func = compile(call_func)
+    a = torch.tensor(1.0)
+    result = call_func(a)
+    run_and_check(compiled_call_func, [MISS, MISS], 1, caplog, result, a)
+    run_and_check(compiled_call_func, [HIT], 1, caplog, result, a)

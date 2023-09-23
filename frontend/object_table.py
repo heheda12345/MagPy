@@ -52,3 +52,6 @@ class ObjectTable:
 
     def contains(self, value: Any) -> bool:
         return id(value) in self.objs
+
+    def contains_by_id(self, idx: int) -> bool:
+        return idx in self.objs
