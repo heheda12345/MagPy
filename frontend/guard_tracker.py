@@ -680,6 +680,20 @@ class GuardTracker:
             # Stack layout: ... | method | self | arg1 | ... | argN
             self.call_function(meth_val, [self_val] + args, kwargs)
 
+    def CALL_FUNCTION_KW(self, inst: Instruction) -> None:
+        num_args = inst.argval
+        args = [
+            get_value_stack_from_top(self.frame, i + 1)
+            for i in range(num_args - 1, -1, -1)
+        ]
+        kw_names = get_value_stack_from_top(self.frame, 0)
+        func = get_value_stack_from_top(self.frame, num_args + 2)
+        kwargs: dict[str, Any] = {}
+        for arg, kw_name in zip(args[-len(kw_names):], kw_names):
+            kwargs[kw_name] = arg
+        args = args[:-len(kw_names)]
+        self.call_function(func, args, kwargs)
+
     def STORE_FAST(self, inst: Instruction) -> None:
         self.state.add_stored_locals(inst.argval)
 

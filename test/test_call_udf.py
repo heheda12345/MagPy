@@ -49,6 +49,17 @@ class ParamModel(torch.nn.Module):
         return x * self.param
 
 
+def func_kw(a, b, c=1.0):
+    return a + b + c
+
+
+def call_function_kw(a, b, c):
+    x = func_kw(a, b, c=2.0)
+    y = func_kw(a, b)
+    z = func_kw(a, b, c)
+    return x + y + z
+
+
 def test_call_ud_func_break(caplog):
     reset()
     compiled_call_func = compile(call_func)
@@ -136,3 +147,15 @@ def test_call_param_module(caplog):
     compiled_model = compile(call_model)
     run_and_check(compiled_model, [MISS, MISS], 1, caplog, result, model, a)
     run_and_check(compiled_model, [HIT], 1, caplog, result, model, a)
+
+
+def test_call_function_kw(caplog):
+    reset()
+    a = 1.0
+    b = 2.0
+    c = 3.0
+    result = call_function_kw(a, b, c)
+    compiled_call_func = compile(call_function_kw)
+    run_and_check(compiled_call_func, [MISS, MISS, MISS, MISS], 1, caplog,
+                  result, a, b, c)
+    run_and_check(compiled_call_func, [HIT], 1, caplog, result, a, b, c)
