@@ -8,7 +8,8 @@ import copy
 from .bytecode_analysis import stacksize_analysis
 from .instruction import Instruction, convert_instruction, ci, format_insts
 from .code import save_code
-from .cache import get_frame_cache, CachedGraph, StorePos, StoreInStack, StoreInLocal
+from .cache import get_frame_cache, CachedGraph
+from .store_pos import StorePos, StoreInStack, StoreInLocal
 
 
 def get_code_keys() -> List[str]:
@@ -290,7 +291,7 @@ def get_instructions(code: types.CodeType) -> List[Instruction]:
 
 
 def add_callsite(
-    orignal_insts: List[Instruction], final_inst: Instruction,
+    orignal_insts: List[Instruction], is_callee: bool,
     cached_graphs: List[CachedGraph], frame_id: int, callsite_id: int,
     start_pc: int
 ) -> tuple[list[Instruction], list[Instruction], dict[str, list[str]]]:
@@ -369,7 +370,17 @@ def add_callsite(
             ])
             in_trace_insts.extend(insts[-2:])
         else:
-            insts.append(ci("RETURN_VALUE"))
+            if is_callee:
+                insts.extend([
+                    ci("LOAD_GLOBAL", "enable_trace"),
+                    ci("LOAD_CONST", frame_id),
+                    ci("CALL_FUNCTION", 1),
+                    ci("POP_TOP"),
+                    ci("RETURN_VALUE")
+                ])
+                in_trace_insts.extend(insts[-3:])
+            else:
+                insts.append(ci("RETURN_VALUE"))
         possible_matches.append(insts)
     restore_stack_insts = [
         ci("LOAD_FAST", f"__stack__{i}")
@@ -417,31 +428,38 @@ def add_name(code_options: Dict[str, Any], varnames: List[str],
     code_options["co_nlocals"] = len(code_options["co_varnames"])
 
 
-def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
+def rewrite_bytecode(code: types.CodeType, frame_id: int,
+                     is_callee: bool) -> types.CodeType:
     original_instructions = get_instructions(code)
     instructions = copy.deepcopy(original_instructions)
     virtualize_jumps(instructions)
     for original_inst, inst in zip(original_instructions, instructions):
         inst.original_inst = original_inst
+    instructions[0].is_start = True
     print(format_insts(instructions))
     strip_extended_args(instructions)
     frame_cache = get_frame_cache(frame_id)
     # list of (start_pc, traced_instructions)
     run_traced_insts: list[tuple[int, list[Instruction]]] = []
     in_trace_insts = []
-    final_insts = [
-        ci("LOAD_GLOBAL", "disable_trace"),
-        ci("LOAD_CONST", frame_id),
-        ci("CALL_FUNCTION", 1),
-        ci("POP_TOP"),
-        ci("RETURN_VALUE")
-    ]
-    in_trace_insts.extend(final_insts[:3])
+    if is_callee:
+        final_insts = [
+            ci("RETURN_VALUE"),
+        ]
+    else:
+        final_insts = [
+            ci("LOAD_GLOBAL", "disable_trace"),
+            ci("LOAD_CONST", frame_id),
+            ci("CALL_FUNCTION", 1),
+            ci("POP_TOP"),
+            ci("RETURN_VALUE")
+        ]
+    in_trace_insts.extend(final_insts)
     new_names_all: dict[str, set[str]] = {"varnames": set(), "names": set()}
     for start_pc, callsite_id in frame_cache.callsite_id.items():
         cached_graphs = frame_cache.cached_graphs[start_pc]
         callsite_code, new_in_trace_insts, new_names = add_callsite(
-            instructions, final_insts[-1], cached_graphs, frame_id, callsite_id,
+            instructions, is_callee, cached_graphs, frame_id, callsite_id,
             start_pc)
         run_traced_insts.append((start_pc, callsite_code))
         in_trace_insts.extend(new_in_trace_insts)
@@ -451,6 +469,7 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
     for i, inst in enumerate(instructions):
         if inst.opname == "RETURN_VALUE":
             instructions[i] = ci("JUMP_ABSOLUTE", target=final_insts[0])
+            instructions[i].is_end = True
             next_original_pc.append((original_instructions[i], instructions[i]))
             in_trace_insts.append(instructions[i])
     run_traced_insts.sort(key=lambda x: x[0], reverse=True)
@@ -462,6 +481,15 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int) -> types.CodeType:
     run_traced_insts.reverse()
     for start_pc, traced_code in run_traced_insts:
         instructions.extend(traced_code)
+    if is_callee:
+        disable_trace_at_start = [
+            ci("LOAD_GLOBAL", "disable_trace"),
+            ci("LOAD_CONST", frame_id),
+            ci("CALL_FUNCTION", 1),
+            ci("POP_TOP"),
+        ]
+        in_trace_insts.extend(disable_trace_at_start[:-1])
+        instructions = disable_trace_at_start + instructions
     instructions.extend(final_insts)
     print("guarded code")
     print(format_insts(instructions))

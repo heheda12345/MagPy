@@ -3,8 +3,8 @@ from types import FrameType
 
 
 def set_eval_frame(
-    new_callback: Tuple[Callable[..., Any], Callable[..., Any]]
-) -> Tuple[Callable[..., Any], Callable[..., Any]]:
+    new_callback: Optional[Tuple[Callable[..., Any], Callable[..., Any]]]
+) -> Optional[Tuple[Callable[..., Any], Callable[..., Any]]]:
     pass
 
 

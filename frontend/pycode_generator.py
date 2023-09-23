@@ -3,7 +3,7 @@ from itertools import chain
 import torch
 import torch.fx
 from .pycode_writer import PyCodeWriter, new_name, is_valid_name
-from .cache import StorePos
+from .store_pos import StorePos
 from .variables import Variable
 
 
@@ -15,8 +15,8 @@ def gen_imports(writer: PyCodeWriter, imports: set[str]) -> None:
 class GraphFnCodegen:
     outputs: list[Tuple[str, StorePos, str]]
     imports: set[str]
-    graph_inputs: list[str]
-    graph_outputs: list[torch.fx.Proxy]
+    graph_inputs: list[StorePos]
+    graph_outputs: list[torch.fx.Node]
     objs: dict[str, Any]  # name -> var
     key: int
 
@@ -47,8 +47,9 @@ class GraphFnCodegen:
         writer.wl(
             f"print('running graph_fn (key = {self.key})', locals.keys())")
         # TODO: simplify
-        writer.wl(f"graph_out = compiled_graph({', '.join(self.graph_inputs)})")
-        # writer.wl(f"print('graph_out', graph_out)")
+        writer.wl(
+            f"graph_out = compiled_graph({', '.join([str(x) for x in self.graph_inputs])})"
+        )  # writer.wl(f"print('graph_out', graph_out)")
         for target_name, _, code in self.outputs:
             writer.wl(f"{target_name} = {code}")
         # writer.wl(f"print('graph_fn done', locals)")
@@ -63,14 +64,14 @@ class GraphFnCodegen:
     def get_return_values(self) -> list[StorePos]:
         return [store_pos for _, store_pos, _ in self.outputs]
 
-    def add_graph_output(self, proxy: torch.fx.Proxy) -> str:
-        self.graph_outputs.append(proxy)
+    def add_graph_output(self, fx_node: torch.fx.Node) -> str:
+        self.graph_outputs.append(fx_node)
         return f"graph_out[{len(self.graph_outputs)-1}]"
 
-    def get_graph_outputs(self) -> list[torch.fx.Proxy]:
+    def get_graph_outputs(self) -> list[torch.fx.Node]:
         return self.graph_outputs
 
-    def add_graph_input(self, extract_code: str) -> None:
+    def add_graph_input(self, extract_code: StorePos) -> None:
         self.graph_inputs.append(extract_code)
 
     def add_var(self, var: Any, name: str = "") -> str:
@@ -88,15 +89,21 @@ class GuardFnCodegen:
     imports: set[str]
     vars: dict[str, Variable]  # name -> var
     key: int
+    object_refs: list[Any]  # the reference to objects for id check
 
     def __init__(self, key: int) -> None:
         self.checks = []
         self.imports = set()
         self.vars = {}
         self.key = key
+        self.object_refs = []
 
     def add_check(self, check: str) -> None:
         self.checks.append(check)
+
+    def add_id_check(self, check: str, obj: Any) -> None:
+        self.add_check(check)
+        self.object_refs.append(obj)
 
     def add_import(self, module_name: str) -> None:
         self.imports.add(module_name)
@@ -140,3 +147,6 @@ class GuardFnCodegen:
 
         self.vars[name] = var
         return name
+
+    def get_object_refs(self) -> list[Any]:
+        return self.object_refs

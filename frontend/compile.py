@@ -2,12 +2,14 @@ import dis
 import sys
 import traceback
 from types import FrameType, CodeType
-from typing import Any, Tuple, Callable
+from typing import Any, Tuple, Callable, cast
 import logging
+import inspect
 import torch
+from . import tracer, utils
 from .c_api import set_eval_frame, set_skip_files, guard_match, c_reset, set_null_object
 from .bytecode_writter import rewrite_bytecode
-from .tracer import enable_trace, disable_trace, get_trace_func
+from .tracer import enable_trace, disable_trace, get_trace_func, get_process_frame
 from .cache import enable_cache
 from .utils import null_object
 from .fx_graph import set_frame_root
@@ -15,37 +17,6 @@ from .fx_graph import set_frame_root
 logging.basicConfig(
     format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s',
     level=logging.INFO)
-
-
-def get_process_frame(
-        f: Callable[..., Any]) -> Tuple[Callable[..., Any], Callable[..., Any]]:
-
-    def preprocess_frame(frame: FrameType,
-                         frame_id: int) -> Tuple[CodeType, Callable[..., Any]]:
-        try:
-            print(f"preprocess frame {frame.f_code.co_filename}", frame_id,
-                  hex(id(frame)))
-            enable_cache(frame_id)
-            set_frame_root(frame_id, f)
-            new_code = rewrite_bytecode(frame.f_code, frame_id)
-            trace_func = get_trace_func(frame_id)
-        except Exception as e:
-            print("exception in preprocess:", e, type(e))
-            print(traceback.format_exc())
-            raise e
-        return (new_code, trace_func)
-
-    def postprocess_frame(frame: FrameType) -> None:
-        try:
-            print(f"postprocess frame {frame.f_code.co_filename}")
-        except Exception as e:
-            print("exception in postprocess:", e, type(e))
-            print(traceback.format_exc())
-            raise e
-        return None
-
-    return (preprocess_frame, postprocess_frame)
-
 
 LOAD_OPCODES = list(
     map(dis.opmap.get, [
@@ -73,7 +44,12 @@ init = False
 def compile(f: Callable[..., Any]) -> Callable[..., Any]:
     global init
     if not init:
-        set_skip_files(set())
+        nn_module = inspect.getmodule(torch.nn.Module)
+        assert nn_module is not None
+        set_skip_files(
+            set({
+                cast(str, nn_module.__file__), tracer.__file__, utils.__file__
+            }))
         set_null_object(null_object)
         init = True
         import builtins
@@ -82,7 +58,7 @@ def compile(f: Callable[..., Any]) -> Callable[..., Any]:
         setattr(builtins, "disable_trace", disable_trace)
 
     def _fn(*args: Any, **kwargs: Any) -> Any:
-        pre, post = get_process_frame(f)
+        pre, post = get_process_frame(f, False)
         prior = set_eval_frame((pre, post))
         try:
             fn = f.forward if isinstance(f, torch.nn.Module) else f

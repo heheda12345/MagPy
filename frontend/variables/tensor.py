@@ -5,12 +5,12 @@ import torch.fx
 from frontend.pycode_generator import GuardFnCodegen, GraphFnCodegen
 from .base import Variable
 from ..pycode_writer import new_name
-from ..fx_graph import FxGraph, ProxyArgs
-from ..cache import StorePos
+from ..fx_graph import FxGraph, NodeArgs
+from ..store_pos import StorePos
 
 
 class TensorVar(Variable):
-    proxy: torch.fx.Proxy
+    fx_node: torch.fx.Node
     dtype: torch.dtype
     device: torch.device
     layout: torch.layout
@@ -22,9 +22,10 @@ class TensorVar(Variable):
     size: Optional[tuple[Optional[int], ...]]
     stride: Optional[tuple[Optional[int], ...]]
     is_contiguous: Optional[bool]
+    idx: int
 
     def __init__(self,
-                 proxy: torch.fx.Proxy,
+                 fx_node: torch.fx.Node,
                  dtype: torch.dtype,
                  device: torch.device,
                  layout: torch.layout,
@@ -37,9 +38,10 @@ class TensorVar(Variable):
                  size: Optional[tuple[Optional[int], ...]] = None,
                  stride: Optional[tuple[Optional[int], ...]] = None,
                  is_contiguous: Optional[bool] = None,
-                 extract_code_at_start: str = "") -> None:
+                 idx: int = 0,
+                 extract_code_at_start: list[StorePos] = []) -> None:
         super().__init__(need_guard_check, extract_code_at_start)
-        self.proxy = proxy
+        self.fx_node = fx_node
         self.dtype = dtype
         self.device = device
         self.layout = layout
@@ -51,19 +53,21 @@ class TensorVar(Variable):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
+        self.idx = idx
 
     @classmethod
-    def from_tensor_and_proxy(cls,
-                              tensor: torch.Tensor,
-                              proxy: torch.fx.Proxy,
-                              need_guard_check: bool,
-                              extract_code_at_start: str = "") -> 'TensorVar':
-        var = cls(proxy, tensor.dtype, tensor.device, tensor.layout,
+    def from_tensor_and_node(
+            cls,
+            tensor: torch.Tensor,
+            fx_node: torch.fx.Node,
+            need_guard_check: bool,
+            extract_code_at_start: list[StorePos] = []) -> 'TensorVar':
+        var = cls(fx_node, tensor.dtype, tensor.device, tensor.layout,
                   tensor.ndim, tensor.requires_grad, tensor.is_quantized,
-                  tensor.is_sparse, type(tensor),
-                  need_guard_check, tensor.size(), tensor.stride(),
-                  tensor.is_contiguous(), extract_code_at_start)
-        proxy.node.meta["var"] = var
+                  tensor.is_sparse, type(tensor), need_guard_check,
+                  tensor.size(), tensor.stride(), tensor.is_contiguous(),
+                  id(tensor), extract_code_at_start)
+        fx_node.meta["var"] = var
         return var
 
     @classmethod
@@ -71,17 +75,17 @@ class TensorVar(Variable):
                    value: torch.Tensor,
                    need_guard_check: bool,
                    fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: str = "") -> 'TensorVar':
+                   extract_code_at_start: list[StorePos] = []) -> 'TensorVar':
         assert fx_graph is not None
         name = new_name('tensor')
-        assert extract_code_at_start != ""
-        proxy = fx_graph.create_proxy("placeholder", name, (), {}, name)
-        var = cls.from_tensor_and_proxy(value, proxy, need_guard_check,
-                                        extract_code_at_start)
+        assert len(extract_code_at_start) > 0
+        fx_node = fx_graph.create_input(value, name, (), {}, name)
+        var = cls.from_tensor_and_node(value, fx_node, need_guard_check,
+                                       extract_code_at_start)
         return var
 
-    def as_proxy(self) -> ProxyArgs:
-        return self.proxy
+    def as_fx_node(self) -> NodeArgs:
+        return self.fx_node
 
     def tensor_guard_check(self, value: torch.Tensor) -> bool:
         return isinstance(value, torch.Tensor) and self.dtype == value.dtype and self.device == value.device and \
@@ -94,15 +98,14 @@ class TensorVar(Variable):
             hasattr(value, 'stride') and self.stride == value.stride() and \
             hasattr(value, 'is_contiguous') and self.is_contiguous == value.is_contiguous()
 
-    def make_guard_inner(self, codegen: GuardFnCodegen) -> None:
+    def make_guard_inner(self, codegen: "GuardFnCodegen",
+                         pos: StorePos) -> None:
         name_in_codegen = codegen.add_var(self)
-        codegen.add_check(
-            f"{name_in_codegen}.tensor_guard_check({self.extract_code_at_start})"
-        )
+        codegen.add_check(f"{name_in_codegen}.tensor_guard_check({pos})")
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen") -> None:
-        name_in_graph_output = codegen.add_graph_output(self.proxy)
+        name_in_graph_output = codegen.add_graph_output(self.fx_node)
         codegen.output(name_in_graph_fn, store_pos, name_in_graph_output)
 
 
@@ -112,26 +115,28 @@ class TorchParamVar(Variable):
     def __init__(self,
                  param: torch.nn.Parameter,
                  need_guard_check: bool,
-                 extract_code_at_start: str = "") -> None:
+                 extract_code_at_start: list[StorePos] = []) -> None:
         super().__init__(need_guard_check, extract_code_at_start)
-        assert extract_code_at_start != ""
+        assert len(extract_code_at_start) > 0
         self.param = param
 
     @classmethod
-    def from_value(cls,
-                   value: torch.nn.Parameter,
-                   need_guard_check: bool,
-                   _fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: str = "") -> "TorchParamVar":
+    def from_value(
+            cls,
+            value: torch.nn.Parameter,
+            need_guard_check: bool,
+            _fx_graph: Optional[FxGraph] = None,
+            extract_code_at_start: list[StorePos] = []) -> "TorchParamVar":
         return cls(value, need_guard_check, extract_code_at_start)
 
-    def make_guard_inner(self, codegen: GuardFnCodegen) -> None:
-        codegen.add_check(
-            f"id({self.extract_code_at_start}) == {id(self.param)}")
+    def make_guard_inner(self, codegen: "GuardFnCodegen",
+                         pos: StorePos) -> None:
+        codegen.add_id_check(f"id({pos}) == {id(self.param)}", self.param)
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen") -> None:
-        codegen.output(name_in_graph_fn, store_pos, self.extract_code_at_start)
+        codegen.output(name_in_graph_fn, store_pos,
+                       str(self.extract_code_at_start))
 
-    def as_proxy(self) -> "ProxyArgs":
-        raise ValueError("TorchParamVar.as_proxy should not be called")
+    def as_fx_node(self) -> "NodeArgs":
+        raise ValueError("TorchParamVar.as_fx_node should not be called")

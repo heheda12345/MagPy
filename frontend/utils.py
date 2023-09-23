@@ -1,8 +1,14 @@
 import inspect
 import dis
-from typing import Any
-from .bytecode_writter import get_code_keys
+from typing import Any, TYPE_CHECKING, Callable
+from types import FrameType
 import random
+import operator
+from .bytecode_writter import get_code_keys
+from .c_api import get_value_stack_from_top, get_value_stack_size
+import os
+if TYPE_CHECKING:
+    from .instruction import Instruction
 
 
 class NullObject:
@@ -15,7 +21,7 @@ class NullObject:
     '''
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        print("calling unbound method", args[0], args[1:], kwargs)
+        print("calling unbound method")
         return args[0](*args[1:], **kwargs)
 
 
@@ -39,6 +45,58 @@ def print_bytecode() -> None:
 
 def is_scalar(value: Any) -> bool:
     return type(value) in {int, float, bool, str}
+
+
+def is_call_bytecode(inst: 'Instruction') -> bool:
+    return inst.opname.startswith("CALL_")
+
+
+fx_graph_functions: set[Callable[..., Any]] = {
+    operator.pos,
+    operator.neg,
+    operator.not_,
+    operator.invert,
+    operator.pow,
+    operator.mul,
+    operator.matmul,
+    operator.floordiv,
+    operator.truediv,
+    operator.mod,
+    operator.add,
+    operator.sub,
+    operator.getitem,
+    operator.lshift,
+    operator.rshift,
+    operator.and_,
+    operator.or_,
+    operator.xor,
+    # operator.ipow,
+    # operator.imul,
+    # operator.imatmul,
+    # operator.ifloordiv,
+    # operator.itruediv,
+    # operator.imod,
+    # operator.iadd,
+    # operator.isub,
+    # operator.ilshift,
+    # operator.irshift,
+    # operator.iand,
+    # operator.ixor,
+    # operator.ior,
+}
+
+
+def is_user_defined_func(func: Callable[..., Any]) -> bool:
+    if func in fx_graph_functions:
+        return False
+    module = inspect.getmodule(func)
+    if module is None:
+        return True
+    module_pack = module.__package__
+    if module_pack is None:
+        return True
+    root_module = module_pack.split('.')[0]
+    return root_module not in ('math', 'builtins', 'torch', 'numpy')
 
 
 random_state = None
@@ -103,8 +161,26 @@ class UnknownTypeError(Exception):
         super().__init__(f"Unknown type {ty}")
 
 
+def get_all_objects_in_stack(frame: FrameType) -> list[Any]:
+    stack_size = get_value_stack_size(frame)
+    return [get_value_stack_from_top(frame, i) for i in range(stack_size)]
+
+
 def reset() -> None:
     global graph_breaker
     graph_breaker = None
     global random_state
     random_state = None
+
+
+class NO_LD_PRELOAD_CTX:
+    old_ld_preload: str = ''
+
+    def __enter__(self) -> None:
+        if 'LD_PRELOAD' in os.environ:
+            self.old_ld_preload = os.environ['LD_PRELOAD']
+            del os.environ['LD_PRELOAD']
+
+    def __exit__(self, *args: Any) -> None:
+        if self.old_ld_preload:
+            os.environ['LD_PRELOAD'] = self.old_ld_preload

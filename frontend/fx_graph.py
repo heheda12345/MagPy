@@ -1,45 +1,9 @@
 from typing import Any, Callable, Dict, Optional, Tuple, Union
-import operator
 import torch
 import torch.fx
-
-
-def fx_graph_functions() -> set[Callable[..., Any]]:
-    fns: set[Callable[..., Any]] = {
-        operator.pos,
-        operator.neg,
-        operator.not_,
-        operator.invert,
-        operator.pow,
-        operator.mul,
-        operator.matmul,
-        operator.floordiv,
-        operator.truediv,
-        operator.mod,
-        operator.add,
-        operator.sub,
-        operator.getitem,
-        operator.lshift,
-        operator.rshift,
-        operator.and_,
-        operator.or_,
-        operator.xor,
-        # operator.ipow,
-        # operator.imul,
-        # operator.imatmul,
-        # operator.ifloordiv,
-        # operator.itruediv,
-        # operator.imod,
-        # operator.iadd,
-        # operator.isub,
-        # operator.ilshift,
-        # operator.irshift,
-        # operator.iand,
-        # operator.ixor,
-        # operator.ior,
-    }
-    return fns
-
+import torch._inductor.compile_fx
+from .utils import NO_LD_PRELOAD_CTX
+from . import config
 
 BaseArgumentTypes = Union[
     str,
@@ -51,23 +15,37 @@ BaseArgumentTypes = Union[
     #   torch.layout, torch._ops.OpOverload
 ]
 
-ProxyArgs = Union[BaseArgumentTypes, torch.fx.Proxy]
+NodeArgs = Union[BaseArgumentTypes, torch.fx.Node]
+
+
+def backend_compile(gm: torch.fx.GraphModule,
+                    example_inputs: list[torch.Tensor]) -> Any:
+    if callable(config.backend):
+        return config.backend(gm, example_inputs)
+    elif config.backend == 'eager':
+        return gm
+    elif config.backend == 'inductor':
+        return torch._inductor.compile_fx.compile_fx(gm, example_inputs)
+    else:
+        raise RuntimeError(f"Unknown backend: {config.backend}")
 
 
 class FxGraph:
     root: torch.nn.Module
     result_graph: torch.fx.Graph
-    tracer: torch.fx.Tracer
     mark_written_fn: Callable[[], None]
+    fake_mode: torch._subclasses.FakeTensorMode
+    example_inputs: list[tuple[str, torch.Tensor]]
 
     def __init__(self, root: torch.nn.Module,
                  mark_written_fn: Callable[[], None]) -> None:
         self.root = root
         self.result_graph = torch.fx.Graph(root)
-        self.tracer = torch.fx.proxy.GraphAppendingTracer(self.result_graph)
         self.mark_written_fn = mark_written_fn
+        self.fake_mode = torch._subclasses.FakeTensorMode()
+        self.example_inputs = []
 
-    def create_proxy(
+    def create_node(
         self,
         kind: str,
         target: torch.fx.node.Target,
@@ -75,26 +53,44 @@ class FxGraph:
         kwargs: Dict[str, Any],
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
-        proxy_factory_fn: Optional[Callable[[torch.fx.Node],
-                                            torch.fx.Proxy]] = None
-    ) -> torch.fx.Proxy:
+    ) -> torch.fx.Node:
         self.mark_written_fn()
-        return self.tracer.create_proxy(kind, target, args, kwargs, name,
-                                        type_expr, proxy_factory_fn)
+        return self.result_graph.create_node(kind, target, args, kwargs, name,
+                                             type_expr)
+
+    def create_input(
+        self,
+        value: torch.Tensor,
+        target: torch.fx.node.Target,
+        args: Tuple[Any, ...],
+        kwargs: Dict[str, Any],
+        name: Optional[str] = None,
+        type_expr: Optional[Any] = None,
+    ) -> torch.fx.Node:
+        fake_tensor = self.fake_mode.from_tensor(value, static_shapes=True)
+        self.mark_written_fn()
+        self.example_inputs.append((fake_tensor, name))
+        return self.create_node("placeholder", target, args, kwargs, name,
+                                type_expr)
+
+    def set_output_nodes(self, output_nodes: list[torch.fx.Node]) -> None:
+        for node in self.result_graph.nodes:
+            assert node.op != "output"
+        self.result_graph.output(tuple(output_nodes))
 
     def compile(
-        self, outputs: list[torch.fx.Proxy]
+        self,
     ) -> Any:  # heheda: shoud be Callable[..., Any], but I cannot pass mypy check
-        output_nodes = tuple((x.node for x in outputs))
-        self.result_graph.output(output_nodes)
-        print("fx graph:", self.result_graph)
         model = torch.fx.GraphModule(self.root, self.result_graph)
         model.recompile()
-        assert callable(model)
+        with NO_LD_PRELOAD_CTX():
+            compiled_fn = backend_compile(model,
+                                          [x[0] for x in self.example_inputs])
+        assert callable(compiled_fn)
         # TODO: add backend compiler
-        return model
+        return compiled_fn
 
-    def get_inputs(self) -> list[torch.fx.Proxy]:
+    def get_inputs(self) -> list[torch.fx.Node]:
         return [x for x in self.result_graph.nodes if x.op == "placeholder"]
 
 
@@ -102,8 +98,6 @@ frame_root: dict[int, torch.nn.Module] = {}
 
 
 def set_frame_root(frame_id: int, root: Any) -> None:
-    if frame_id in frame_root:
-        return
     if isinstance(root, torch.nn.Module):
         root_module = root
     elif hasattr(root, '__self__') and isinstance(root.__self__,

@@ -36,12 +36,12 @@ def run_and_check(compiled, expect_cache_logs, expect_cache_size: int, caplog,
                   expected_result, *args, **kwargs):
     caplog.set_level(logging.INFO)
     caplog.clear()
-
-    out = compiled(*args, **kwargs)
+    with torch.no_grad():
+        out = compiled(*args, **kwargs)
     assert_equal(expected_result, out)
     recorded_cache_logs = []
     for record in caplog.records:
-        if record.message.startswith("guard cache"):
+        if record.message.startswith("\033[31mguard cache"):
             if "hit" in record.message:
                 recorded_cache_logs.append(HIT)
             elif "miss" in record.message:

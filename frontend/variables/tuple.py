@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Optional, Tuple, Any
 from .base import Variable
-from ..fx_graph import ProxyArgs, FxGraph
-from ..cache import StorePos
+from ..fx_graph import NodeArgs, FxGraph
+from ..store_pos import StorePos
 import torch
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -12,12 +12,13 @@ class TupleVar(Variable):
     def __init__(self,
                  value: tuple[Any, ...],
                  need_guard_check: bool,
-                 extract_code_at_start: str = "") -> None:
+                 extract_code_at_start: list[StorePos] = []) -> None:
         super().__init__(need_guard_check, extract_code_at_start)
         self.value = value
 
-    def make_guard_inner(self, codegen: "GuardFnCodegen") -> None:
-        codegen.add_check(f"{self.extract_code_at_start} == {self.value}")
+    def make_guard_inner(self, codegen: "GuardFnCodegen",
+                         pos: StorePos) -> None:
+        codegen.add_check(f"{pos} == {self.value}")
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen") -> None:
@@ -32,8 +33,8 @@ class TupleVar(Variable):
                    value: Tuple[Any, ...],
                    need_guard_check: bool,
                    _fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: str = "") -> "TupleVar":
+                   extract_code_at_start: list[StorePos] = []) -> "TupleVar":
         return cls(value, need_guard_check, extract_code_at_start)
 
-    def as_proxy(self) -> ProxyArgs:
+    def as_fx_node(self) -> NodeArgs:
         return self.value
