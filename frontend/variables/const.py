@@ -11,6 +11,7 @@ from ..utils import NullObject, null_object
 from ..store_pos import StorePos
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
+    from ..object_table import ReadOnlyObjectTable
 
 
 class NoneVar(Variable):
@@ -37,6 +38,7 @@ class NoneVar(Variable):
     def from_value(cls,
                    value: None,
                    need_guard_check: bool,
+                   _object_table: 'ReadOnlyObjectTable',
                    _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "NoneVar":
         return cls(need_guard_check, extract_code_at_start)
@@ -69,6 +71,7 @@ class NullVar(Variable):
     def from_value(cls,
                    value: NullObject,
                    need_guard_check: bool,
+                   _object_table: 'ReadOnlyObjectTable',
                    _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "NullVar":
         return cls(need_guard_check, extract_code_at_start)
@@ -110,6 +113,7 @@ class SliceVar(Variable):
     def from_value(cls,
                    value: slice,
                    need_guard_check: bool,
+                   _object_table: 'ReadOnlyObjectTable',
                    _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "SliceVar":
         return cls(value.start, value.stop, value.step, need_guard_check,
@@ -154,6 +158,7 @@ class ModuleVar(Variable):
     def from_value(cls,
                    value: ModuleType,
                    need_guard_check: bool,
+                   _object_table: 'ReadOnlyObjectTable',
                    _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "ModuleVar":
         if value in torch_modules:
@@ -189,6 +194,7 @@ class FunctionVar(Variable):
     def from_value(cls,
                    value: Callable[..., Any],
                    need_guard_check: bool,
+                   _object_table: 'ReadOnlyObjectTable',
                    _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "FunctionVar":
         return cls(value, ObjectSrc.USER_DEFINED, need_guard_check,

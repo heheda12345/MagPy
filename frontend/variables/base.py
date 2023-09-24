@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     import torch.fx
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
     from ..fx_graph import FxGraph, NodeArgs
+    from ..object_table import ReadOnlyObjectTable, ObjectTable
 
 
 @dataclass
@@ -27,6 +28,7 @@ class Variable:
     def from_value(self,
                    value: Any,
                    need_guard_check: bool,
+                   object_table: 'ReadOnlyObjectTable',
                    fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> 'Variable':
         raise NotImplementedError
@@ -55,3 +57,6 @@ class Variable:
     @abstractmethod
     def as_fx_node(self) -> "NodeArgs":
         raise NotImplementedError
+
+    def add_subvars_to_table(self, table: 'ObjectTable') -> None:
+        pass

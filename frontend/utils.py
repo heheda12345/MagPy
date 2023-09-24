@@ -1,6 +1,6 @@
 import inspect
 import dis
-from typing import Any, TYPE_CHECKING, Callable
+from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic
 from types import FrameType
 import random
 import operator
@@ -184,3 +184,23 @@ class NO_LD_PRELOAD_CTX:
     def __exit__(self, *args: Any) -> None:
         if self.old_ld_preload:
             os.environ['LD_PRELOAD'] = self.old_ld_preload
+
+
+T = TypeVar('T')
+
+
+class ReadOnlyObject(Generic[T]):
+    obj: T
+    const_attrs: tuple[str, ...]
+
+    def __init__(self, obj: T, const_attrs: tuple[str, ...] = ()) -> None:
+        self.obj = obj
+        self.const_attrs = const_attrs
+
+    def __getattr__(self, attr: str) -> Any:
+        if attr in self.const_attrs:
+            return getattr(self.obj, attr)
+        else:
+            raise AttributeError(
+                f"Attribute {attr} should not be called in reader of {self.obj}"
+            )
