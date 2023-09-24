@@ -710,6 +710,24 @@ class GuardTracker:
     def STORE_FAST(self, inst: Instruction) -> None:
         self.state.add_stored_locals(inst.argval)
 
+    def POP_JUMP_IF_FALSE(self, _inst: Instruction) -> None:
+        pass
+
+    def POP_JUMP_IF_TRUE(self, _inst: Instruction) -> None:
+        pass
+
+    def JUMP_IF_TRUE_OR_POP(self, _inst: Instruction) -> None:
+        pass
+
+    def JUMP_IF_FALSE_OR_POP(self, _inst: Instruction) -> None:
+        pass
+
+    def JUMP_FORWARD(self, inst: Instruction) -> None:
+        pass
+
+    def JUMP_ABSOLUTE(self, inst: Instruction) -> None:
+        pass
+
     # def BUILD_TUPLE(self, inst: Instruction) -> None:
     #     # maybe need to implement
     #     pass

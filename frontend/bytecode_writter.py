@@ -308,10 +308,8 @@ def add_callsite(
         in_trace_insts.extend(disable_trace_insts[:-1])
 
     start_stack_size = cached_graphs[0].start_stack_size if cached_graphs else 0
-    end_stack_size = cached_graphs[0].end_stack_size if cached_graphs else 0
     for graph in cached_graphs:
         assert graph.start_stack_size == start_stack_size
-        assert graph.end_stack_size == end_stack_size
 
     prepare_stack_insts = [
         ci("STORE_FAST", f"__stack__{i}") for i in range(start_stack_size)
@@ -407,10 +405,12 @@ def add_callsite(
         *call_guard_insts,
         *match_and_run_insts,
     ]
+    max_end_stack_size = max([g.start_stack_size for g in cached_graphs],
+                             default=0)
     new_names = {
         "varnames": ["__graph_fn", "__case_idx"] + [
             f"__stack__{i}"
-            for i in range(max(start_stack_size, end_stack_size))
+            for i in range(max(start_stack_size, max_end_stack_size))
         ],
         "names": [
             "guard_match", "enable_trace", "disable_trace", "locals",
