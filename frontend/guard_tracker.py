@@ -320,15 +320,16 @@ class GuardTracker:
         self.state = State.from_frame(self.frame, read_stack, self.frame_root)
         self.have_error = False
 
-    def variable_check(self,
-                       var: TupleVar,
+    def variable_check(self, var: TupleVar,
                        extract_code_at_start: StorePos) -> None:
         for i, sub_obj in enumerate(var.value):
-            sub_var = vs.make_var_from_value(sub_obj, True, self.state.fx_graph,
-                                             [StoreInTuple(extract_code_at_start, i)])
+            sub_var = vs.make_var_from_value(
+                sub_obj, True, self.state.fx_graph,
+                [StoreInTuple(extract_code_at_start, i)])
             self.state.add_object(sub_var, sub_obj)
             if isinstance(sub_var, TupleVar):
-                self.variable_check(sub_var, StoreInTuple(extract_code_at_start, i))
+                self.variable_check(sub_var,
+                                    StoreInTuple(extract_code_at_start, i))
 
     def variable_output(self, var: Variable, name_in_graph_fn: str,
                         store_pos: StorePos, codegen: "GraphFnCodegen") -> None:

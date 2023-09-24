@@ -1,5 +1,4 @@
 from typing import TYPE_CHECKING, Union, Optional, Callable, Any
-from frontend.cache import StorePos
 from frontend.pycode_generator import GraphFnCodegen
 
 import torch.fx

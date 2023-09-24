@@ -54,7 +54,7 @@ class StoreInTuple(StorePos):
     self_pos: StorePos
     self_idx: int
 
-    def __init__(self, self_pos: StorePos, self_idx:int) -> None:
+    def __init__(self, self_pos: StorePos, self_idx: int) -> None:
         self.self_pos = self_pos
         self.self_idx = self_idx
 

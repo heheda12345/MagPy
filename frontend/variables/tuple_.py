@@ -20,8 +20,9 @@ class TupleVar(Variable):
         self.length = len(value)
         self.objs = []
 
-    def make_guard_inner(self, codegen: "GuardFnCodegen", pos: StorePos) -> None:
-        codegen.add_check(f"111==111 and len({pos}) == {self.length} and 222==222")
+    def make_guard_inner(self, codegen: "GuardFnCodegen",
+                         pos: StorePos) -> None:
+        codegen.add_check(f"len({pos}) == {self.length}")
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen") -> None:
