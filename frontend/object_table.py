@@ -1,7 +1,7 @@
 from typing import Any, get_args, Optional, Tuple
 from .variables.base import Variable
 from .variables import CONST_TYPES, ScalarVar, make_var_from_value
-from .variables.tuple import TupleVar
+from .variables.tuple_ import TupleVar
 from .utils import NullObject
 
 

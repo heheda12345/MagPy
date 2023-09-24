@@ -108,6 +108,11 @@ class TensorVar(Variable):
         name_in_graph_output = codegen.add_graph_output(self.fx_node)
         codegen.output(name_in_graph_fn, store_pos, name_in_graph_output)
 
+    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
+                  codegen: "GraphFnCodegen") -> None:
+        name_in_graph_output = codegen.add_graph_output(self.fx_node)
+        codegen.add_temp(name_in_graph_fn, store_pos, name_in_graph_output)
+
 
 class TorchParamVar(Variable):
     param: torch.nn.Parameter
@@ -137,6 +142,10 @@ class TorchParamVar(Variable):
                     codegen: "GraphFnCodegen") -> None:
         codegen.output(name_in_graph_fn, store_pos,
                        str(self.extract_code_at_start))
+
+    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
+                  codegen: GraphFnCodegen) -> None:
+        return super().make_temp(name_in_graph_fn, store_pos, codegen)
 
     def as_fx_node(self) -> "NodeArgs":
         raise ValueError("TorchParamVar.as_fx_node should not be called")

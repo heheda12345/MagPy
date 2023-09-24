@@ -1,4 +1,5 @@
 from typing import TYPE_CHECKING, Union, Optional, Callable, Any
+from frontend.pycode_generator import GraphFnCodegen
 
 import torch.fx
 from types import ModuleType
@@ -28,6 +29,10 @@ class NoneVar(Variable):
                     codegen: "GraphFnCodegen") -> None:
         codegen.output(name_in_graph_fn, store_pos, "None")
 
+    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
+                  codegen: GraphFnCodegen) -> None:
+        pass
+
     @classmethod
     def from_value(cls,
                    value: None,
@@ -55,6 +60,10 @@ class NullVar(Variable):
                     codegen: "GraphFnCodegen") -> None:
         name_in_codegen = codegen.add_var(null_object, "NULL_VAR")
         codegen.output(name_in_graph_fn, store_pos, f"{name_in_codegen} # NULL")
+
+    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
+                  codegen: GraphFnCodegen) -> None:
+        pass
 
     @classmethod
     def from_value(cls,
@@ -92,6 +101,10 @@ class SliceVar(Variable):
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen") -> None:
         codegen.output(name_in_graph_fn, store_pos, "None")
+
+    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
+                  codegen: GraphFnCodegen) -> None:
+        return super().make_temp(name_in_graph_fn, store_pos, codegen)
 
     @classmethod
     def from_value(cls,

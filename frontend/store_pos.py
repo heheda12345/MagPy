@@ -48,3 +48,15 @@ class StoreInAttr(StorePos):
 
     def __str__(self) -> str:
         return f"{self.self_pos}.{self.attr_name}"
+
+
+class StoreInTuple(StorePos):
+    self_pos: StorePos
+    self_idx: int
+
+    def __init__(self, self_pos: StorePos, self_idx: int) -> None:
+        self.self_pos = self_pos
+        self.self_idx = self_idx
+
+    def __str__(self) -> str:
+        return f"{self.self_pos}[{self.self_idx}]"

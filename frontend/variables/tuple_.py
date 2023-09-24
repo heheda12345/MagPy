@@ -8,6 +8,8 @@ if TYPE_CHECKING:
 
 
 class TupleVar(Variable):
+    objs: list[Variable]
+    length: int
 
     def __init__(self,
                  value: tuple[Any, ...],
@@ -15,18 +17,31 @@ class TupleVar(Variable):
                  extract_code_at_start: list[StorePos] = []) -> None:
         super().__init__(need_guard_check, extract_code_at_start)
         self.value = value
+        self.length = len(value)
+        self.objs = []
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_check(f"{pos} == {self.value}")
+        codegen.add_check(f"len({pos}) == {self.length}")
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen") -> None:
-        # print(f"come to make output:{self.value}")
-        # for sub_value in self.value:
-        #     if isinstance(sub_value, torch.Tensor):
-        #         id(sub_value)
-        codegen.output(name_in_graph_fn, store_pos, str(self.value))
+        for j, var in enumerate(self.objs):
+            var.make_temp(f"{name_in_graph_fn}_{j}", store_pos, codegen)
+
+        codegen.output(
+            name_in_graph_fn, store_pos,
+            f"({','.join(f'{name_in_graph_fn}_{j}' for j in range(len(self.objs)))},)"
+        )
+
+    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
+                  codegen: "GraphFnCodegen") -> None:
+        for j, var in enumerate(self.objs):
+            var.make_temp(f"{name_in_graph_fn}_{j}", store_pos, codegen)
+        codegen.add_temp(
+            name_in_graph_fn, store_pos,
+            f"({','.join(f'{name_in_graph_fn}_{j}' for j in range(len(self.objs)))})"
+        )
 
     @classmethod
     def from_value(cls,

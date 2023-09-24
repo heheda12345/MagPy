@@ -38,6 +38,10 @@ class ScalarVar(Variable):
         else:
             codegen.output(name_in_graph_fn, store_pos, str(self.value))
 
+    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
+                  codegen: "GraphFnCodegen") -> None:
+        codegen.add_temp(name_in_graph_fn, store_pos, str(self.value))
+
     @classmethod
     def from_value(cls,
                    value: ScalarType,

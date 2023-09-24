@@ -6,7 +6,7 @@ from .scalar import ScalarVar
 from .tensor import TensorVar, TorchParamVar
 from .torch_module import TorchModuleVar
 from .const import NullVar, NoneVar, SliceVar, ModuleVar, FunctionVar, ObjectSrc
-from .tuple import TupleVar
+from .tuple_ import TupleVar
 from ..fx_graph import FxGraph
 from ..utils import NullObject, UnknownTypeError
 from ..store_pos import StorePos
