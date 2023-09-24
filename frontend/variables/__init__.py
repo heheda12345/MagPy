@@ -45,9 +45,6 @@ def make_var_from_value(value: Any,
     elif callable(value):
         return FunctionVar.from_value(value, need_guard_check, object_table,
                                       fx_graph, extract_code_at_start)
-    elif isinstance(value, tuple):
-        return TupleVar.from_value(value, need_guard_check, object_table,
-                                   fx_graph, extract_code_at_start)
     raise UnknownTypeError(type(value))
 
 

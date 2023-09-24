@@ -13,7 +13,7 @@ from .code import ProcessedCode, load_code
 from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
-from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInTuple
+from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex
 from . import variables as vs
 from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack
 from .object_table import ObjectTable

@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Optional, Tuple, Any
 from .base import Variable
 from ..fx_graph import NodeArgs, FxGraph
-from ..store_pos import StorePos, StoreInTuple
+from ..store_pos import StorePos, StoreInIndex
 import torch
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -27,7 +27,7 @@ class TupleVar(Variable):
         from . import make_var_from_value
         for i, obj in enumerate(value):
             new_extract: list[StorePos] = [
-                StoreInTuple(pos, i) for pos in self.extract_code_at_start
+                StoreInIndex(pos, i) for pos in self.extract_code_at_start
             ]
             var = object_table.get_or_make_var(obj, need_guard_check, fx_graph,
                                                new_extract)
@@ -38,7 +38,7 @@ class TupleVar(Variable):
                          pos: StorePos) -> None:
         codegen.add_check(f"len({pos}) == {self.length}")
         for i, obj in enumerate(self.vars):
-            obj.make_guard_inner(codegen, StoreInTuple(pos, i))
+            obj.make_guard_inner(codegen, StoreInIndex(pos, i))
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen") -> None:
@@ -77,7 +77,7 @@ class TupleVar(Variable):
             old_var = table.get_or_none(idx)
             if old_var is not None:
                 new_extract: list[StorePos] = [
-                    StoreInTuple(pos, i) for pos in self.extract_code_at_start
+                    StoreInIndex(pos, i) for pos in self.extract_code_at_start
                 ]
                 old_var.extract_code_at_start.extend(new_extract)
                 old_var.need_guard_check |= self.need_guard_check
