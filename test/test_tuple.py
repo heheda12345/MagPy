@@ -116,3 +116,9 @@ def test_with_tensor(caplog):
     assert_equal(id(result[0]), id(compiled_tensor5(tuple_a, tuple_b)[1]))
     assert_equal(id(compiled_tensor5(tuple_a, tuple_b)[0]),
                  id(compiled_tensor5(tuple_a, tuple_b)[1]))
+    # test nested tuple
+    tuple_a = (1, 2, 4, (6, 7), a, (8, (9, 10), 11))
+    tuple_b = (3.5, 7, b)
+    result = tensor_3(tuple_a, tuple_b)
+    run_and_check(compiled_tensor3, [MISS], 7, caplog, result, tuple_a, tuple_b)
+    run_and_check(compiled_tensor3, [HIT], 7, caplog, result, tuple_a, tuple_b)

@@ -10,7 +10,7 @@ import dis
 from .code import ProcessedCode, load_code
 from .c_api import get_value_stack_from_top, get_value_stack_size
 from .instruction import Instruction, ci
-from .cache import CachedGraph, get_frame_cache, StoreInStack, StoreInLocal
+from .cache import CachedGraph, get_frame_cache, StoreInStack, StoreInLocal, StorePos
 from . import variables as vs
 from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, UnknownTypeError
 from .object_table import ObjectTable
@@ -18,6 +18,7 @@ from .pycode_generator import GraphFnCodegen, GuardFnCodegen
 from .fx_graph import FxGraph, fx_graph_functions, get_frame_root, is_leaf_module, ProxyArgs
 from .bytecode_analysis import livevars_analysis
 from .variables.tuple_ import TupleVar
+from .variables.base import Variable
 
 
 class State:
@@ -147,6 +148,29 @@ class GuardTracker:
         self.state = State.from_frame(self.frame, read_stack, self.frame_root)
         self.have_error = False
 
+    def variable_check(self,
+                       var: TupleVar,
+                       extract_code_at_start: str = "") -> None:
+        for i, sub_obj in enumerate(var.value):
+            sub_var = vs.make_var_from_value(sub_obj, True, self.state.fx_graph,
+                                             f'{extract_code_at_start}[{i}]')
+            self.state.add_object(sub_var, sub_obj)
+            if isinstance(sub_var, TupleVar):
+                self.variable_check(sub_var, f'{extract_code_at_start}[{i}]')
+
+    def variable_output(self, var: Variable, name_in_graph_fn: str,
+                        store_pos: StorePos, codegen: "GraphFnCodegen") -> None:
+        if isinstance(var, TupleVar):
+            self.tuple_output(var)
+        var.make_output(name_in_graph_fn, store_pos, codegen)
+
+    def tuple_output(self, var: TupleVar) -> None:
+        for sub_val in var.value:
+            sub_obj = self.state.objects.get(sub_val, allow_unexist_const=False)
+            var.objs.append(sub_obj)
+            if isinstance(sub_obj, TupleVar):
+                self.tuple_output(sub_obj)
+
     def record(
             self, frame: FrameType, frame_id: int
     ) -> None:  # pass frame and frame_id only for assertion
@@ -218,19 +242,10 @@ class GuardTracker:
         # TODO: can be optimized by only reproduce the modified variables
         stack_size = get_value_stack_size(self.frame)
         for i in range(stack_size):
-            # print("tuple comes to make output here")
             value = get_value_stack_from_top(self.frame, i)
             var = self.state.objects.get(value, allow_unexist_const=True)
-            if isinstance(var, TupleVar):
-                for sub_value in var.value:
-                    sub_obj = self.state.objects.get(sub_value,
-                                                     allow_unexist_const=False)
-                    # print(sub_obj)
-                    # if sub_obj not in var.objs:
-                    # print(f'not loaded before, it generated: {sub_obj}')
-                    # instead, tuple add objs at make output, if no output, we dont care for now
-                    var.objs.append(sub_obj)
-            var.make_output(f"__stack__{i}", StoreInStack(i), graph_codegen)
+            self.variable_output(var, f"__stack__{i}", StoreInStack(i),
+                                 graph_codegen)
         graph_code = graph_codegen.get_code()
         compiled_graph = self.state.fx_graph.compile(
             outputs=graph_codegen.get_graph_outputs())
@@ -379,21 +394,11 @@ class GuardTracker:
     def LOAD_FAST(self, inst: Instruction) -> None:
         if inst.argval not in self.state.stored_locals:
             obj = self.frame.f_locals[inst.argval]
-            # print(f'load fast obj: {obj}')
-            # print(f'instr arg: {inst.argval}')
             var = vs.make_var_from_value(obj, True, self.state.fx_graph,
                                          f'locals["{inst.argval}"]')
-            # print(f'get the object var: {var}')
             self.state.add_object(var, obj)
             if isinstance(var, TupleVar):
-                for j, sub_obj in enumerate(obj):
-                    sub_var = vs.make_var_from_value(
-                        sub_obj, True, self.state.fx_graph,
-                        f'locals["{inst.argval}"][{j}]')
-                    # print(f"get sub var in tuple: {sub_var}")
-                    self.state.add_object(sub_var, sub_obj)
-                    # tuple can't load at load, since tuple allows to preserve same value
-                    # var.objs.append(sub_var)
+                self.variable_check(var, f'locals["{inst.argval}"]')
 
     def LOAD_GLOBAL(self, inst: Instruction) -> None:
         if inst.argval not in self.state.stored_globals:
@@ -410,13 +415,7 @@ class GuardTracker:
                                          f'globals()["{inst.argval}"]')
             self.state.add_object(var, obj)
             if isinstance(var, TupleVar):
-                for j, sub_obj in enumerate(obj):
-                    sub_var = vs.make_var_from_value(
-                        sub_obj, True, self.state.fx_graph,
-                        f'globals()["{inst.argval}"][{j}]')
-                    # print(f"get sub var in tuple: {sub_var}")
-                    self.state.add_object(sub_var, sub_obj)
-                    # var.objs.append(sub_var)
+                self.variable_check(var, f'globals()["{inst.argval}"]')
 
     # heheda: we need to make sure that no unbound LOAD_METHOD is called by python runtime to avoid NULL in stack
     def LOAD_METHOD(self, inst: Instruction) -> None:
@@ -468,7 +467,6 @@ class GuardTracker:
         self.state.add_stored_locals(inst.argval)
 
     def BUILD_TUPLE(self, inst: Instruction) -> None:
-        # maybe need to implement
         pass
 
     # def LIST_TO_TUPLE(self, inst: Instruction) -> None:

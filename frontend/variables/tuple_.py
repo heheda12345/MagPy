@@ -24,7 +24,6 @@ class TupleVar(Variable):
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen") -> None:
-        # print(f"come to make tuple output:{self.value}")
         for j, var in enumerate(self.objs):
             var.make_temp(f"{name_in_graph_fn}_{j}", store_pos, codegen)
 
