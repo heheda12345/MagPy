@@ -30,6 +30,21 @@ class ModelParam(torch.nn.Module):
         return y
 
 
+class Model2(torch.nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(1, 1)
+
+    def forward(self, x):
+        return self.linear(x) - 4.0
+
+
+def call_model(model, a):
+    b = model.linear(a) + 1
+    return b
+
+
 def test_call_method(caplog):
     reset()
     with torch.no_grad():
@@ -62,6 +77,18 @@ def test_module_param(caplog):
         compiled_model = compile(model)
         run_and_check(compiled_model, [MISS], 1, caplog, expect_result, x)
         run_and_check(compiled_model, [HIT], 1, caplog, expect_result, x)
+
+
+def test_external_module(caplog):
+    reset()
+    with torch.no_grad():
+        model = Model2().eval()
+        x = torch.randn(1, 1)
+        expect_result = call_model(model, x)
+        compiled_model = compile(call_model)
+        run_and_check(compiled_model, [MISS], 1, caplog, expect_result, model,
+                      x)
+        run_and_check(compiled_model, [HIT], 1, caplog, expect_result, model, x)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from .const import NullVar, NoneVar, SliceVar, ModuleVar, FunctionVar, ObjectSrc
 from .tuple_ import TupleVar
 from ..fx_graph import FxGraph
 from ..utils import NullObject, UnknownTypeError
+from ..store_pos import StorePos
 
 ty2var: dict[type[Any], type[Variable]] = {
     float: ScalarVar,
@@ -27,7 +28,7 @@ CONST_TYPES = Union[int, float, bool, str, NullObject, None, slice]
 def make_var_from_value(value: Any,
                         need_guard_check: bool,
                         fx_graph: Optional[FxGraph] = None,
-                        extract_code_at_start: str = "") -> Variable:
+                        extract_code_at_start: list[StorePos] = []) -> Variable:
     if type(value) in ty2var:
         return ty2var[type(value)].from_value(value, need_guard_check, fx_graph,
                                               extract_code_at_start)

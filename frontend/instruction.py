@@ -18,6 +18,8 @@ class Instruction:
     target: Optional["Instruction"] = None
     original_inst: Optional["Instruction"] = None
     comment: str = ""
+    is_start: bool = False
+    is_end: bool = False
 
     def __hash__(self) -> int:
         return id(self)
