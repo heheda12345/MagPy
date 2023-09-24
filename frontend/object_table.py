@@ -59,7 +59,7 @@ class ObjectTable:
                         fx_graph: Optional[FxGraph] = None,
                         extract_code_at_start: list[StorePos] = []) -> Variable:
         if isinstance(value, bool):
-            return ScalarVar(value, need_guard_check)
+            return ScalarVar(value, need_guard_check, extract_code_at_start)
         elif id(value) in self.objs:
             return self.objs[id(value)]
         else:
