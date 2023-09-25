@@ -65,6 +65,7 @@ fx_graph_inplace_functions: set[Callable[..., Any]] = {
     operator.iand,
     operator.ixor,
     operator.ior,
+    operator.setitem,
 }
 
 fx_graph_functions: set[Callable[..., Any]] = {

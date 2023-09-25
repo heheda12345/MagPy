@@ -31,3 +31,33 @@ def test_inplace_add(caplog):
     result5 = inplace_add(torch.tensor(3), torch.tensor(4))
     run_and_check(compiled, [HIT], 4, caplog, result5, torch.tensor(3),
                   torch.tensor(4))
+
+
+# TODO:
+# def inplace_add2(a, b):
+#     a += b
+#     return b # but a is still modified
+
+
+def store_subscr(a, b):
+    a[1] += b
+    return a
+
+
+def test_inplace_subscr(caplog):
+    reset()
+    compiled = compile(store_subscr)
+
+    def get_input1():
+        return [1, 2], 3
+
+    result1 = store_subscr(*get_input1())
+    run_and_check(compiled, [MISS], 1, caplog, result1, *get_input1())
+    run_and_check(compiled, [HIT], 1, caplog, result1, *get_input1())
+
+    def get_input2():
+        return torch.tensor([1, 2]), torch.tensor(3)
+
+    result2 = store_subscr(*get_input2())
+    run_and_check(compiled, [MISS], 2, caplog, result2, *get_input2())
+    run_and_check(compiled, [HIT], 2, caplog, result2, *get_input2())
