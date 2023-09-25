@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from abc import abstractmethod
-from typing import Any, TYPE_CHECKING, Optional
+from typing import Any, TYPE_CHECKING, Optional, Tuple, Iterable
 from ..fx_graph import FxGraph
 from ..store_pos import StorePos
 if TYPE_CHECKING:
@@ -61,3 +61,9 @@ class Variable:
 
     def add_subvars_to_table(self, table: 'ObjectTable') -> None:
         pass
+
+    def set_prev(self, prev: Optional['Variable']) -> None:
+        self.prev = prev
+
+    def get_subvars_with_idx(self) -> Iterable[Tuple["Variable", int]]:
+        return []

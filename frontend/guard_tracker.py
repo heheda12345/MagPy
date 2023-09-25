@@ -15,7 +15,7 @@ from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
 from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex
 from . import variables as vs
-from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack
+from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack
 from .object_table import ObjectTable
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
 from .fx_graph import FxGraph, get_frame_root, is_leaf_module, NodeArgs
@@ -40,7 +40,7 @@ class State:
     defer_restart: Optional[str]  # None if no need to restart
     stack_objs: Optional[list[Any]]
     object_refs: list[Any]  # hold the reference of objects to avoid GC
-    num_new_refs: int
+    inplace_modify_count: int
 
     def __init__(self, root: torch.nn.Module) -> None:
         self.objects = ObjectTable()
@@ -65,6 +65,7 @@ class State:
         self.stack_objs = None
         self.object_refs = []
         self.num_new_refs = 0
+        self.inplace_modify_count = 0
 
     def update_subpath(self, module: torch.nn.Module, prefix: str) -> None:
 
@@ -396,6 +397,8 @@ class GuardTracker:
         key = new_random_key()
         guard_codegen = GuardFnCodegen(key=key)
         for var in self.state.objects.get_all():
+            while var.prev is not None:
+                var = var.prev
             var.make_guard(guard_codegen)
         guard_code = guard_codegen.get_code()
         graph_codegen = GraphFnCodegen(key=key)
@@ -476,13 +479,30 @@ class GuardTracker:
             self.state.object_refs.append(
                 get_value_stack_from_top(self.frame, i))
         self.state.num_new_refs = 0
-        for i, node in enumerate(self.state.node_waiting_ids):
-            value = get_value_stack_from_top(self.frame, i)
-            if isinstance(value, torch.Tensor):
-                var = vs.TensorVar.from_tensor_and_node(value, node, False)
-            else:
-                raise NotImplementedError
-            self.state.objects.add(var, value)
+        if self.state.inplace_modify_count > 0:
+            if len(self.state.node_waiting_ids) > 0:
+                assert len(self.state.node_waiting_ids
+                          ) == self.state.inplace_modify_count
+            for i in range(self.state.inplace_modify_count):
+                obj = get_value_stack_from_top(self.frame, i)
+                if isinstance(obj, torch.Tensor):
+                    assert len(self.state.node_waiting_ids) > 0
+                    new_var: vs.Variable = vs.TensorVar.from_tensor_and_node(
+                        obj, self.state.node_waiting_ids[i], False)
+                else:
+                    new_var = vs.make_var_from_value(
+                        obj, False, self.state.objects.read_only,
+                        self.state.fx_graph, [])
+                self.state.objects.update_by_id(new_var, id(obj))
+            self.state.inplace_modify_count = 0
+        else:
+            for i, node in enumerate(self.state.node_waiting_ids):
+                value = get_value_stack_from_top(self.frame, i)
+                if isinstance(value, torch.Tensor):
+                    var = vs.TensorVar.from_tensor_and_node(value, node, False)
+                else:
+                    raise NotImplementedError
+                self.state.objects.add(var, value)
         self.state.node_waiting_ids.clear()
         if self.state.defer_restart is not None:
             self.restart("defered restart " + self.state.defer_restart,
@@ -535,7 +555,11 @@ class GuardTracker:
             assert prior is None
             assert self.state.written == False
             return
-        elif self.has_tensor_arg(args, kwargs):
+        if func in fx_graph_inplace_functions:
+            self.state.inplace_modify_count = 1
+        else:
+            self.state.inplace_modify_count = 0
+        if self.has_tensor_arg(args, kwargs):
             if func in fx_graph_functions or isinstance(func, torch.nn.Module):
                 self.state.record_function(func, args, kwargs)
                 return
@@ -599,6 +623,45 @@ class GuardTracker:
         obj1 = get_value_stack_from_top(self.frame, 1)
         obj2 = get_value_stack_from_top(self.frame, 0)
         self.call_function(operator.getitem, [obj1, obj2], {})
+
+    def INPLACE_POWER(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.ipow)
+
+    def INPLACE_MULTIPLY(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.imul)
+
+    def INPLACE_MATRIX_MULTIPLY(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.imatmul)
+
+    def INPLACE_FLOOR_DIVIDE(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.ifloordiv)
+
+    def INPLACE_TRUE_DIVIDE(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.itruediv)
+
+    def INPLACE_MODULO(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.imod)
+
+    def INPLACE_ADD(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.iadd)
+
+    def INPLACE_SUBTRACT(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.isub)
+
+    def INPLACE_LSHIFT(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.ilshift)
+
+    def INPLACE_RSHIFT(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.irshift)
+
+    def INPLACE_AND(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.iand)
+
+    def INPLACE_XOR(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.ixor)
+
+    def INPLACE_OR(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.ior)
 
     def BUILD_SLICE(self, _inst: Instruction) -> None:
         pass

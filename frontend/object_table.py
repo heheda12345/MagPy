@@ -33,6 +33,14 @@ class ObjectTable:
         self.objs[idx] = var
         var.add_subvars_to_table(self)
 
+    def update_by_id(self, var: Variable, idx: int) -> None:
+        if self.contains_by_id(idx):
+            old_var = self.objs[idx]
+        else:
+            old_var = None
+        var.set_prev(old_var)
+        self.objs[idx] = var
+
     def get_all(self) -> list[Variable]:
         return list(self.objs.values()) + self.objs_no_id
 

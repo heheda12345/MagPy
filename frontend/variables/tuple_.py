@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Tuple, Any
+from typing import TYPE_CHECKING, Optional, Tuple, Any, Iterable
 from .base import Variable
 from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos, StoreInIndex
@@ -36,6 +36,7 @@ class TupleVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
+        codegen.add_check(f"isinstance({pos}, tuple)")
         codegen.add_check(f"len({pos}) == {self.length}")
         for i, obj in enumerate(self.vars):
             obj.make_guard_inner(codegen, StoreInIndex(pos, i))
