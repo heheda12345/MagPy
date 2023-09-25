@@ -724,6 +724,9 @@ class GuardTracker:
     def BUILD_LIST(self, inst: Instruction) -> None:
         pass
 
+    def BUILD_SET(self, inst: Instruction) -> None:
+        pass
+
     # def LIST_TO_TUPLE(self, inst: Instruction) -> None:
     #     pass
 
