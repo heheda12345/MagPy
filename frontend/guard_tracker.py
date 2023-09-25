@@ -511,6 +511,11 @@ class GuardTracker:
             isinstance(i, tuple)
             for i in itertools.chain(args, kwargs.values()))
 
+    @classmethod
+    def has_list_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
+        return any(
+            isinstance(i, list) for i in itertools.chain(args, kwargs.values()))
+
     def call_function(
         self,
         func: Callable[..., Any],
@@ -544,6 +549,8 @@ class GuardTracker:
         elif self.all_scalar_arg(args, kwargs):
             return
         elif self.has_tuple_arg(args, kwargs):
+            return
+        elif self.has_list_arg(args, kwargs):
             return
         raise NotImplementedError
 
@@ -712,6 +719,9 @@ class GuardTracker:
         self.state.add_stored_locals(inst.argval)
 
     def BUILD_TUPLE(self, inst: Instruction) -> None:
+        pass
+
+    def BUILD_LIST(self, inst: Instruction) -> None:
         pass
 
     # def LIST_TO_TUPLE(self, inst: Instruction) -> None:

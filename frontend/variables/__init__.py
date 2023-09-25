@@ -7,6 +7,7 @@ from .tensor import TensorVar, TorchParamVar
 from .torch_module import TorchModuleVar
 from .const import NullVar, NoneVar, SliceVar, ModuleVar, FunctionVar, ObjectSrc
 from .tuple_ import TupleVar
+from .list_ import ListVar
 from ..fx_graph import FxGraph
 from ..utils import NullObject, UnknownTypeError
 from ..store_pos import StorePos
@@ -22,6 +23,7 @@ ty2var: dict[type[Any], type[Variable]] = {
     slice: SliceVar,
     torch.nn.Parameter: TorchParamVar,
     tuple: TupleVar,
+    list: ListVar,
 }
 
 CONST_TYPES = Union[int, float, bool, str, NullObject, None, slice]
