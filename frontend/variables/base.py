@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 class Variable:
     need_guard_check: bool
     extract_code_at_start: list[StorePos]
+    prev: Optional['Variable'] = None
 
     def __init__(self,
                  need_guard_check: bool,

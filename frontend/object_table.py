@@ -41,10 +41,10 @@ class ObjectTable:
             return ScalarVar(value, False)
         elif id(value) in self.objs:
             return self.objs[id(value)]
-        elif allow_unexist_const and isinstance(value, get_args(CONST_TYPES)):
-            return make_var_from_value(value, False, self.read_only)
-        elif isinstance(value, tuple):
-            return TupleVar(value, False, self.read_only)
+        elif allow_unexist_const:
+            if isinstance(value, get_args(CONST_TYPES)) or isinstance(
+                    value, (list, tuple)):
+                return make_var_from_value(value, False, self.read_only)
         raise RuntimeError(f"Object {value} not found in object table")
 
     def get_or_none(self, value: Any) -> Optional[Variable]:

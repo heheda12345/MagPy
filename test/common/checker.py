@@ -10,6 +10,7 @@ MISS = 2
 
 def assert_equal(ref, out):
     precision = 1e-3
+    assert type(ref) == type(out)
     if isinstance(ref, torch.Tensor):
         assert (isinstance(out, torch.Tensor))
         r = ref.cpu()
