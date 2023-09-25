@@ -1,4 +1,4 @@
-from typing import Optional, Any
+from typing import Optional, Any, TYPE_CHECKING
 import torch
 import torch.fx
 
@@ -7,6 +7,8 @@ from .base import Variable
 from ..pycode_writer import new_name
 from ..fx_graph import FxGraph, NodeArgs
 from ..store_pos import StorePos
+if TYPE_CHECKING:
+    from ..object_table import ReadOnlyObjectTable
 
 
 class TensorVar(Variable):
@@ -74,6 +76,7 @@ class TensorVar(Variable):
     def from_value(cls,
                    value: torch.Tensor,
                    need_guard_check: bool,
+                   _object_table: 'ReadOnlyObjectTable',
                    fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> 'TensorVar':
         assert fx_graph is not None
@@ -130,6 +133,7 @@ class TorchParamVar(Variable):
             cls,
             value: torch.nn.Parameter,
             need_guard_check: bool,
+            _object_table: 'ReadOnlyObjectTable',
             _fx_graph: Optional[FxGraph] = None,
             extract_code_at_start: list[StorePos] = []) -> "TorchParamVar":
         return cls(value, need_guard_check, extract_code_at_start)

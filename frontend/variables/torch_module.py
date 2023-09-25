@@ -6,6 +6,7 @@ from ..fx_graph import FxGraph
 from ..store_pos import StorePos
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
+    from ..object_table import ReadOnlyObjectTable
 
 ScalarType = Union[int, float, bool, str]
 
@@ -26,6 +27,7 @@ class TorchModuleVar(Variable):
             cls,
             value: torch.nn.Module,
             need_guard_check: bool,
+            _object_table: 'ReadOnlyObjectTable',
             _fx_graph: Optional[FxGraph] = None,
             extract_code_at_start: list[StorePos] = []) -> "TorchModuleVar":
         return cls(value, need_guard_check, extract_code_at_start)

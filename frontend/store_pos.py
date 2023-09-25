@@ -50,11 +50,11 @@ class StoreInAttr(StorePos):
         return f"{self.self_pos}.{self.attr_name}"
 
 
-class StoreInTuple(StorePos):
+class StoreInIndex(StorePos):
     self_pos: StorePos
-    self_idx: int
+    self_idx: Any
 
-    def __init__(self, self_pos: StorePos, self_idx: int) -> None:
+    def __init__(self, self_pos: StorePos, self_idx: Any) -> None:
         self.self_pos = self_pos
         self.self_idx = self_idx
 

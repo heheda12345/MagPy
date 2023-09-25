@@ -13,7 +13,7 @@ from .code import ProcessedCode, load_code
 from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
-from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInTuple
+from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex
 from . import variables as vs
 from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack
 from .object_table import ObjectTable
@@ -142,7 +142,9 @@ class State:
             state.start_stack_size = get_value_stack_size(frame)
             for i in range(state.start_stack_size):
                 value = get_value_stack_from_top(frame, i)
-                var = vs.make_var_from_value(value, True, state.fx_graph,
+                var = vs.make_var_from_value(value, True,
+                                             state.objects.read_only,
+                                             state.fx_graph,
                                              [StoreInLocal(f"__stack__{i}")])
                 state.objects.add(var, value)
         # state.written may be assigned inside make_var_from_value
@@ -320,30 +322,6 @@ class GuardTracker:
         self.state = State.from_frame(self.frame, read_stack, self.frame_root)
         self.have_error = False
 
-    def variable_check(self, var: TupleVar,
-                       extract_code_at_start: StorePos) -> None:
-        for i, sub_obj in enumerate(var.value):
-            sub_var = vs.make_var_from_value(
-                sub_obj, True, self.state.fx_graph,
-                [StoreInTuple(extract_code_at_start, i)])
-            self.state.add_object(sub_var, sub_obj)
-            if isinstance(sub_var, TupleVar):
-                self.variable_check(sub_var,
-                                    StoreInTuple(extract_code_at_start, i))
-
-    def variable_output(self, var: Variable, name_in_graph_fn: str,
-                        store_pos: StorePos, codegen: "GraphFnCodegen") -> None:
-        if isinstance(var, TupleVar):
-            self.tuple_output(var)
-        var.make_output(name_in_graph_fn, store_pos, codegen)
-
-    def tuple_output(self, var: TupleVar) -> None:
-        for sub_val in var.value:
-            sub_obj = self.state.objects.get(sub_val, allow_unexist_const=True)
-            var.objs.append(sub_obj)
-            if isinstance(sub_obj, TupleVar):
-                self.tuple_output(sub_obj)
-
     def record(
             self, frame: FrameType, frame_id: int
     ) -> None:  # pass frame and frame_id only for assertion
@@ -446,8 +424,7 @@ class GuardTracker:
 
         for i, value in enumerate(stack_objs):
             var = self.state.objects.get(value, allow_unexist_const=True)
-            self.variable_output(var, f"__stack__{i}", StoreInStack(i),
-                                 graph_codegen)
+            var.make_output(f"__stack__{i}", StoreInStack(i), graph_codegen)
 
         self.state.fx_graph.set_output_nodes(graph_codegen.get_graph_outputs())
 
@@ -625,11 +602,11 @@ class GuardTracker:
     def LOAD_FAST(self, inst: Instruction) -> None:
         if inst.argval not in self.state.stored_locals:
             obj = self.frame.f_locals[inst.argval]
-            var = vs.make_var_from_value(obj, True, self.state.fx_graph,
+            var = vs.make_var_from_value(obj, True,
+                                         self.state.objects.read_only,
+                                         self.state.fx_graph,
                                          [StoreInLocal(inst.argval)])
             self.state.add_object(var, obj)
-            if isinstance(var, TupleVar):
-                self.variable_check(var, StoreInLocal(inst.argval))
 
     def LOAD_GLOBAL(self, inst: Instruction) -> None:
         if inst.argval not in self.state.stored_globals:
@@ -642,11 +619,11 @@ class GuardTracker:
             except Exception as e:
                 raise UnknownTypeError(inst.argval)
 
-            var = vs.make_var_from_value(obj, True, self.state.fx_graph,
+            var = vs.make_var_from_value(obj, True,
+                                         self.state.objects.read_only,
+                                         self.state.fx_graph,
                                          [StoreInGlobal(inst.argval)])
             self.state.add_object(var, obj)
-            if isinstance(var, TupleVar):
-                self.variable_check(var, StoreInGlobal(inst.argval))
 
     # heheda: we need to make sure that no unbound LOAD_METHOD is called by python runtime to avoid NULL in stack
     def LOAD_METHOD(self, inst: Instruction) -> None:
@@ -654,7 +631,8 @@ class GuardTracker:
         method = getattr(self_obj, inst.argval)
         self_var = self.state.objects.get(self_obj)
         method_var = vs.make_var_from_value(
-            method, self_var.need_guard_check, self.state.fx_graph, [
+            method, self_var.need_guard_check, self.state.objects.read_only,
+            self.state.fx_graph, [
                 StoreInAttr(self_var.extract_code_at_start[0], self_obj,
                             inst.argval)
             ] if self_var.need_guard_check else [])
@@ -668,7 +646,8 @@ class GuardTracker:
         attr = getattr(obj, inst.argval)
         obj_var = self.state.objects.get(obj)
         attr_var = vs.make_var_from_value(
-            attr, obj_var.need_guard_check, self.state.fx_graph,
+            attr, obj_var.need_guard_check, self.state.objects.read_only,
+            self.state.fx_graph,
             [StoreInAttr(obj_var.extract_code_at_start[0], obj, inst.argval)]
             if obj_var.need_guard_check else [])
         if isinstance(obj_var, vs.ModuleVar):
