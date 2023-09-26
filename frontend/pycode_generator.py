@@ -14,7 +14,7 @@ def gen_imports(writer: PyCodeWriter, imports: set[str]) -> None:
 
 class GraphFnCodegen:
     outputs: list[Tuple[str, StorePos, str]]
-    temps: list[Tuple[str, StorePos, str]]
+    returns: list[Tuple[str, StorePos]]
     imports: set[str]
     graph_inputs: list[StorePos]
     graph_outputs: list[torch.fx.Node]
@@ -23,20 +23,18 @@ class GraphFnCodegen:
 
     def __init__(self, key: int) -> None:
         self.outputs = []
-        self.temps = []
+        self.returns = []
         self.imports = set()
         self.graph_inputs = []
         self.graph_outputs = []
         self.objs = {}
         self.key = key
 
-    def output(self, name_in_graph_fn: str, store_pos: StorePos,
-               code: str) -> None:
+    def output(self, name_in_graph_fn: str, store_pos: StorePos, code: str,
+               in_return: bool) -> None:
         self.outputs.append((name_in_graph_fn, store_pos, code))
-
-    def add_temp(self, name_in_graph_fn: str, store_pos: StorePos,
-                 code: str) -> None:
-        self.temps.append((name_in_graph_fn, store_pos, code))
+        if in_return:
+            self.returns.append((name_in_graph_fn, store_pos))
 
     def add_import(self, module_name: str) -> None:
         self.imports.add(module_name)
@@ -56,13 +54,11 @@ class GraphFnCodegen:
         writer.wl(
             f"graph_out = compiled_graph({', '.join([str(x) for x in self.graph_inputs])})"
         )  # writer.wl(f"print('graph_out', graph_out)")
-        for target_name, _, code in self.temps:
-            writer.wl(f"{target_name} = {code}")
         for target_name, _, code in self.outputs:
             writer.wl(f"{target_name} = {code}")
         # writer.wl(f"print('graph_fn done', locals)")
         graph_retures = ", ".join(
-            [f"{target_name}" for target_name, _, _ in self.outputs])
+            f"{target_name}" for target_name, _ in self.returns)
         writer.wl(f"return {graph_retures}")
         writer.block_end()
         writer.wl(f"return fn")
@@ -70,7 +66,7 @@ class GraphFnCodegen:
         return writer.get_code()
 
     def get_return_values(self) -> list[StorePos]:
-        return [store_pos for _, store_pos, _ in self.outputs]
+        return [store_pos for _, store_pos in self.returns]
 
     def add_graph_output(self, fx_node: torch.fx.Node) -> str:
         self.graph_outputs.append(fx_node)

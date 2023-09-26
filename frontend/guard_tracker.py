@@ -426,7 +426,7 @@ class GuardTracker:
             value = self.frame.f_locals[live_var]
             var = self.state.objects.get(value, allow_unexist_const=True)
             var.make_output(f"__live_{i}", StoreInLocal(live_var),
-                            graph_codegen)
+                            graph_codegen, True)
         # TODO: can be optimized by only reproduce the modified variables
         if break_before_cur_inst:
             stack_objs = self.state.stack_objs
@@ -436,7 +436,8 @@ class GuardTracker:
 
         for i, value in enumerate(stack_objs):
             var = self.state.objects.get(value, allow_unexist_const=True)
-            var.make_output(f"__stack__{i}", StoreInStack(i), graph_codegen)
+            var.make_output(f"__stack__{i}", StoreInStack(i), graph_codegen,
+                            True)
 
         self.state.fx_graph.set_output_nodes(graph_codegen.get_graph_outputs())
         print("graph", self.state.fx_graph.result_graph)
@@ -570,6 +571,13 @@ class GuardTracker:
             assert self.state.written == False
             return
         if func in fx_graph_inplace_functions:
+            if len(args) == 0:
+                raise NotImplementedError
+            if not self.state.objects.contains(args[0]):
+                self.state.add_object(
+                    vs.make_var_from_value(args[0], False,
+                                           self.state.objects.read_only,
+                                           self.state.fx_graph, []), args[0])
             self.state.inplace_update_objs.append(StoreInStack(0))
         if self.has_tensor_arg(args, kwargs):
             if func in fx_graph_functions or isinstance(func, torch.nn.Module):

@@ -107,14 +107,10 @@ class TensorVar(Variable):
         codegen.add_check(f"{name_in_codegen}.tensor_guard_check({pos})")
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen") -> None:
+                    codegen: "GraphFnCodegen", in_return: bool) -> None:
         name_in_graph_output = codegen.add_graph_output(self.fx_node)
-        codegen.output(name_in_graph_fn, store_pos, name_in_graph_output)
-
-    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
-                  codegen: "GraphFnCodegen") -> None:
-        name_in_graph_output = codegen.add_graph_output(self.fx_node)
-        codegen.add_temp(name_in_graph_fn, store_pos, name_in_graph_output)
+        codegen.output(name_in_graph_fn, store_pos, name_in_graph_output,
+                       in_return)
 
 
 class TorchParamVar(Variable):
@@ -143,13 +139,9 @@ class TorchParamVar(Variable):
         codegen.add_id_check(f"id({pos}) == {id(self.param)}", self.param)
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen") -> None:
+                    codegen: "GraphFnCodegen", in_return: bool) -> None:
         codegen.output(name_in_graph_fn, store_pos,
-                       str(self.extract_code_at_start))
-
-    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
-                  codegen: GraphFnCodegen) -> None:
-        return super().make_temp(name_in_graph_fn, store_pos, codegen)
+                       str(self.extract_code_at_start), in_return)
 
     def as_fx_node(self) -> "NodeArgs":
         raise ValueError("TorchParamVar.as_fx_node should not be called")

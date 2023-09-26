@@ -31,17 +31,15 @@ class ScalarVar(Variable):
             codegen.add_check(f"{pos} == {self.value}")
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen") -> None:
+                    codegen: "GraphFnCodegen", in_return: bool) -> None:
         if type(self.value) == float:
             codegen.output(name_in_graph_fn, store_pos,
-                           f"{get_float_string(self.value)} # {self.value}")
+                           f"{get_float_string(self.value)} # {self.value}",
+                           in_return)
             codegen.add_import("struct")
         else:
-            codegen.output(name_in_graph_fn, store_pos, str(self.value))
-
-    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
-                  codegen: "GraphFnCodegen") -> None:
-        codegen.add_temp(name_in_graph_fn, store_pos, str(self.value))
+            codegen.output(name_in_graph_fn, store_pos, str(self.value),
+                           in_return)
 
     @classmethod
     def from_value(cls,

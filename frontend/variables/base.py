@@ -47,12 +47,7 @@ class Variable:
 
     @abstractmethod
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen") -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
-                  codegen: "GraphFnCodegen") -> None:
+                    codegen: "GraphFnCodegen", in_return: bool) -> None:
         raise NotImplementedError
 
     @abstractmethod

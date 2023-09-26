@@ -27,12 +27,8 @@ class NoneVar(Variable):
             codegen.add_check(f"{pos} is None")
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen") -> None:
-        codegen.output(name_in_graph_fn, store_pos, "None")
-
-    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
-                  codegen: GraphFnCodegen) -> None:
-        pass
+                    codegen: "GraphFnCodegen", in_return: bool) -> None:
+        codegen.output(name_in_graph_fn, store_pos, "None", in_return)
 
     @classmethod
     def from_value(cls,
@@ -59,13 +55,10 @@ class NullVar(Variable):
         pass
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen") -> None:
+                    codegen: "GraphFnCodegen", in_return: bool) -> None:
         name_in_codegen = codegen.add_var(null_object, "NULL_VAR")
-        codegen.output(name_in_graph_fn, store_pos, f"{name_in_codegen} # NULL")
-
-    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
-                  codegen: GraphFnCodegen) -> None:
-        pass
+        codegen.output(name_in_graph_fn, store_pos, f"{name_in_codegen} # NULL",
+                       in_return)
 
     @classmethod
     def from_value(cls,
@@ -102,12 +95,8 @@ class SliceVar(Variable):
             f"{pos} == slice({self.start}, {self.stop}, {self.step})")
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen") -> None:
-        codegen.output(name_in_graph_fn, store_pos, "None")
-
-    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
-                  codegen: GraphFnCodegen) -> None:
-        return super().make_temp(name_in_graph_fn, store_pos, codegen)
+                    codegen: "GraphFnCodegen", in_return: bool) -> None:
+        codegen.output(name_in_graph_fn, store_pos, "None", in_return)
 
     @classmethod
     def from_value(cls,
@@ -149,10 +138,10 @@ class ModuleVar(Variable):
         codegen.add_id_check(f"id({pos}) == {id(self.module)}", self.module)
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen") -> None:
+                    codegen: "GraphFnCodegen", in_return: bool) -> None:
         name_in_codegen = codegen.add_var(self.module,
                                           f"MODULE_{self.module.__name__}")
-        codegen.output(name_in_graph_fn, store_pos, name_in_codegen)
+        codegen.output(name_in_graph_fn, store_pos, name_in_codegen, in_return)
 
     @classmethod
     def from_value(cls,
@@ -186,9 +175,9 @@ class FunctionVar(Variable):
         codegen.add_id_check(f"id({pos}) == {id(self.func)}", self.func)
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen") -> None:
+                    codegen: "GraphFnCodegen", in_return: bool) -> None:
         name_in_codegen = codegen.add_var(self.func, f"_{self.func.__name__}")
-        codegen.output(name_in_graph_fn, store_pos, name_in_codegen)
+        codegen.output(name_in_graph_fn, store_pos, name_in_codegen, in_return)
 
     @classmethod
     def from_value(cls,

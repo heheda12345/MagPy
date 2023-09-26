@@ -36,11 +36,7 @@ class TorchModuleVar(Variable):
         codegen.add_id_check(f"id({pos}) == {id(self.module)}", self.module)
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen") -> None:
+                    codegen: "GraphFnCodegen", in_return: bool) -> None:
         assert len(self.extract_code_at_start) > 0
         codegen.output(name_in_graph_fn, store_pos,
-                       str(self.extract_code_at_start[0]))
-
-    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
-                  codegen: GraphFnCodegen) -> None:
-        return super().make_temp(name_in_graph_fn, store_pos, codegen)
+                       str(self.extract_code_at_start[0]), in_return)

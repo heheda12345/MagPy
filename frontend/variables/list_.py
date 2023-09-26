@@ -40,23 +40,15 @@ class ListVar(Variable):
             obj.make_guard_inner(codegen, StoreInIndex(pos, i))
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen") -> None:
+                    codegen: "GraphFnCodegen", in_return: bool) -> None:
         for j, var in enumerate(self.vars):
-            var.make_temp(f"{name_in_graph_fn}_{j}", store_pos, codegen)
+            var.make_output(f"{name_in_graph_fn}_{j}", store_pos, codegen,
+                            False)
 
         codegen.output(
             name_in_graph_fn, store_pos,
-            f"[{','.join(f'{name_in_graph_fn}_{j}' for j in range(len(self.vars)))},]"
-        )
-
-    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
-                  codegen: "GraphFnCodegen") -> None:
-        for j, var in enumerate(self.vars):
-            var.make_temp(f"{name_in_graph_fn}_{j}", store_pos, codegen)
-        codegen.add_temp(
-            name_in_graph_fn, store_pos,
-            f"[{','.join(f'{name_in_graph_fn}_{j}' for j in range(len(self.vars)))}]"
-        )
+            f"[{','.join(f'{name_in_graph_fn}_{j}' for j in range(len(self.vars)))},]",
+            in_return)
 
     @classmethod
     def from_value(cls,
@@ -73,7 +65,7 @@ class ListVar(Variable):
 
     def add_subvars_to_table(self, table: 'ObjectTable') -> None:
         for i, (var, idx) in enumerate(zip(self.vars, self.obj_ids)):
-            old_var = table.get_or_none(idx)
+            old_var = table.get_or_none_by_id(idx)
             if old_var is not None:
                 new_extract: list[StorePos] = [
                     StoreInIndex(pos, i) for pos in self.extract_code_at_start

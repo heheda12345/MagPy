@@ -26,10 +26,12 @@ class ObjectTable:
             old_var.extract_code_at_start.extend(var.extract_code_at_start)
             old_var.need_guard_check |= var.need_guard_check
         else:
+            assert id(value) not in self.objs
             self.objs[id(value)] = var
             var.add_subvars_to_table(self)
 
     def add_by_id(self, var: Variable, idx: int) -> None:
+        assert idx not in self.objs
         self.objs[idx] = var
         var.add_subvars_to_table(self)
 
@@ -58,6 +60,12 @@ class ObjectTable:
     def get_or_none(self, value: Any) -> Optional[Variable]:
         if id(value) in self.objs:
             return self.objs[id(value)]
+        else:
+            return None
+
+    def get_or_none_by_id(self, idx: int) -> Optional[Variable]:
+        if idx in self.objs:
+            return self.objs[idx]
         else:
             return None
 
@@ -98,6 +106,9 @@ class ReadOnlyObjectTable:
 
     def get_or_none(self, value: Any) -> Optional[Variable]:
         return self.table.get_or_none(value)
+
+    def get_or_none_by_id(self, idx: int) -> Optional[Variable]:
+        return self.table.get_or_none_by_id(idx)
 
     def get_or_make_var(self,
                         value: Any,
