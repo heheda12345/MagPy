@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING, Optional, Tuple, Any
 from .base import Variable
 from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos, StoreInIndex
-
+import torch
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
     from ..object_table import ReadOnlyObjectTable, ObjectTable
@@ -22,6 +22,17 @@ class SetVar(Variable):
         super().__init__(need_guard_check, extract_code_at_start)
         self.value = value
         self.length = len(value)
+        self.vars = []
+        self.obj_ids = []
+        for i, obj in enumerate(value):
+            new_extract: list[StorePos] = [
+                StoreInIndex(pos, i, False)
+                for pos in self.extract_code_at_start
+            ]
+            var = object_table.get_or_make_var(obj, need_guard_check, fx_graph,
+                                               new_extract)
+            self.vars.append(var)
+            self.obj_ids.append(id(obj))
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
@@ -29,7 +40,13 @@ class SetVar(Variable):
 
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen") -> None:
-        codegen.output(name_in_graph_fn, store_pos, str(self.value))
+        for j, var in enumerate(self.vars):
+            var.make_temp(f"{name_in_graph_fn}_{j}", store_pos, codegen)
+
+        codegen.output(
+            name_in_graph_fn, store_pos,
+            f"{{{','.join(f'{name_in_graph_fn}_{j}' for j in range(len(self.vars)))},}}"
+        )
 
     def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
                   codegen: "GraphFnCodegen") -> None:

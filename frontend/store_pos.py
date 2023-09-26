@@ -53,10 +53,18 @@ class StoreInAttr(StorePos):
 class StoreInIndex(StorePos):
     self_pos: StorePos
     self_idx: Any
+    subscriptable: bool
 
-    def __init__(self, self_pos: StorePos, self_idx: Any) -> None:
+    def __init__(self,
+                 self_pos: StorePos,
+                 self_idx: Any,
+                 subscritable: bool = True) -> None:
         self.self_pos = self_pos
         self.self_idx = self_idx
+        self.subscriptable = subscritable
 
     def __str__(self) -> str:
-        return f"{self.self_pos}[{self.self_idx}]"
+        if self.subscriptable:
+            return f"{self.self_pos}[{self.self_idx}]"
+        else:
+            return f'list({self.self_pos})[{self.self_idx}]'
