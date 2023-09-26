@@ -1,4 +1,5 @@
 from typing import TYPE_CHECKING, Optional, Any
+from copy import copy
 from .base import Variable
 from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos, StoreInIndex
@@ -39,16 +40,27 @@ class ListVar(Variable):
         for i, obj in enumerate(self.vars):
             obj.make_guard_inner(codegen, StoreInIndex(pos, i))
 
-    def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen", in_return: bool) -> None:
-        for j, var in enumerate(self.vars):
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: "GraphFnCodegen", in_return: bool,
+                          idx: int) -> None:
+        oldest = self.get_oldest_var()
+        for j, (idx_j, var) in enumerate(zip(self.obj_ids, self.vars)):
             var.make_output(f"{name_in_graph_fn}_{j}", store_pos, codegen,
-                            False)
-
-        codegen.output(
-            name_in_graph_fn, store_pos,
-            f"[{','.join(f'{name_in_graph_fn}_{j}' for j in range(len(self.vars)))},]",
-            in_return)
+                            False, idx_j)
+        if len(oldest.extract_code_at_start) > 0:
+            assert isinstance(oldest, ListVar)
+            old_store_pos = oldest.extract_code_at_start[0]
+            codegen.add_stmt(f"{old_store_pos}.clear()")
+            for i in range(self.length):
+                codegen.add_stmt(
+                    f"{old_store_pos}.append({name_in_graph_fn}_{i})")
+            codegen.output(name_in_graph_fn, store_pos, str(old_store_pos),
+                           in_return, idx)
+        else:
+            codegen.output(
+                name_in_graph_fn, store_pos,
+                f"[{','.join(f'{name_in_graph_fn}_{j}' for j in range(len(self.vars)))},]",
+                in_return, idx)
 
     @classmethod
     def from_value(cls,

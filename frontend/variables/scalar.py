@@ -30,16 +30,17 @@ class ScalarVar(Variable):
         else:
             codegen.add_check(f"{pos} == {self.value}")
 
-    def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen", in_return: bool) -> None:
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: "GraphFnCodegen", in_return: bool,
+                          idx: int) -> None:
         if type(self.value) == float:
             codegen.output(name_in_graph_fn, store_pos,
                            f"{get_float_string(self.value)} # {self.value}",
-                           in_return)
+                           in_return, idx)
             codegen.add_import("struct")
         else:
             codegen.output(name_in_graph_fn, store_pos, str(self.value),
-                           in_return)
+                           in_return, idx)
 
     @classmethod
     def from_value(cls,

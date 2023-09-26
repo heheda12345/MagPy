@@ -45,9 +45,20 @@ class Variable:
                          pos: StorePos) -> None:
         raise NotImplementedError
 
-    @abstractmethod
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen", in_return: bool) -> None:
+                    codegen: "GraphFnCodegen", in_return: bool,
+                    idx: int) -> None:
+        if idx in codegen.id2name:
+            codegen.output(name_in_graph_fn, store_pos, codegen.id2name[idx],
+                           in_return, 0)
+        else:
+            self.make_output_inner(name_in_graph_fn, store_pos, codegen,
+                                   in_return, idx)
+
+    @abstractmethod
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: "GraphFnCodegen", in_return: bool,
+                          idx: int) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -62,3 +73,9 @@ class Variable:
 
     def get_subvars_with_idx(self) -> Iterable[Tuple["Variable", int]]:
         return []
+
+    def get_oldest_var(self) -> "Variable":
+        ret = self
+        while ret.prev is not None:
+            ret = ret.prev
+        return ret

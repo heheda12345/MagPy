@@ -426,7 +426,7 @@ class GuardTracker:
             value = self.frame.f_locals[live_var]
             var = self.state.objects.get(value, allow_unexist_const=True)
             var.make_output(f"__live_{i}", StoreInLocal(live_var),
-                            graph_codegen, True)
+                            graph_codegen, True, id(value))
         # TODO: can be optimized by only reproduce the modified variables
         if break_before_cur_inst:
             stack_objs = self.state.stack_objs
@@ -437,7 +437,7 @@ class GuardTracker:
         for i, value in enumerate(stack_objs):
             var = self.state.objects.get(value, allow_unexist_const=True)
             var.make_output(f"__stack__{i}", StoreInStack(i), graph_codegen,
-                            True)
+                            True, id(value))
 
         self.state.fx_graph.set_output_nodes(graph_codegen.get_graph_outputs())
         print("graph", self.state.fx_graph.result_graph)

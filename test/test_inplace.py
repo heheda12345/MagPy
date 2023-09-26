@@ -1,7 +1,7 @@
 from frontend.compile import compile, reset
 from frontend.utils import add_force_graph_break
 from frontend.c_api import get_next_frame_id
-from common.checker import run_and_check, HIT, MISS
+from common.checker import run_and_check, HIT, MISS, assert_equal
 import torch
 
 
@@ -21,9 +21,15 @@ def test_inplace_add(caplog):
     run_and_check(compiled, [MISS], 2, caplog, result2, (1, 2), (3, 4))
     run_and_check(compiled, [HIT], 2, caplog, result2, (1, 2), (3, 4))
 
-    result3 = inplace_add([1, 2], [3, 4])
-    run_and_check(compiled, [MISS], 3, caplog, result3, [1, 2], [3, 4])
-    run_and_check(compiled, [HIT], 3, caplog, result3, [1, 2], [3, 4])
+    def get_input3():
+        return [1, 2], [3, 4]
+
+    result3 = inplace_add(*get_input3())
+    run_and_check(compiled, [MISS], 3, caplog, result3, *get_input3())
+    run_and_check(compiled, [HIT], 3, caplog, result3, *get_input3())
+    input3 = get_input3()
+    output3 = compiled(*input3)
+    assert_equal(id(input3[0]), id(output3))
 
     result4 = inplace_add(torch.tensor(1), torch.tensor(2))
     run_and_check(compiled, [MISS], 4, caplog, result4, torch.tensor(1),
@@ -31,6 +37,9 @@ def test_inplace_add(caplog):
     result5 = inplace_add(torch.tensor(3), torch.tensor(4))
     run_and_check(compiled, [HIT], 4, caplog, result5, torch.tensor(3),
                   torch.tensor(4))
+    input6 = (torch.tensor(5), torch.tensor(6))
+    result6 = compiled(*input6)
+    assert_equal(id(input6[0]), id(result6))
 
 
 # TODO:
@@ -39,25 +48,53 @@ def test_inplace_add(caplog):
 #     return b # but a is still modified
 
 
-def store_subscr(a, b):
+def store_subscr_add(a, b):
     a[1] += b
     return a
 
 
-def test_inplace_subscr(caplog):
+def test_inplace_subscr_add(caplog):
     reset()
-    compiled = compile(store_subscr)
+    compiled = compile(store_subscr_add)
 
     def get_input1():
         return [1, 2], 3
 
-    result1 = store_subscr(*get_input1())
+    result1 = store_subscr_add(*get_input1())
     run_and_check(compiled, [MISS], 1, caplog, result1, *get_input1())
     run_and_check(compiled, [HIT], 1, caplog, result1, *get_input1())
+    input1 = get_input1()
+    output1 = compiled(*input1)
+    assert_equal(id(input1[0]), id(output1))
 
     def get_input2():
         return torch.tensor([1, 2]), torch.tensor(3)
 
-    result2 = store_subscr(*get_input2())
+    result2 = store_subscr_add(*get_input2())
     run_and_check(compiled, [MISS], 2, caplog, result2, *get_input2())
     run_and_check(compiled, [HIT], 2, caplog, result2, *get_input2())
+    input2 = get_input2()
+    output2 = compiled(*input2)
+    assert_equal(id(input2[0]), id(output2))
+
+
+def store_subscr(a, b):
+    a[1] = b
+    return a, b
+
+
+def test_store_subscr(caplog):
+    reset()
+    compiled = compile(store_subscr)
+
+    def get_input1():
+        return [1, 2], [3, 4]
+
+    result = store_subscr(*get_input1())
+    run_and_check(compiled, [MISS], 1, caplog, result, *get_input1())
+    run_and_check(compiled, [HIT], 1, caplog, result, *get_input1())
+    a, b = get_input1()
+    output = compiled(a, b)
+    assert_equal(id(a), id(output[0]))
+    assert_equal(id(b), id(output[0][1]))
+    assert_equal(id(b), id(output[1]))

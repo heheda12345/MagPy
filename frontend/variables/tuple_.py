@@ -41,16 +41,17 @@ class TupleVar(Variable):
         for i, obj in enumerate(self.vars):
             obj.make_guard_inner(codegen, StoreInIndex(pos, i))
 
-    def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen", in_return: bool) -> None:
-        for j, var in enumerate(self.vars):
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: "GraphFnCodegen", in_return: bool,
+                          idx: int) -> None:
+        for j, (idx_j, var) in enumerate(zip(self.obj_ids, self.vars)):
             var.make_output(f"{name_in_graph_fn}_{j}", store_pos, codegen,
-                            False)
+                            False, idx_j)
 
         codegen.output(
             name_in_graph_fn, store_pos,
             f"({','.join(f'{name_in_graph_fn}_{j}' for j in range(len(self.vars)))},)",
-            in_return)
+            in_return, idx)
 
     @classmethod
     def from_value(cls,
