@@ -58,7 +58,8 @@ def test_without_tensor(caplog):
 
 
 def tensor_0(a, b):
-    return {1, 2 ,3, a + b}
+    return {1, 2, 3, a + b}
+
 
 def test_with_tensor(caplog):
     reset()
