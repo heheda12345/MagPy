@@ -724,6 +724,12 @@ class GuardTracker:
     def BUILD_LIST(self, inst: Instruction) -> None:
         pass
 
+    def BUILD_CONST_KEY_MAP(self, inst: Instruction) -> None:
+        pass
+
+    def BUILD_MAP(self, inst: Instruction) -> None:
+        pass
+
     # def LIST_TO_TUPLE(self, inst: Instruction) -> None:
     #     pass
 
