@@ -46,6 +46,9 @@ class ObjectTable:
     def get_all(self) -> list[Variable]:
         return list(self.objs.values()) + self.objs_no_id
 
+    def get_all_with_id(self) -> list[Tuple[int, Variable]]:
+        return list(self.objs.items())
+
     def get(self, value: Any, allow_unexist_const: bool = False) -> Variable:
         if isinstance(value, bool):
             return ScalarVar(value, False)

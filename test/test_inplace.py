@@ -98,3 +98,53 @@ def test_store_subscr(caplog):
     assert_equal(id(a), id(output[0]))
     assert_equal(id(b), id(output[0][1]))
     assert_equal(id(b), id(output[1]))
+
+
+def store_without_return(a, b):
+    a[1] = b
+    return b
+
+
+def test_store_without_return(caplog):
+    reset()
+    compiled = compile(store_without_return)
+
+    def get_input1():
+        return [1, 2], [3, 4]
+
+    a, b = get_input1()
+    result = store_without_return(a, b)
+
+    run_and_check(compiled, [MISS], 1, caplog, result, *get_input1())
+    run_and_check(compiled, [HIT], 1, caplog, result, *get_input1())
+
+    a1, b1 = get_input1()
+    output = compiled(a1, b1)
+    assert_equal(id(b1), id(output))
+    assert_equal(a1, a)
+
+
+def store_to_temp1(a):
+    b = [1, 2, 3]
+    b[2] = a
+    return b
+
+
+def store_to_temp2(a):
+    b = [1, 2, 3]
+    b[2] = a
+    return a
+
+
+def test_store_to_temp(caplog):
+    reset()
+
+    result = store_to_temp1(4)
+    compiled = compile(store_to_temp1)
+    run_and_check(compiled, [MISS], 1, caplog, result, 4)
+    run_and_check(compiled, [HIT], 1, caplog, result, 4)
+
+    result = store_to_temp2(4)
+    compiled = compile(store_to_temp2)
+    run_and_check(compiled, [MISS], 2, caplog, result, 4)
+    run_and_check(compiled, [HIT], 2, caplog, result, 4)

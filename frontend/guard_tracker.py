@@ -439,6 +439,15 @@ class GuardTracker:
             var.make_output(f"__stack__{i}", StoreInStack(i), graph_codegen,
                             True, id(value))
 
+        for idx, var in self.state.objects.get_all_with_id():
+            if var.prev is not None and idx not in graph_codegen.id2name:
+                oldest_var = var.get_oldest_var()
+                if len(oldest_var.extract_code_at_start) == 0:
+                    continue
+                var.make_output(f"__tmp_{idx}",
+                                oldest_var.extract_code_at_start[0],
+                                graph_codegen, False, idx)
+
         self.state.fx_graph.set_output_nodes(graph_codegen.get_graph_outputs())
         print("graph", self.state.fx_graph.result_graph)
 
@@ -825,6 +834,9 @@ class GuardTracker:
 
     # def LIST_TO_TUPLE(self, inst: Instruction) -> None:
     #     pass
+
+    def LIST_EXTEND(self, inst: Instruction) -> None:
+        pass
 
     def POP_TOP(self, _inst: Instruction) -> None:
         pass
