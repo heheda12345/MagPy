@@ -95,7 +95,7 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
     module_pack = module.__package__
     if module_pack is None:
         return True
-    root_module = module_pack.split('.')[0]
+    root_module = str(module).split('\'')[1].split('.')[0]
     return root_module not in ('math', 'builtins', 'torch', 'numpy')
 
 
