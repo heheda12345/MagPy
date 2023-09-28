@@ -54,12 +54,20 @@ class StoreInIndex(StorePos):
     self_pos: StorePos
     self_id: int  # id of the bind object
     self_index: Any  # array index
+    subscriptable: bool
 
-    def __init__(self, self_pos: StorePos, self_id: int,
-                 self_index: Any) -> None:
+    def __init__(self,
+                 self_pos: StorePos,
+                 self_id: int,
+                 self_index: Any,
+                 subscritable: bool = True) -> None:
         self.self_pos = self_pos
         self.self_id = self_id
         self.self_index = self_index
+        self.subscriptable = subscritable
 
-    def __repr__(self) -> str:
-        return f"{self.self_pos}[{self.self_index}]"
+    def __str__(self) -> str:
+        if self.subscriptable:
+            return f"{self.self_pos}[{self.self_index}]"
+        else:
+            return f'list({self.self_pos})[{self.self_index}]'
