@@ -43,7 +43,7 @@ class ObjectTable:
             return self.objs[id(value)]
         elif allow_unexist_const:
             if isinstance(value, get_args(CONST_TYPES)) or isinstance(
-                    value, (list, tuple)):
+                    value, (list, tuple, set)):
                 return make_var_from_value(value, False, self.read_only)
         raise RuntimeError(f"Object {value} not found in object table")
 
