@@ -51,6 +51,23 @@ def is_call_bytecode(inst: 'Instruction') -> bool:
     return inst.opname.startswith("CALL_")
 
 
+fx_graph_inplace_functions: set[Callable[..., Any]] = {
+    operator.ipow,
+    operator.imul,
+    operator.imatmul,
+    operator.ifloordiv,
+    operator.itruediv,
+    operator.imod,
+    operator.iadd,
+    operator.isub,
+    operator.ilshift,
+    operator.irshift,
+    operator.iand,
+    operator.ixor,
+    operator.ior,
+    operator.setitem,
+}
+
 fx_graph_functions: set[Callable[..., Any]] = {
     operator.pos,
     operator.neg,
@@ -70,20 +87,8 @@ fx_graph_functions: set[Callable[..., Any]] = {
     operator.and_,
     operator.or_,
     operator.xor,
-    # operator.ipow,
-    # operator.imul,
-    # operator.imatmul,
-    # operator.ifloordiv,
-    # operator.itruediv,
-    # operator.imod,
-    # operator.iadd,
-    # operator.isub,
-    # operator.ilshift,
-    # operator.irshift,
-    # operator.iand,
-    # operator.ixor,
-    # operator.ior,
 }
+fx_graph_functions = fx_graph_functions.union(fx_graph_inplace_functions)
 
 
 def is_user_defined_func(func: Callable[..., Any]) -> bool:

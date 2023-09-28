@@ -15,7 +15,7 @@ from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
 from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex
 from . import variables as vs
-from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack
+from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack
 from .object_table import ObjectTable
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
 from .fx_graph import FxGraph, get_frame_root, is_leaf_module, NodeArgs
@@ -40,7 +40,7 @@ class State:
     defer_restart: Optional[str]  # None if no need to restart
     stack_objs: Optional[list[Any]]
     object_refs: list[Any]  # hold the reference of objects to avoid GC
-    num_new_refs: int
+    inplace_update_objs: list[Any]
 
     def __init__(self, root: torch.nn.Module) -> None:
         self.objects = ObjectTable()
@@ -65,6 +65,7 @@ class State:
         self.stack_objs = None
         self.object_refs = []
         self.num_new_refs = 0
+        self.inplace_update_objs = []
 
     def update_subpath(self, module: torch.nn.Module, prefix: str) -> None:
 
@@ -94,7 +95,7 @@ class State:
         def as_fx_node(var: vs.Variable) -> NodeArgs:
             if isinstance(var, vs.TorchParamVar):
                 return self.fx_graph.create_node("get_attr",
-                                                 self.subparam_paths[var.param],
+                                                 self.subparam_paths[var.obj],
                                                  (), {})
             return var.as_fx_node()
 
@@ -108,8 +109,11 @@ class State:
 
         return node_args, node_kwargs
 
-    def record_function(self, func: Callable[..., Any], args: List[Any],
-                        kwargs: Dict[str, Any]) -> None:
+    def record_function(self,
+                        func: Callable[..., Any],
+                        args: List[Any],
+                        kwargs: Dict[str, Any],
+                        add_proxy_waiting_id: bool = True) -> None:
         pargs, pkwargs = self.as_node_args_kwargs(args, kwargs)
         self.written = True
         if isinstance(func, torch.nn.Module):
@@ -120,7 +124,8 @@ class State:
                     pargs,
                     pkwargs,
                 )
-                self.node_waiting_ids.append(fx_node)
+                if add_proxy_waiting_id:
+                    self.node_waiting_ids.append(fx_node)
             else:
                 for k, v in self.submodule_paths.items():
                     print(id(k), v, k)
@@ -132,7 +137,8 @@ class State:
                 pargs,
                 pkwargs,
             )
-            self.node_waiting_ids.append(fx_node)
+            if add_proxy_waiting_id:
+                self.node_waiting_ids.append(fx_node)
 
     @classmethod
     def from_frame(cls, frame: FrameType, read_stack: bool,
@@ -143,7 +149,7 @@ class State:
             for i in range(state.start_stack_size):
                 value = get_value_stack_from_top(frame, i)
                 var = vs.make_var_from_value(value, True,
-                                             state.objects.read_only,
+                                             state.objects.get_or_make_var,
                                              state.fx_graph,
                                              [StoreInLocal(f"__stack__{i}")])
                 state.objects.add(var, value)
@@ -175,8 +181,12 @@ class State:
             return pos
         elif isinstance(pos, StoreInAttr):
             return StoreInAttr(
-                self.store_pos_in_callee(pos.self_pos, id(pos.self_obj)),
-                pos.self_obj, pos.attr_name)
+                self.store_pos_in_callee(pos.self_pos, pos.self_id),
+                pos.self_id, pos.attr_name)
+        elif isinstance(pos, StoreInIndex):
+            return StoreInIndex(
+                self.store_pos_in_callee(pos.self_pos, pos.self_id),
+                pos.self_id, pos.self_index)
         else:
             raise NotImplementedError
 
@@ -185,6 +195,7 @@ class State:
             return
         self.written = True
         self.defer_restart = None
+        replacement_mapping: dict[torch.fx.Node, torch.fx.Node] = {}
 
         def merge_call_guard() -> None:
             for idx, var in state.objects.objs.items():
@@ -202,12 +213,14 @@ class State:
                         elif isinstance(pos, StoreInAttr):
                             new_var.extract_code_at_start.append(
                                 self.store_pos_in_callee(pos, idx))
+                        elif isinstance(pos, StoreInIndex):
+                            new_var.extract_code_at_start.append(
+                                self.store_pos_in_callee(pos, idx))
                         else:
-                            raise NotImplementedError
+                            raise NotImplementedError(pos)
 
         def merge_fx_graph() -> None:
             print("to merge", state.fx_graph.result_graph)
-            replacement_mapping: dict[torch.fx.Node, torch.fx.Node] = {}
 
             def replacement_fn(node: torch.fx.Node) -> torch.fx.Node:
                 return replacement_mapping[node]
@@ -233,8 +246,8 @@ class State:
                     for arg in node.args[0]:
                         tensor_idx = get_tensor_idx(arg)
                         if self.objects.contains_by_id(tensor_idx):
-                            raise NotImplementedError
-                        new_tensor_var = copy.deepcopy(
+                            continue
+                        new_tensor_var = copy.copy(
                             state.objects.get_by_id(tensor_idx))
                         assert isinstance(new_tensor_var, vs.TensorVar)
                         if new_tensor_var.need_guard_check:
@@ -272,15 +285,68 @@ class State:
                 replacement_mapping[node] = new_node
 
         def merge_output() -> None:
-            if isinstance(return_value, tuple):
-                raise NotImplementedError
+            merged_ids: set[int] = set()
+
+            def get_or_make_var(
+                    obj: Any, need_guard_check: bool,
+                    fx_graph: Optional[FxGraph],
+                    extract_code_at_start: list[StorePos]) -> vs.Variable:
+                if id(obj) in merged_ids:
+                    new_var = self.objects.get(obj)
+                elif self.objects.contains(obj) and self.objects.get(
+                        obj, False) is not None:  # value from caller, modified
+                    if isinstance(obj, torch.Tensor):
+                        old_obj = state.objects.get(obj, False)
+                        assert isinstance(old_obj, vs.TensorVar)
+                        old_node = old_obj.fx_node
+                        new_node = replacement_mapping[old_node]
+                        new_var = vs.TensorVar.from_tensor_and_node(
+                            obj, new_node, need_guard_check,
+                            extract_code_at_start)
+                    else:
+                        new_var = vs.make_var_from_value(
+                            obj, need_guard_check, get_or_make_var, fx_graph,
+                            extract_code_at_start)
+                    self.objects.update_by_id(new_var, id(obj))
+                elif self.objects.contains(
+                        obj):  # value from caller, unmodified
+                    new_var = self.objects.get(obj)
+                else:  # value not in caller
+                    if isinstance(obj, torch.Tensor):
+                        old_obj = state.objects.get(obj, False)
+                        assert isinstance(old_obj, vs.TensorVar)
+                        old_node = old_obj.fx_node
+                        new_node = replacement_mapping[old_node]
+                        new_var = vs.TensorVar.from_tensor_and_node(
+                            obj, new_node, need_guard_check,
+                            extract_code_at_start)
+                    else:
+                        new_var = vs.make_var_from_value(
+                            obj, need_guard_check, get_or_make_var, fx_graph,
+                            extract_code_at_start)
+                    self.objects.add(new_var, obj)
+                merged_ids.add(id(obj))
+                return new_var
+
+            for idx, var in state.objects.get_all_with_id():
+                if var.prev is not None:
+                    oldest = var.get_oldest_var()
+                    if len(oldest.extract_code_at_start) == 0:
+                        continue
+                    new_extract = [
+                        self.store_pos_in_callee(pos, idx)
+                        for pos in oldest.extract_code_at_start
+                    ]
+                    get_or_make_var(var.obj, var.need_guard_check,
+                                    self.fx_graph, new_extract)
+
             var = state.objects.get(return_value, allow_unexist_const=True)
-            new_var = copy.copy(var)
-            new_var.extract_code_at_start = []
-            for pos in var.extract_code_at_start:
-                new_var.extract_code_at_start.append(
-                    self.store_pos_in_callee(pos, id(return_value)))
-            self.objects.add(new_var, return_value)
+            new_extract = [
+                self.store_pos_in_callee(pos, id(var.obj))
+                for pos in var.extract_code_at_start
+            ]
+            get_or_make_var(return_value, var.need_guard_check, self.fx_graph,
+                            new_extract)
 
         if len(state.objects.objs_no_id) > 0:
             raise NotImplementedError
@@ -292,6 +358,10 @@ class State:
     def mark_defer_restart(self, reason: str, stack_objs: list[Any]) -> None:
         self.defer_restart = reason
         self.stack_objs = stack_objs
+
+    def add_inplace_update_obj(self, obj: Any) -> None:
+        self.written = True
+        self.inplace_update_objs.append(obj)
 
 
 class GuardTracker:
@@ -396,6 +466,8 @@ class GuardTracker:
         key = new_random_key()
         guard_codegen = GuardFnCodegen(key=key)
         for var in self.state.objects.get_all():
+            while var.prev is not None:
+                var = var.prev
             var.make_guard(guard_codegen)
         guard_code = guard_codegen.get_code()
         graph_codegen = GraphFnCodegen(key=key)
@@ -414,7 +486,7 @@ class GuardTracker:
             value = self.frame.f_locals[live_var]
             var = self.state.objects.get(value, allow_unexist_const=True)
             var.make_output(f"__live_{i}", StoreInLocal(live_var),
-                            graph_codegen)
+                            graph_codegen, True, id(value))
         # TODO: can be optimized by only reproduce the modified variables
         if break_before_cur_inst:
             stack_objs = self.state.stack_objs
@@ -424,9 +496,20 @@ class GuardTracker:
 
         for i, value in enumerate(stack_objs):
             var = self.state.objects.get(value, allow_unexist_const=True)
-            var.make_output(f"__stack__{i}", StoreInStack(i), graph_codegen)
+            var.make_output(f"__stack__{i}", StoreInStack(i), graph_codegen,
+                            True, id(value))
+
+        for idx, var in self.state.objects.get_all_with_id():
+            if var.prev is not None and idx not in graph_codegen.id2name:
+                oldest_var = var.get_oldest_var()
+                if len(oldest_var.extract_code_at_start) == 0:
+                    continue
+                var.make_output(f"__tmp_{idx}",
+                                oldest_var.extract_code_at_start[0],
+                                graph_codegen, False, idx)
 
         self.state.fx_graph.set_output_nodes(graph_codegen.get_graph_outputs())
+        print("graph", self.state.fx_graph.result_graph)
 
         if self.state.start_pc == 0 and self.code.original_insts[
                 end_pc].opname == "RETURN_VALUE" and self.caller is not None:
@@ -476,13 +559,34 @@ class GuardTracker:
             self.state.object_refs.append(
                 get_value_stack_from_top(self.frame, i))
         self.state.num_new_refs = 0
-        for i, node in enumerate(self.state.node_waiting_ids):
-            value = get_value_stack_from_top(self.frame, i)
-            if isinstance(value, torch.Tensor):
-                var = vs.TensorVar.from_tensor_and_node(value, node, False)
-            else:
-                raise NotImplementedError
-            self.state.objects.add(var, value)
+        if len(self.state.inplace_update_objs) > 0:
+            for i, obj in enumerate(self.state.inplace_update_objs):
+                if isinstance(obj, StoreInStack):
+                    pos = obj
+                    obj = get_value_stack_from_top(self.frame, pos.idx)
+                    if isinstance(obj, torch.Tensor):
+                        new_var: vs.Variable = vs.TensorVar.from_tensor_and_node(
+                            obj, self.state.node_waiting_ids[pos.idx], False)
+                    else:
+                        new_var = vs.make_var_from_value(
+                            obj, False, self.state.objects.get_or_make_var,
+                            self.state.fx_graph, [])
+                else:
+                    # heheda: not know how to get the node of tensor now
+                    assert not isinstance(obj, torch.Tensor)
+                    new_var = vs.make_var_from_value(
+                        obj, False, self.state.objects.get_or_make_var,
+                        self.state.fx_graph, [])
+                self.state.objects.update_by_id(new_var, id(obj))
+        else:
+            for i, node in enumerate(self.state.node_waiting_ids):
+                value = get_value_stack_from_top(self.frame, i)
+                if isinstance(value, torch.Tensor):
+                    var = vs.TensorVar.from_tensor_and_node(value, node, False)
+                else:
+                    raise NotImplementedError
+                self.state.objects.add(var, value)
+        self.state.inplace_update_objs.clear()
         self.state.node_waiting_ids.clear()
         if self.state.defer_restart is not None:
             self.restart("defered restart " + self.state.defer_restart,
@@ -535,7 +639,16 @@ class GuardTracker:
             assert prior is None
             assert self.state.written == False
             return
-        elif self.has_tensor_arg(args, kwargs):
+        if func in fx_graph_inplace_functions:
+            if len(args) == 0:
+                raise NotImplementedError
+            if not self.state.objects.contains(args[0]):
+                self.state.add_object(
+                    vs.make_var_from_value(args[0], False,
+                                           self.state.objects.get_or_make_var,
+                                           self.state.fx_graph, []), args[0])
+            self.state.inplace_update_objs.append(StoreInStack(0))
+        if self.has_tensor_arg(args, kwargs):
             if func in fx_graph_functions or isinstance(func, torch.nn.Module):
                 self.state.record_function(func, args, kwargs)
                 return
@@ -600,6 +713,45 @@ class GuardTracker:
         obj2 = get_value_stack_from_top(self.frame, 0)
         self.call_function(operator.getitem, [obj1, obj2], {})
 
+    def INPLACE_POWER(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.ipow)
+
+    def INPLACE_MULTIPLY(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.imul)
+
+    def INPLACE_MATRIX_MULTIPLY(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.imatmul)
+
+    def INPLACE_FLOOR_DIVIDE(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.ifloordiv)
+
+    def INPLACE_TRUE_DIVIDE(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.itruediv)
+
+    def INPLACE_MODULO(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.imod)
+
+    def INPLACE_ADD(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.iadd)
+
+    def INPLACE_SUBTRACT(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.isub)
+
+    def INPLACE_LSHIFT(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.ilshift)
+
+    def INPLACE_RSHIFT(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.irshift)
+
+    def INPLACE_AND(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.iand)
+
+    def INPLACE_XOR(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.ixor)
+
+    def INPLACE_OR(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.ior)
+
     def BUILD_SLICE(self, _inst: Instruction) -> None:
         pass
 
@@ -609,11 +761,16 @@ class GuardTracker:
     def LOAD_FAST(self, inst: Instruction) -> None:
         if inst.argval not in self.state.stored_locals:
             obj = self.frame.f_locals[inst.argval]
-            var = vs.make_var_from_value(obj, True,
-                                         self.state.objects.read_only,
-                                         self.state.fx_graph,
-                                         [StoreInLocal(inst.argval)])
-            self.state.add_object(var, obj)
+            pos = StoreInLocal(inst.argval)
+            if not self.state.objects.contains(obj):
+                var = vs.make_var_from_value(obj, True,
+                                             self.state.objects.get_or_make_var,
+                                             self.state.fx_graph, [pos])
+                self.state.add_object(var, obj)
+                print("add to obj table", obj, id(obj))
+            else:
+                var = self.state.objects.get(obj)
+                var.extract_code_at_start.append(pos)
 
     def LOAD_GLOBAL(self, inst: Instruction) -> None:
         if inst.argval not in self.state.stored_globals:
@@ -627,7 +784,7 @@ class GuardTracker:
                 raise UnknownTypeError(inst.argval)
 
             var = vs.make_var_from_value(obj, True,
-                                         self.state.objects.read_only,
+                                         self.state.objects.get_or_make_var,
                                          self.state.fx_graph,
                                          [StoreInGlobal(inst.argval)])
             self.state.add_object(var, obj)
@@ -638,9 +795,9 @@ class GuardTracker:
         method = getattr(self_obj, inst.argval)
         self_var = self.state.objects.get(self_obj)
         method_var = vs.make_var_from_value(
-            method, self_var.need_guard_check, self.state.objects.read_only,
-            self.state.fx_graph, [
-                StoreInAttr(self_var.extract_code_at_start[0], self_obj,
+            method, self_var.need_guard_check,
+            self.state.objects.get_or_make_var, self.state.fx_graph, [
+                StoreInAttr(self_var.extract_code_at_start[0], id(self_obj),
                             inst.argval)
             ] if self_var.need_guard_check else [])
         if isinstance(self_var, vs.ModuleVar) and isinstance(
@@ -653,10 +810,11 @@ class GuardTracker:
         attr = getattr(obj, inst.argval)
         obj_var = self.state.objects.get(obj)
         attr_var = vs.make_var_from_value(
-            attr, obj_var.need_guard_check, self.state.objects.read_only,
-            self.state.fx_graph,
-            [StoreInAttr(obj_var.extract_code_at_start[0], obj, inst.argval)]
-            if obj_var.need_guard_check else [])
+            attr, obj_var.need_guard_check, self.state.objects.get_or_make_var,
+            self.state.fx_graph, [
+                StoreInAttr(obj_var.extract_code_at_start[0], id(obj),
+                            inst.argval)
+            ] if obj_var.need_guard_check else [])
         if isinstance(obj_var, vs.ModuleVar):
             if isinstance(attr_var, vs.ModuleVar):
                 attr_var.src = obj_var.src
@@ -718,6 +876,18 @@ class GuardTracker:
     def STORE_FAST(self, inst: Instruction) -> None:
         self.state.add_stored_locals(inst.argval)
 
+    def STORE_SUBSCR(self, inst: Instruction) -> None:
+        index = get_value_stack_from_top(self.frame, 0)
+        target = get_value_stack_from_top(self.frame, 1)
+        value = get_value_stack_from_top(self.frame, 2)
+        if isinstance(target, torch.Tensor):
+            # still use the original node, so no need to update object table
+            self.state.record_function(operator.setitem, [target, index, value],
+                                       {},
+                                       add_proxy_waiting_id=False)
+        else:
+            self.state.add_inplace_update_obj(target)
+
     def BUILD_TUPLE(self, inst: Instruction) -> None:
         pass
 
@@ -729,6 +899,27 @@ class GuardTracker:
 
     # def LIST_TO_TUPLE(self, inst: Instruction) -> None:
     #     pass
+
+    def LIST_EXTEND(self, inst: Instruction) -> None:
+        pass
+
+    def POP_TOP(self, _inst: Instruction) -> None:
+        pass
+
+    def ROT_TWO(self, _inst: Instruction) -> None:
+        pass
+
+    def ROT_THREE(self, _inst: Instruction) -> None:
+        pass
+
+    def ROT_FOUR(self, _inst: Instruction) -> None:
+        pass
+
+    def DUP_TOP(self, _inst: Instruction) -> None:
+        pass
+
+    def DUP_TOP_TWO(self, _inst: Instruction) -> None:
+        pass
 
 
 trackers: list[GuardTracker] = []
