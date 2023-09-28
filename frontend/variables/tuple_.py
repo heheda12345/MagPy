@@ -1,11 +1,11 @@
-from typing import TYPE_CHECKING, Optional, Tuple, Any, Iterable
+from typing import TYPE_CHECKING, Optional, Tuple, Any, Callable
 from .base import Variable
 from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos, StoreInIndex
 import torch
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
-    from ..object_table import ReadOnlyObjectTable, ObjectTable
+    from ..object_table import ObjectTable
 
 
 class TupleVar(Variable):
@@ -16,21 +16,21 @@ class TupleVar(Variable):
     def __init__(self,
                  value: tuple[Any, ...],
                  need_guard_check: bool,
-                 object_table: 'ReadOnlyObjectTable',
+                 get_or_make_var: Callable[
+                     [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
                  fx_graph: Optional[FxGraph] = None,
                  extract_code_at_start: list[StorePos] = []) -> None:
-        super().__init__(need_guard_check, extract_code_at_start)
+        super().__init__(need_guard_check, value, extract_code_at_start)
         self.value = value
         self.length = len(value)
         self.vars = []
         self.obj_ids = []
-        from . import make_var_from_value
         for i, obj in enumerate(value):
             new_extract: list[StorePos] = [
-                StoreInIndex(pos, i) for pos in self.extract_code_at_start
+                StoreInIndex(pos, id(obj), i)
+                for pos in self.extract_code_at_start
             ]
-            var = object_table.get_or_make_var(obj, need_guard_check, fx_graph,
-                                               new_extract)
+            var = get_or_make_var(obj, need_guard_check, fx_graph, new_extract)
             self.vars.append(var)
             self.obj_ids.append(id(obj))
 
@@ -38,8 +38,8 @@ class TupleVar(Variable):
                          pos: StorePos) -> None:
         codegen.add_check(f"isinstance({pos}, tuple)")
         codegen.add_check(f"len({pos}) == {self.length}")
-        for i, obj in enumerate(self.vars):
-            obj.make_guard_inner(codegen, StoreInIndex(pos, i))
+        for i, (var, obj) in enumerate(zip(self.vars, self.obj_ids)):
+            var.make_guard_inner(codegen, StoreInIndex(pos, obj, i))
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
@@ -57,10 +57,12 @@ class TupleVar(Variable):
     def from_value(cls,
                    value: Tuple[Any, ...],
                    need_guard_check: bool,
-                   object_table: 'ReadOnlyObjectTable',
+                   get_or_make_var: Callable[
+                       [Any, bool, Optional[FxGraph], list[StorePos]],
+                       Variable],
                    fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "TupleVar":
-        return cls(value, need_guard_check, object_table, fx_graph,
+        return cls(value, need_guard_check, get_or_make_var, fx_graph,
                    extract_code_at_start)
 
     def as_fx_node(self) -> NodeArgs:
@@ -71,7 +73,8 @@ class TupleVar(Variable):
             old_var = table.get_or_none_by_id(idx)
             if old_var is not None:
                 new_extract: list[StorePos] = [
-                    StoreInIndex(pos, i) for pos in self.extract_code_at_start
+                    StoreInIndex(pos, idx, i)
+                    for pos in self.extract_code_at_start
                 ]
                 old_var.extract_code_at_start.extend(new_extract)
                 old_var.need_guard_check |= self.need_guard_check

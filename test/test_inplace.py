@@ -148,3 +148,95 @@ def test_store_to_temp(caplog):
     compiled = compile(store_to_temp2)
     run_and_check(compiled, [MISS], 2, caplog, result, 4)
     run_and_check(compiled, [HIT], 2, caplog, result, 4)
+
+
+def inplace_callee_no_ret(a):
+    a[1] = 2.0
+
+
+def inplace_callee_ret(a):
+    a[1] = 2.0
+    return a
+
+
+def inplace_callee_add_no_ret(a):
+    a[1] += 2.0
+
+
+def inplace_callee_add_ret(a):
+    a[1] += 2.0
+    return a
+
+
+def caller1(a):
+    inplace_callee_no_ret(a)
+    return a
+
+
+def caller2(a):
+    inplace_callee_no_ret(a)
+
+
+def caller3(a):
+    inplace_callee_ret(a)
+    return a
+
+
+def caller4(a):
+    inplace_callee_ret(a)
+
+
+def caller5(a):
+    inplace_callee_add_no_ret(a)
+    return a
+
+
+def caller6(a):
+    inplace_callee_add_no_ret(a)
+
+
+def caller7(a):
+    inplace_callee_add_ret(a)
+    return a
+
+
+def caller8(a):
+    inplace_callee_add_ret(a)
+
+
+def test_inplace_function(caplog):
+    reset()
+    fs = [
+        caller1, caller2, caller3, caller4, caller5, caller6, caller7, caller8
+    ]
+
+    def get_input1():
+        return [1.0, 3.0]
+
+    def get_input2():
+        return torch.tensor([1.0, 3.0])
+
+    cache_size = 0
+    for f in fs:
+        print("===============running", f)
+        compiled = compile(f)
+        cache_size += 1
+        original_input = get_input1()
+        result = f(original_input)
+        run_and_check(compiled, [MISS, MISS], cache_size, caplog, result,
+                      get_input1())
+        run_and_check(compiled, [HIT], cache_size, caplog, result, get_input1())
+        input1 = get_input1()
+        _output = compiled(input1)
+        assert_equal(input1, original_input)
+
+        compiled = compile(f)
+        cache_size += 1
+        original_input = get_input2()
+        result = f(original_input)
+        run_and_check(compiled, [MISS, MISS], cache_size, caplog, result,
+                      get_input2())
+        run_and_check(compiled, [HIT], cache_size, caplog, result, get_input2())
+        input2 = get_input2()
+        _output = compiled(input2)
+        assert_equal(input2, original_input)

@@ -11,15 +11,15 @@ from ..utils import NullObject, null_object
 from ..store_pos import StorePos
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
-    from ..object_table import ReadOnlyObjectTable
 
 
 class NoneVar(Variable):
 
     def __init__(self,
                  need_guard_check: bool,
+                 obj: None,
                  extract_code_at_start: list[StorePos] = []) -> None:
-        super().__init__(need_guard_check, extract_code_at_start)
+        super().__init__(need_guard_check, obj, extract_code_at_start)
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
@@ -35,10 +35,12 @@ class NoneVar(Variable):
     def from_value(cls,
                    value: None,
                    need_guard_check: bool,
-                   _object_table: 'ReadOnlyObjectTable',
+                   _get_or_make_var: Callable[
+                       [Any, bool, Optional[FxGraph], list[StorePos]],
+                       Variable],
                    _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "NoneVar":
-        return cls(need_guard_check, extract_code_at_start)
+        return cls(need_guard_check, value, extract_code_at_start)
 
     def as_fx_node(self) -> NodeArgs:
         return None
@@ -48,8 +50,9 @@ class NullVar(Variable):
 
     def __init__(self,
                  need_guard_check: bool,
+                 obj: NullObject,
                  extract_code_at_start: list[StorePos] = []) -> None:
-        super().__init__(need_guard_check, extract_code_at_start)
+        super().__init__(need_guard_check, obj, extract_code_at_start)
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
@@ -66,10 +69,12 @@ class NullVar(Variable):
     def from_value(cls,
                    value: NullObject,
                    need_guard_check: bool,
-                   _object_table: 'ReadOnlyObjectTable',
+                   _get_or_make_var: Callable[
+                       [Any, bool, Optional[FxGraph], list[StorePos]],
+                       Variable],
                    _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "NullVar":
-        return cls(need_guard_check, extract_code_at_start)
+        return cls(need_guard_check, value, extract_code_at_start)
 
     def as_fx_node(self) -> NodeArgs:
         raise NotImplementedError()
@@ -85,8 +90,9 @@ class SliceVar(Variable):
                  stop: Optional[int],
                  step: Optional[int],
                  need_guard_check: bool,
+                 obj: slice,
                  extract_code_at_start: list[StorePos] = []) -> None:
-        super().__init__(need_guard_check, extract_code_at_start)
+        super().__init__(need_guard_check, obj, extract_code_at_start)
         self.start = start
         self.stop = stop
         self.step = step
@@ -105,10 +111,12 @@ class SliceVar(Variable):
     def from_value(cls,
                    value: slice,
                    need_guard_check: bool,
-                   _object_table: 'ReadOnlyObjectTable',
+                   _get_or_make_var: Callable[
+                       [Any, bool, Optional[FxGraph], list[StorePos]],
+                       Variable],
                    _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "SliceVar":
-        return cls(value.start, value.stop, value.step, need_guard_check,
+        return cls(value.start, value.stop, value.step, need_guard_check, value,
                    extract_code_at_start)
 
     def as_fx_node(self) -> NodeArgs:
@@ -124,7 +132,6 @@ torch_modules = set([torch])
 
 
 class ModuleVar(Variable):
-    module: ModuleType
     src: ObjectSrc
 
     def __init__(self,
@@ -132,19 +139,18 @@ class ModuleVar(Variable):
                  src: ObjectSrc,
                  need_guard_check: bool,
                  extract_code_at_start: list[StorePos] = []) -> None:
-        super().__init__(need_guard_check, extract_code_at_start)
-        self.module = module
+        super().__init__(need_guard_check, module, extract_code_at_start)
         self.src = src
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_id_check(f"id({pos}) == {id(self.module)}", self.module)
+        codegen.add_id_check(f"id({pos}) == {id(self.obj)}", self.obj)
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
                           idx: int) -> None:
-        name_in_codegen = codegen.add_var(self.module,
-                                          f"MODULE_{self.module.__name__}")
+        name_in_codegen = codegen.add_var(self.obj,
+                                          f"MODULE_{self.obj.__name__}")
         codegen.output(name_in_graph_fn, store_pos, name_in_codegen, in_return,
                        idx)
 
@@ -152,7 +158,9 @@ class ModuleVar(Variable):
     def from_value(cls,
                    value: ModuleType,
                    need_guard_check: bool,
-                   _object_table: 'ReadOnlyObjectTable',
+                   _get_or_make_var: Callable[
+                       [Any, bool, Optional[FxGraph], list[StorePos]],
+                       Variable],
                    _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "ModuleVar":
         if value in torch_modules:
@@ -163,7 +171,6 @@ class ModuleVar(Variable):
 
 
 class FunctionVar(Variable):
-    func: Callable[..., Any]
     src: ObjectSrc
 
     def __init__(self,
@@ -171,18 +178,17 @@ class FunctionVar(Variable):
                  src: ObjectSrc,
                  need_guard_check: bool,
                  extract_code_at_start: list[StorePos] = []) -> None:
-        super().__init__(need_guard_check, extract_code_at_start)
-        self.func = func
+        super().__init__(need_guard_check, func, extract_code_at_start)
         self.src = src
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_id_check(f"id({pos}) == {id(self.func)}", self.func)
+        codegen.add_id_check(f"id({pos}) == {id(self.obj)}", self.obj)
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
                           idx: int) -> None:
-        name_in_codegen = codegen.add_var(self.func, f"_{self.func.__name__}")
+        name_in_codegen = codegen.add_var(self.obj, f"_{self.obj.__name__}")
         codegen.output(name_in_graph_fn, store_pos, name_in_codegen, in_return,
                        idx)
 
@@ -190,7 +196,9 @@ class FunctionVar(Variable):
     def from_value(cls,
                    value: Callable[..., Any],
                    need_guard_check: bool,
-                   _object_table: 'ReadOnlyObjectTable',
+                   _get_or_make_var: Callable[
+                       [Any, bool, Optional[FxGraph], list[StorePos]],
+                       Variable],
                    _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "FunctionVar":
         return cls(value, ObjectSrc.USER_DEFINED, need_guard_check,

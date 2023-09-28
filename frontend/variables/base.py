@@ -1,25 +1,27 @@
 from dataclasses import dataclass
 from abc import abstractmethod
-from typing import Any, TYPE_CHECKING, Optional, Tuple, Iterable
+from typing import Any, TYPE_CHECKING, Optional, Tuple, Iterable, Callable
+from copy import copy
 from ..fx_graph import FxGraph
 from ..store_pos import StorePos
 if TYPE_CHECKING:
     import torch.fx
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
     from ..fx_graph import FxGraph, NodeArgs
-    from ..object_table import ReadOnlyObjectTable, ObjectTable
+    from ..object_table import ObjectTable
 
 
 @dataclass
 class Variable:
     need_guard_check: bool
     extract_code_at_start: list[StorePos]
+    obj: Any
     prev: Optional['Variable'] = None
 
-    def __init__(self,
-                 need_guard_check: bool,
-                 extract_code_at_start: list[StorePos] = []) -> None:
+    def __init__(self, need_guard_check: bool, obj: Any,
+                 extract_code_at_start: list[StorePos]) -> None:
         self.need_guard_check = need_guard_check
+        self.obj = obj
         self.extract_code_at_start = extract_code_at_start
         if need_guard_check:
             assert len(extract_code_at_start) > 0
@@ -29,7 +31,9 @@ class Variable:
     def from_value(self,
                    value: Any,
                    need_guard_check: bool,
-                   object_table: 'ReadOnlyObjectTable',
+                   get_or_make_var: Callable[
+                       [Any, bool, Optional[FxGraph], list[StorePos]],
+                       'Variable'],
                    fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> 'Variable':
         raise NotImplementedError
