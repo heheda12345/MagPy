@@ -1,6 +1,6 @@
 import inspect
 import dis
-from typing import Any, TYPE_CHECKING, Callable
+from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic
 from types import FrameType
 import random
 import operator
@@ -51,6 +51,23 @@ def is_call_bytecode(inst: 'Instruction') -> bool:
     return inst.opname.startswith("CALL_")
 
 
+fx_graph_inplace_functions: set[Callable[..., Any]] = {
+    operator.ipow,
+    operator.imul,
+    operator.imatmul,
+    operator.ifloordiv,
+    operator.itruediv,
+    operator.imod,
+    operator.iadd,
+    operator.isub,
+    operator.ilshift,
+    operator.irshift,
+    operator.iand,
+    operator.ixor,
+    operator.ior,
+    operator.setitem,
+}
+
 fx_graph_functions: set[Callable[..., Any]] = {
     operator.pos,
     operator.neg,
@@ -70,20 +87,8 @@ fx_graph_functions: set[Callable[..., Any]] = {
     operator.and_,
     operator.or_,
     operator.xor,
-    # operator.ipow,
-    # operator.imul,
-    # operator.imatmul,
-    # operator.ifloordiv,
-    # operator.itruediv,
-    # operator.imod,
-    # operator.iadd,
-    # operator.isub,
-    # operator.ilshift,
-    # operator.irshift,
-    # operator.iand,
-    # operator.ixor,
-    # operator.ior,
 }
+fx_graph_functions = fx_graph_functions.union(fx_graph_inplace_functions)
 
 
 def is_user_defined_func(func: Callable[..., Any]) -> bool:
@@ -95,7 +100,7 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
     module_pack = module.__package__
     if module_pack is None:
         return True
-    root_module = module_pack.split('.')[0]
+    root_module = str(module).split('\'')[1].split('.')[0]
     return root_module not in ('math', 'builtins', 'torch', 'numpy')
 
 
@@ -184,3 +189,23 @@ class NO_LD_PRELOAD_CTX:
     def __exit__(self, *args: Any) -> None:
         if self.old_ld_preload:
             os.environ['LD_PRELOAD'] = self.old_ld_preload
+
+
+T = TypeVar('T')
+
+
+class ReadOnlyObject(Generic[T]):
+    obj: T
+    const_attrs: tuple[str, ...]
+
+    def __init__(self, obj: T, const_attrs: tuple[str, ...] = ()) -> None:
+        self.obj = obj
+        self.const_attrs = const_attrs
+
+    def __getattr__(self, attr: str) -> Any:
+        if attr in self.const_attrs:
+            return getattr(self.obj, attr)
+        else:
+            raise AttributeError(
+                f"Attribute {attr} should not be called in reader of {self.obj}"
+            )

@@ -13,27 +13,38 @@ def gen_imports(writer: PyCodeWriter, imports: set[str]) -> None:
 
 
 class GraphFnCodegen:
-    outputs: list[Tuple[str, StorePos, str]]
+    postprossess: PyCodeWriter
+    returns: list[Tuple[str, StorePos]]
     imports: set[str]
     graph_inputs: list[StorePos]
     graph_outputs: list[torch.fx.Node]
     objs: dict[str, Any]  # name -> var
     key: int
+    id2name: dict[int, str]  # idx -> name_in_graph_fn
 
     def __init__(self, key: int) -> None:
-        self.outputs = []
+        self.postprossess = PyCodeWriter()
+        self.returns = []
         self.imports = set()
         self.graph_inputs = []
         self.graph_outputs = []
         self.objs = {}
         self.key = key
+        self.id2name = {}
 
-    def output(self, name_in_graph_fn: str, store_pos: StorePos,
-               code: str) -> None:
-        self.outputs.append((name_in_graph_fn, store_pos, code))
+    def output(self, name_in_graph_fn: str, store_pos: StorePos, code: str,
+               in_return: bool, idx: int) -> None:
+        self.postprossess.wl(f"{name_in_graph_fn} = {code}")
+        if idx != 0:
+            self.id2name[idx] = name_in_graph_fn
+        if in_return:
+            self.returns.append((name_in_graph_fn, store_pos))
 
     def add_import(self, module_name: str) -> None:
         self.imports.add(module_name)
+
+    def add_stmt(self, stmt: str) -> None:
+        self.postprossess.wl(stmt)
 
     def get_code(self) -> str:
         writer = PyCodeWriter()
@@ -50,11 +61,10 @@ class GraphFnCodegen:
         writer.wl(
             f"graph_out = compiled_graph({', '.join([str(x) for x in self.graph_inputs])})"
         )  # writer.wl(f"print('graph_out', graph_out)")
-        for target_name, _, code in self.outputs:
-            writer.wl(f"{target_name} = {code}")
+        writer.write(self.postprossess.get_code())
         # writer.wl(f"print('graph_fn done', locals)")
         graph_retures = ", ".join(
-            [f"{target_name}" for target_name, _, _ in self.outputs])
+            f"{target_name}" for target_name, _ in self.returns)
         writer.wl(f"return {graph_retures}")
         writer.block_end()
         writer.wl(f"return fn")
@@ -62,7 +72,7 @@ class GraphFnCodegen:
         return writer.get_code()
 
     def get_return_values(self) -> list[StorePos]:
-        return [store_pos for _, store_pos, _ in self.outputs]
+        return [store_pos for _, store_pos in self.returns]
 
     def add_graph_output(self, fx_node: torch.fx.Node) -> str:
         self.graph_outputs.append(fx_node)
@@ -128,7 +138,7 @@ class GuardFnCodegen:
         writer.block_end()
         writer.wl(f"except Exception as e:")
         writer.block_start()
-        writer.wl(f"print('exception in graph_fn:', e, type(e))")
+        writer.wl(f"print('exception in guard_fn:', e, type(e))")
         writer.wl(f'import traceback')
         writer.wl(f"print(traceback.format_exc())")
         writer.wl(f"return False")

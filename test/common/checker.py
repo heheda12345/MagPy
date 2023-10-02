@@ -10,6 +10,8 @@ MISS = 2
 
 def assert_equal(ref, out):
     precision = 1e-3
+    assert type(ref) == type(
+        out), f"wrong type: expect {type(ref)}, got {type(out)}"
     if isinstance(ref, torch.Tensor):
         assert (isinstance(out, torch.Tensor))
         r = ref.cpu()
@@ -48,7 +50,9 @@ def run_and_check(compiled, expect_cache_logs, expect_cache_size: int, caplog,
                 recorded_cache_logs.append(MISS)
             else:
                 assert (False), "unknown cache log"
-    assert len(recorded_cache_logs) == len(expect_cache_logs)
+    assert len(recorded_cache_logs) == len(
+        expect_cache_logs
+    ), f"wrong cache log: expect {expect_cache_logs}, got {recorded_cache_logs}"
     for recorded, expected in zip(recorded_cache_logs, expect_cache_logs):
         assert recorded == expected, f"wrong cache log: expect {expect_cache_logs}, got {recorded_cache_logs}"
     assert cache.TOTAL_SIZE == expect_cache_size, f"wrong cache size: expect {expect_cache_size}, got {cache.TOTAL_SIZE}"
