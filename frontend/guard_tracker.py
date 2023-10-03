@@ -16,6 +16,7 @@ from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
 from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod
 from . import variables as vs
+from . import dynamic as dyn
 from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func
 from .object_table import ObjectTable
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -506,8 +507,13 @@ class GuardTracker:
         for node in self.state.fx_graph.result_graph.nodes:
             if node.op == "placeholder":
                 var = node.meta["var"]
-                assert isinstance(var, vs.TensorVar)
-                graph_codegen.add_graph_input(var.extract_code_at_start[0])
+                if isinstance(var, vs.TensorVar):
+                    graph_codegen.add_graph_input(var.extract_code_at_start[0])
+                elif isinstance(var, vs.ScalarVar):
+                    graph_codegen.add_graph_input(var.extract_code_at_start[0],
+                                                  to_tensor=True)
+                else:
+                    raise ValueError("unknown var type", var)
         current_inst = self.code.get_inst(lasti)
         # livevars_analysis should return the same result when passing self.code.guard_insts
         # and self.code.original_insts, but as current_inst may not be in original_insts,
@@ -608,12 +614,20 @@ class GuardTracker:
             if partial is None:
                 continue
             value = get_value_stack_from_top(self.frame, i)
+            node = partial.node
             if isinstance(value, torch.Tensor):
-                node = partial.node
                 assert node is not None
-                var: Variable = vs.TensorVar.from_tensor_and_node(
+                var: vs.Variable = vs.TensorVar.from_tensor_and_node(
                     value, node, partial.need_guard_check,
                     partial.extract_code_at_start)
+            elif is_scalar(value) and node is not None:
+                var = vs.ScalarVar.from_value_and_node(
+                    value,
+                    partial.node,
+                    partial.need_guard_check,
+                    partial.extract_code_at_start,
+                )
+                dyn.mark_dynamic(value, dyn.ScalarWithUnknownValue())
             else:
                 var = vs.make_var_from_value(value, partial.need_guard_check,
                                              self.state.objects.get_or_make_var,
@@ -639,12 +653,17 @@ class GuardTracker:
     @classmethod
     def has_tensor_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
         return any(
-            isinstance(i, torch.Tensor)
+            isinstance(i, torch.Tensor) or (is_scalar(i) and dyn.contains(i))
             for i in itertools.chain(args, kwargs.values()))
 
     @classmethod
     def all_scalar_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
         return all(is_scalar(i) for i in itertools.chain(args, kwargs.values()))
+
+    @classmethod
+    def all_static_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
+        return all(
+            not dyn.contains(i) for i in itertools.chain(args, kwargs.values()))
 
     @classmethod
     def has_tuple_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
@@ -708,7 +727,8 @@ class GuardTracker:
                     ]
                 })
 
-        if self.all_scalar_arg(args, kwargs):
+        if self.all_scalar_arg(args, kwargs) and self.all_static_arg(
+                args, kwargs):
             return
         elif self.has_tuple_arg(args, kwargs):
             return

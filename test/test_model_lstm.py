@@ -37,8 +37,8 @@ class LSTMCell(nn.Module):
         nn.init.xavier_uniform_(self.weight_ih)
         nn.init.xavier_uniform_(self.weight_hh)
 
-    def forward(self, inp, c, h):
-        ih = torch.matmul(inp, self.weight_ih)
+    def forward(self, inp, i, c, h):
+        ih = torch.matmul(inp[i], self.weight_ih)
         hh = torch.matmul(h, self.weight_hh)
 
         ingatei = ih[0]
@@ -75,10 +75,14 @@ def test_lstm_cell(caplog):
         inp = torch.randn(10, 10)
         c = torch.randn(10, 10)
         h = torch.randn(10, 10)
-        expect_result = model(inp, c, h)
+        expect_result = model(inp, 1, c, h)
         compiled_model = compile(model)
-
-        run_and_check(compiled_model, [MISS], 1, caplog, expect_result, inp, c,
-                      h)
-        run_and_check(compiled_model, [HIT], 1, caplog, expect_result, inp, c,
-                      h)
+        run_and_check(compiled_model, [MISS], 1, caplog, expect_result, inp, 1,
+                      c, h)
+        run_and_check(compiled_model, [HIT], 1, caplog, expect_result, inp, 1,
+                      c, h)
+        expect_result2 = model(inp, 2, c, h)
+        run_and_check(compiled_model, [MISS], 2, caplog, expect_result2, inp, 2,
+                      c, h)
+        run_and_check(compiled_model, [HIT], 2, caplog, expect_result2, inp, 2,
+                      c, h)
