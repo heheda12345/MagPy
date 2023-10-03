@@ -7,7 +7,7 @@ from typing import Tuple, Callable
 import copy
 from .bytecode_analysis import stacksize_analysis
 from .instruction import Instruction, convert_instruction, ci, format_insts
-from .code import save_code
+from .code import generate_code_map, ProcessedCode
 from .cache import get_frame_cache, CachedGraph
 from .store_pos import StorePos, StoreInStack, StoreInLocal
 
@@ -429,7 +429,7 @@ def add_name(code_options: Dict[str, Any], varnames: List[str],
 
 
 def rewrite_bytecode(code: types.CodeType, frame_id: int,
-                     is_callee: bool) -> types.CodeType:
+                     is_callee: bool) -> tuple[types.CodeType, ProcessedCode]:
     original_instructions = get_instructions(code)
     instructions = copy.deepcopy(original_instructions)
     virtualize_jumps(instructions)
@@ -498,10 +498,11 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int,
     add_name(code_options, list(new_names_all["varnames"]),
              list(new_names_all["names"]))
     fix_instructions_for_assemble(instructions, code_options)
-    save_code(original_instructions, instructions, frame_id, in_trace_insts,
-              next_original_pc)
+    code_map = generate_code_map(original_instructions, instructions,
+                                 in_trace_insts, next_original_pc)
     new_code = assemble_instructions(instructions, code_options)[1]
-    return new_code
+
+    return new_code, code_map
 
 
 # test code

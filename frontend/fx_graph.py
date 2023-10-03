@@ -35,7 +35,7 @@ class FxGraph:
     result_graph: torch.fx.Graph
     mark_written_fn: Callable[[], None]
     fake_mode: torch._subclasses.FakeTensorMode
-    example_inputs: list[tuple[str, torch.Tensor]]
+    example_inputs: list[tuple[torch.Tensor, str]]
 
     def __init__(self, root: torch.nn.Module,
                  mark_written_fn: Callable[[], None]) -> None:
@@ -64,7 +64,7 @@ class FxGraph:
         target: torch.fx.node.Target,
         args: Tuple[Any, ...],
         kwargs: Dict[str, Any],
-        name: Optional[str] = None,
+        name: str,
         type_expr: Optional[Any] = None,
     ) -> torch.fx.Node:
         fake_tensor = self.fake_mode.from_tensor(value, static_shapes=True)
@@ -84,8 +84,8 @@ class FxGraph:
         model = torch.fx.GraphModule(self.root, self.result_graph)
         model.recompile()
         with NO_LD_PRELOAD_CTX():
-            compiled_fn = backend_compile(model,
-                                          [x[0] for x in self.example_inputs])
+            compiled_fn = backend_compile(
+                model, [x[0].contiguous() for x in self.example_inputs])
         assert callable(compiled_fn)
         # TODO: add backend compiler
         return compiled_fn

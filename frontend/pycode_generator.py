@@ -59,7 +59,7 @@ class GraphFnCodegen:
             f"print('running graph_fn (key = {self.key})', locals.keys())")
         # TODO: simplify
         writer.wl(
-            f"graph_out = compiled_graph({', '.join([str(x) for x in self.graph_inputs])})"
+            f"graph_out = compiled_graph({', '.join([str(x)+'.contiguous()' for x in self.graph_inputs])})"
         )  # writer.wl(f"print('graph_out', graph_out)")
         writer.write(self.postprossess.get_code())
         # writer.wl(f"print('graph_fn done', locals)")

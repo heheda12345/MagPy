@@ -123,24 +123,16 @@ class SliceVar(Variable):
         return slice(self.start, self.stop, self.step)
 
 
-class ObjectSrc(Enum):
-    USER_DEFINED = 0
-    TORCH = 1
-
-
 torch_modules = set([torch])
 
 
 class ModuleVar(Variable):
-    src: ObjectSrc
 
     def __init__(self,
                  module: ModuleType,
-                 src: ObjectSrc,
                  need_guard_check: bool,
                  extract_code_at_start: list[StorePos] = []) -> None:
         super().__init__(need_guard_check, module, extract_code_at_start)
-        self.src = src
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
@@ -163,23 +155,16 @@ class ModuleVar(Variable):
                        Variable],
                    _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "ModuleVar":
-        if value in torch_modules:
-            src = ObjectSrc.TORCH
-        else:
-            src = ObjectSrc.USER_DEFINED
-        return cls(value, src, need_guard_check, extract_code_at_start)
+        return cls(value, need_guard_check, extract_code_at_start)
 
 
 class FunctionVar(Variable):
-    src: ObjectSrc
 
     def __init__(self,
                  func: Callable[..., Any],
-                 src: ObjectSrc,
                  need_guard_check: bool,
                  extract_code_at_start: list[StorePos] = []) -> None:
         super().__init__(need_guard_check, func, extract_code_at_start)
-        self.src = src
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
@@ -201,5 +186,4 @@ class FunctionVar(Variable):
                        Variable],
                    _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "FunctionVar":
-        return cls(value, ObjectSrc.USER_DEFINED, need_guard_check,
-                   extract_code_at_start)
+        return cls(value, need_guard_check, extract_code_at_start)

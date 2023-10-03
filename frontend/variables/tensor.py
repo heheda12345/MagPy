@@ -98,9 +98,9 @@ class TensorVar(Variable):
             self.is_quantized == value.is_quantized and \
             self.is_sparse == value.is_sparse and \
             self.class_type == type(value) and \
-            hasattr(value, 'size') and self.size == value.size() and \
-            hasattr(value, 'stride') and self.stride == value.stride() and \
-            hasattr(value, 'is_contiguous') and self.is_contiguous == value.is_contiguous()
+            hasattr(value, 'size') and self.size == value.size() # and \
+        # hasattr(value, 'stride') and self.stride == value.stride() and \
+        # hasattr(value, 'is_contiguous') and self.is_contiguous == value.is_contiguous()
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:

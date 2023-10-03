@@ -71,3 +71,18 @@ class StoreInIndex(StorePos):
             return f"{self.self_pos}[{self.self_index}]"
         else:
             return f'list({self.self_pos})[{self.self_index}]'
+
+
+class ExtractFromMethod(StorePos):
+    self_pos: StorePos
+    self_id: int
+    method_name: str
+
+    def __init__(self, self_pos: StorePos, self_id: int,
+                 method_name: str) -> None:
+        self.self_pos = self_pos
+        self.self_id = self_id
+        self.method_name = method_name
+
+    def __str__(self) -> str:
+        return f"{self.self_pos}.{self.method_name}()"

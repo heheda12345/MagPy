@@ -7,6 +7,7 @@ import operator
 from .bytecode_writter import get_code_keys
 from .c_api import get_value_stack_from_top, get_value_stack_size
 import os
+import torch
 if TYPE_CHECKING:
     from .instruction import Instruction
 
@@ -102,6 +103,21 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
         return True
     root_module = str(module).split('\'')[1].split('.')[0]
     return root_module not in ('math', 'builtins', 'torch', 'numpy')
+
+
+def is_graph_func(func: Callable[..., Any]) -> bool:
+    if func in fx_graph_functions:
+        return True
+    if isinstance(func, torch.nn.Module):
+        return True
+    module = inspect.getmodule(func)
+    if module is None:
+        return False
+    module_pack = module.__package__
+    if module_pack is None:
+        return False
+    root_module = str(module).split('\'')[1].split('.')[0]
+    return root_module == 'torch'
 
 
 random_state = None

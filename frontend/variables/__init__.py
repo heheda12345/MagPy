@@ -5,7 +5,8 @@ from .base import Variable
 from .scalar import ScalarVar
 from .tensor import TensorVar, TorchParamVar
 from .torch_module import TorchModuleVar
-from .const import NullVar, NoneVar, SliceVar, ModuleVar, FunctionVar, ObjectSrc
+from .any_ import AnyVar
+from .const import NullVar, NoneVar, SliceVar, ModuleVar, FunctionVar
 from .tuple_ import TupleVar
 from .set_ import SetVar
 from .list_ import ListVar
@@ -50,11 +51,13 @@ def make_var_from_value(value: Any,
     elif callable(value):
         return FunctionVar.from_value(value, need_guard_check, get_or_make_var,
                                       fx_graph, extract_code_at_start)
-    raise UnknownTypeError(type(value))
+    else:
+        return AnyVar.from_value(value, need_guard_check, get_or_make_var,
+                                 fx_graph, extract_code_at_start)
 
 
 __all__ = [
     'make_var_from_value', 'Variable', 'ScalarVar', 'TensorVar',
     'TorchModuleVar', 'NullVar', 'NoneVar', "ModuleVar", "FunctionVar",
-    "TorchParamVar", "ObjectSrc"
+    "TorchParamVar", "AnyVar"
 ]
