@@ -254,14 +254,19 @@ class State:
 
             def get_tensor_idx(node: torch.fx.Node) -> int:
                 var = node.meta["var"]
-                idx = var.idx
+                if isinstance(var, vs.TensorVar):
+                    idx = var.idx
+                elif isinstance(var, vs.ScalarVar):
+                    idx = id(var.obj)
+                else:
+                    raise NotImplementedError
                 assert isinstance(idx, int) and idx != 0
                 return idx
 
             def get_original_node(node: torch.fx.Node) -> torch.fx.Node:
                 idx = get_tensor_idx(node)
                 var_in_caller = self.objects.get_by_id(idx)
-                assert isinstance(var_in_caller, vs.TensorVar)
+                assert isinstance(var_in_caller, (vs.TensorVar, vs.ScalarVar))
                 return var_in_caller.fx_node
 
             for node in state.fx_graph.result_graph.nodes:
@@ -276,7 +281,8 @@ class State:
                             continue
                         new_tensor_var = copy.copy(
                             state.objects.get_by_id(tensor_idx))
-                        assert isinstance(new_tensor_var, vs.TensorVar)
+                        assert isinstance(new_tensor_var,
+                                          (vs.TensorVar, vs.ScalarVar))
                         if new_tensor_var.need_guard_check:
                             raise NotImplementedError
                         new_tensor_var.extract_code_at_start = []
@@ -330,6 +336,15 @@ class State:
                         new_var = vs.TensorVar.from_tensor_and_node(
                             obj, new_node, need_guard_check,
                             extract_code_at_start)
+                    elif is_scalar(obj) and dyn.contains(obj):
+                        old_obj = state.objects.get(obj, False)
+                        assert isinstance(old_obj, vs.ScalarVar)
+                        old_node = old_obj.fx_node
+                        assert old_node is not None
+                        new_node = replacement_mapping[old_node]
+                        new_var = vs.ScalarVar.from_value_and_node(
+                            obj, new_node, need_guard_check,
+                            extract_code_at_start)
                     else:
                         new_var = vs.make_var_from_value(
                             obj, need_guard_check, get_or_make_var, fx_graph,
@@ -345,6 +360,15 @@ class State:
                         old_node = old_obj.fx_node
                         new_node = replacement_mapping[old_node]
                         new_var = vs.TensorVar.from_tensor_and_node(
+                            obj, new_node, need_guard_check,
+                            extract_code_at_start)
+                    elif is_scalar(obj) and dyn.contains(obj):
+                        old_obj = state.objects.get(obj, False)
+                        assert isinstance(old_obj, vs.ScalarVar)
+                        old_node = old_obj.fx_node
+                        assert old_node is not None
+                        new_node = replacement_mapping[old_node]
+                        new_var = vs.ScalarVar.from_value_and_node(
                             obj, new_node, need_guard_check,
                             extract_code_at_start)
                     else:
