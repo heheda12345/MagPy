@@ -104,21 +104,21 @@ class GraphFnCodegen:
 
 
 class GuardFnCodegen:
-    checks: list[str]
+    checks: set[str]
     imports: set[str]
     vars: dict[str, Variable]  # name -> var
     key: int
     object_refs: list[Any]  # the reference to objects for id check
 
     def __init__(self, key: int) -> None:
-        self.checks = []
+        self.checks = set()
         self.imports = set()
         self.vars = {}
         self.key = key
         self.object_refs = []
 
     def add_check(self, check: str) -> None:
-        self.checks.append(check)
+        self.checks.add(check)
 
     def add_id_check(self, check: str, obj: Any) -> None:
         self.add_check(check)

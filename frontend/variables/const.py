@@ -105,7 +105,9 @@ class SliceVar(Variable):
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
                           idx: int) -> None:
-        codegen.output(name_in_graph_fn, store_pos, "None", in_return, idx)
+        codegen.output(name_in_graph_fn, store_pos,
+                       f"slice({self.start}, {self.stop}, {self.step})",
+                       in_return, idx)
 
     @classmethod
     def from_value(cls,
@@ -187,3 +189,45 @@ class FunctionVar(Variable):
                    _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "FunctionVar":
         return cls(value, need_guard_check, extract_code_at_start)
+
+
+class RangeVar(Variable):
+    start: Optional[int]
+    stop: Optional[int]
+    step: Optional[int]
+
+    def __init__(self,
+                 start: Optional[int],
+                 stop: Optional[int],
+                 step: Optional[int],
+                 need_guard_check: bool,
+                 obj: range,
+                 extract_code_at_start: list[StorePos] = []) -> None:
+        super().__init__(need_guard_check, obj, extract_code_at_start)
+        self.start = start
+        self.stop = stop
+        self.step = step
+
+    def make_guard_inner(self, codegen: "GuardFnCodegen",
+                         pos: StorePos) -> None:
+        codegen.add_check(
+            f"{pos} == range({self.start}, {self.stop}, {self.step})")
+
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: "GraphFnCodegen", in_return: bool,
+                          idx: int) -> None:
+        codegen.output(name_in_graph_fn, store_pos,
+                       f"range({self.start}, {self.stop}, {self.step})",
+                       in_return, idx)
+
+    @classmethod
+    def from_value(cls,
+                   value: range,
+                   need_guard_check: bool,
+                   _get_or_make_var: Callable[
+                       [Any, bool, Optional[FxGraph], list[StorePos]],
+                       Variable],
+                   _fx_graph: Optional[FxGraph] = None,
+                   extract_code_at_start: list[StorePos] = []) -> "RangeVar":
+        return cls(value.start, value.stop, value.step, need_guard_check, value,
+                   extract_code_at_start)

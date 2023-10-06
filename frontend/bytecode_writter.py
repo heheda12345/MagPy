@@ -437,7 +437,6 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int,
         inst.original_inst = original_inst
     instructions[0].is_start = True
     print(format_insts(instructions))
-    strip_extended_args(instructions)
     frame_cache = get_frame_cache(frame_id)
     # list of (start_pc, traced_instructions)
     run_traced_insts: list[tuple[int, list[Instruction]]] = []
@@ -468,9 +467,11 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int,
     next_original_pc: list[tuple[Instruction, Instruction]] = []
     for i, inst in enumerate(instructions):
         if inst.opname == "RETURN_VALUE":
+            original = inst.original_inst
+            assert original is not None
             instructions[i] = ci("JUMP_ABSOLUTE", target=final_insts[0])
             instructions[i].is_end = True
-            next_original_pc.append((original_instructions[i], instructions[i]))
+            next_original_pc.append((original, instructions[i]))
             in_trace_insts.append(instructions[i])
     run_traced_insts.sort(key=lambda x: x[0], reverse=True)
     for start_pc, traced_code in run_traced_insts:
@@ -491,17 +492,17 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int,
         in_trace_insts.extend(disable_trace_at_start[:-1])
         instructions = disable_trace_at_start + instructions
     instructions.extend(final_insts)
-    print("guarded code")
-    print(format_insts(instructions))
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
     add_name(code_options, list(new_names_all["varnames"]),
              list(new_names_all["names"]))
+    strip_extended_args(instructions)
     fix_instructions_for_assemble(instructions, code_options)
+    print("guarded code")
+    print(format_insts(instructions))
     code_map = generate_code_map(original_instructions, instructions,
                                  in_trace_insts, next_original_pc)
     new_code = assemble_instructions(instructions, code_options)[1]
-
     return new_code, code_map
 
 

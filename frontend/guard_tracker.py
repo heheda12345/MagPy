@@ -14,10 +14,10 @@ from .code import ProcessedCode
 from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
-from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod
+from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin
 from . import variables as vs
 from . import dynamic as dyn
-from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func
+from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module
 from .object_table import ObjectTable
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
 from .fx_graph import FxGraph, get_frame_root, is_leaf_module, NodeArgs
@@ -203,7 +203,7 @@ class State:
             raise ValueError("unknown local in callee", pos)
         elif isinstance(pos, StoreInStack):
             raise ValueError("cannot store in stack in callee")
-        elif isinstance(pos, StoreInGlobal):
+        elif isinstance(pos, (StoreInGlobal, StoreInBuiltin)):
             return pos
         elif isinstance(pos, StoreInAttr):
             return StoreInAttr(
@@ -752,18 +752,38 @@ class GuardTracker:
                 })
 
         if self.all_scalar_arg(args, kwargs) and self.all_static_arg(
-                args, kwargs):
+                args, kwargs) and get_root_module(func) != 'torch':
+            if func == range:
+                self.state.set_partial_var({
+                    -1: [
+                        PartialVar(node=None,
+                                   need_guard_check=False,
+                                   extract_code_at_start=[])
+                    ]
+                })
             return
         elif self.has_tuple_arg(args, kwargs):
             return
         elif self.has_list_arg(args, kwargs):
             set_if_inplace_return()
             return
-        elif self.has_tensor_arg(args, kwargs) and is_graph_func(func):
+        elif get_root_module(func) == 'torch' or (self.has_tensor_arg(
+                args, kwargs) and is_graph_func(func)):
+            if hasattr(func, "__name__") and func.__name__ == "size":
+                self.state.set_partial_var({
+                    -1: [
+                        PartialVar(node=None,
+                                   need_guard_check=False,
+                                   extract_code_at_start=[])
+                    ]
+                })
+                return
             self.state.record_function(func,
                                        args,
                                        kwargs,
                                        inplace_ref=inplace_ref)
+            return
+        elif len(args) > 0 and isinstance(args[0], torch.nn.ModuleList):
             return
         raise NotImplementedError(func, args, kwargs)
 
@@ -873,19 +893,25 @@ class GuardTracker:
 
     def LOAD_GLOBAL(self, inst: Instruction) -> None:
         if inst.argval not in self.state.stored_globals:
-            try:
-                if inst.argval in self.frame.f_globals:
-                    obj = self.frame.f_globals[inst.argval]
-                else:  # try first search in __builtins__
-                    obj = getattr(self.frame.f_globals['__builtins__'],
-                                  str(inst.argval))
-            except Exception as e:
+            if inst.argval in self.frame.f_globals:
+                obj = self.frame.f_globals[inst.argval]
+                store_pos: StorePos = StoreInGlobal(inst.argval)
+            elif isinstance(
+                    self.frame.f_globals['__builtins__'], dict
+            ) and inst.argval in self.frame.f_globals['__builtins__']:
+                obj = self.frame.f_globals['__builtins__'][inst.argval]
+                store_pos = StoreInBuiltin(inst.argval, 'dict')
+            elif hasattr(self.frame.f_globals['__builtins__'],
+                         inst.argval):  # try first search in __builtins__
+                obj = getattr(self.frame.f_globals['__builtins__'],
+                              str(inst.argval))
+                store_pos = StoreInBuiltin(inst.argval, 'attr')
+            else:
                 raise UnknownTypeError(inst.argval)
 
             var = vs.make_var_from_value(obj, True,
                                          self.state.objects.get_or_make_var,
-                                         self.state.fx_graph,
-                                         [StoreInGlobal(inst.argval)])
+                                         self.state.fx_graph, [store_pos])
             self.state.add_object(var, obj)
 
     def LOAD_METHOD(self, inst: Instruction) -> None:
@@ -915,12 +941,15 @@ class GuardTracker:
         obj = get_value_stack_from_top(self.frame, 0)
         attr = getattr(obj, inst.argval)
         obj_var = self.state.objects.get(obj)
-        attr_var = vs.make_var_from_value(
-            attr, obj_var.need_guard_check, self.state.objects.get_or_make_var,
-            self.state.fx_graph, [
-                StoreInAttr(obj_var.extract_code_at_start[0], id(obj),
-                            inst.argval)
-            ] if obj_var.need_guard_check else [])
+        new_extract: list[StorePos] = [
+            StoreInAttr(pos, id(obj), inst.argval)
+            for pos in obj_var.extract_code_at_start
+        ]
+        attr_var = vs.make_var_from_value(attr,
+                                          obj_var.need_guard_check,
+                                          self.state.objects.get_or_make_var,
+                                          self.state.fx_graph,
+                                          extract_code_at_start=new_extract)
         self.state.add_object(attr_var, attr)
 
     def CALL_FUNCTION(self, inst: Instruction) -> None:
@@ -942,7 +971,6 @@ class GuardTracker:
         kwargs: dict[str, Any] = {}
         self_val = get_value_stack_from_top(self.frame, num_args)
         meth_val = get_value_stack_from_top(self.frame, num_args + 1)
-        print("call method", meth_val, id(self_val), id(meth_val))
         if isinstance(meth_val, NullObject):
             # Stack layout: ... | NULL | callable | arg1 | ... | argN
             self.call_function(self_val, args, kwargs)
@@ -957,7 +985,7 @@ class GuardTracker:
             for i in range(num_args - 1, -1, -1)
         ]
         kw_names = get_value_stack_from_top(self.frame, 0)
-        func = get_value_stack_from_top(self.frame, num_args + 2)
+        func = get_value_stack_from_top(self.frame, num_args + 1)
         kwargs: dict[str, Any] = {}
         for arg, kw_name in zip(args[-len(kw_names):], kw_names):
             kwargs[kw_name] = arg

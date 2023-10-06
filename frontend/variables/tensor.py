@@ -4,6 +4,7 @@ import torch.fx
 
 from frontend.pycode_generator import GuardFnCodegen, GraphFnCodegen
 from .base import Variable
+from .tuple_ import TupleVar
 from ..pycode_writer import new_name
 from ..fx_graph import FxGraph, NodeArgs
 from ..store_pos import StorePos
@@ -147,3 +148,14 @@ class TorchParamVar(Variable):
 
     def as_fx_node(self) -> "NodeArgs":
         raise ValueError("TorchParamVar.as_fx_node should not be called")
+
+
+class TorchSizeVar(TupleVar):
+
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: "GraphFnCodegen", in_return: bool,
+                          idx: int) -> None:
+        tuple_name = name_in_graph_fn + "_tuple"
+        super().make_output_inner(tuple_name, store_pos, codegen, False, idx)
+        codegen.output(name_in_graph_fn, store_pos, f"torch.Size({tuple_name})",
+                       in_return, idx)

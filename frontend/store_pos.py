@@ -35,6 +35,22 @@ class StoreInGlobal(StorePos):
         return f"globals()['{self.name}']"
 
 
+class StoreInBuiltin(StorePos):
+    name: str
+    ty: str  # attr or dict
+
+    def __init__(self, name: str, ty: str) -> None:
+        self.name = name
+        self.ty = ty
+        assert ty in ['attr', 'dict']
+
+    def __repr__(self) -> str:
+        if self.ty == 'dict':
+            return f"globals()['__builtins__']['{self.name}']"
+        else:
+            return f"globals()['__builtins__'].{self.name}"
+
+
 class StoreInAttr(StorePos):
     self_pos: StorePos
     self_id: int

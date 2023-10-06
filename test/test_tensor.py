@@ -145,3 +145,16 @@ def test_tensor_functional(caplog):
                   a)
     run_and_check(compiled_tensor_functional, [HIT], 1, caplog, expect_result,
                   a)
+
+
+def tensor_shape(a):
+    return a.size(), a.shape
+
+
+def test_tensor_shape(caplog):
+    reset()
+    compiled_tensor_shape = compile(tensor_shape)
+    a = torch.randn((3, 3))
+    expect_result = tensor_shape(a)
+    run_and_check(compiled_tensor_shape, [MISS], 1, caplog, expect_result, a)
+    run_and_check(compiled_tensor_shape, [HIT], 1, caplog, expect_result, a)

@@ -44,4 +44,4 @@ class AnyVar(Variable):
         return cls(need_guard_check, value, extract_code_at_start)
 
     def as_fx_node(self) -> NodeArgs:
-        raise NotImplementedError()
+        raise NotImplementedError(self.obj)

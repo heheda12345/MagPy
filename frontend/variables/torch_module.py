@@ -32,6 +32,9 @@ class TorchModuleVar(Variable):
         if isinstance(value, torch.nn.Sequential):
             return TorchSequentialVar(value, need_guard_check, get_or_make_var,
                                       extract_code_at_start)
+        elif isinstance(value, torch.nn.ModuleList):
+            return TorchModuleListVar(value, need_guard_check, get_or_make_var,
+                                      extract_code_at_start)
         else:
             return cls(value, need_guard_check, extract_code_at_start)
 
@@ -54,7 +57,46 @@ class TorchSequentialVar(TorchModuleVar):
     submodule_ids: list[int]
 
     def __init__(self,
-                 value: torch.nn.Module,
+                 value: torch.nn.Sequential,
+                 need_guard_check: bool,
+                 get_or_make_var: Callable[
+                     [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
+                 extract_code_at_start: list[StorePos] = []) -> None:
+        super().__init__(value, need_guard_check, extract_code_at_start)
+        self.submodules = []
+        self.submodule_ids = []
+        for i, m in enumerate(value):
+            new_extract: list[StorePos] = [
+                StoreInIndex(pos, id(m), i)
+                for pos in self.extract_code_at_start
+            ]
+            var = get_or_make_var(m, need_guard_check, None, new_extract)
+            assert isinstance(var, TorchModuleVar)
+            self.submodules.append(var)
+            self.submodule_ids.append(id(m))
+
+    def add_subvars_to_table(self, table: 'ObjectTable') -> None:
+        for i, (var, idx) in enumerate(zip(self.submodules,
+                                           self.submodule_ids)):
+            old_var = table.get_or_none_by_id(idx)
+            if old_var is not None:
+                new_extract: list[StorePos] = [
+                    StoreInIndex(pos, idx, i)
+                    for pos in self.extract_code_at_start
+                ]
+                old_var.extract_code_at_start.extend(new_extract)
+                old_var.need_guard_check |= self.need_guard_check
+            else:
+                table.add_by_id(var, idx)
+                var.add_subvars_to_table(table)
+
+
+class TorchModuleListVar(TorchModuleVar):
+    submodules: list[TorchModuleVar]
+    submodule_ids: list[int]
+
+    def __init__(self,
+                 value: torch.nn.ModuleList,
                  need_guard_check: bool,
                  get_or_make_var: Callable[
                      [Any, bool, Optional[FxGraph], list[StorePos]], Variable],

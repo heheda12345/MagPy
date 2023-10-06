@@ -137,6 +137,9 @@ class ProcessedCode:
 
     def get_inst(self, lasti: int) -> Instruction:
         pc = lasti // 2
+        while pc < len(self.guard_insts
+                      ) and self.guard_insts[pc].opname == "EXTENDED_ARG":
+            pc += 1
         return self.guard_insts[pc]
 
     def get_pc_by_inst(self, inst: Instruction) -> int:
