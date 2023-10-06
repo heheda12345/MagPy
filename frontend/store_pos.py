@@ -102,3 +102,17 @@ class ExtractFromMethod(StorePos):
 
     def __str__(self) -> str:
         return f"{self.self_pos}.{self.method_name}()"
+
+
+class ExtractFromFunction(StorePos):
+    var_pos: StorePos
+    var_id: int
+    func_name: str
+
+    def __init__(self, var_pos: StorePos, var_id: int, func_name: str) -> None:
+        self.var_pos = var_pos
+        self.var_id = var_id
+        self.func_name = func_name
+
+    def __str__(self) -> str:
+        return f"{self.func_name}({self.var_pos})"

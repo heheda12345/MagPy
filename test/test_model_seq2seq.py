@@ -157,6 +157,7 @@ def get_input(batch_size):
 
 
 def test_seq2seq_one_token(caplog):
+    reset()
     with torch.no_grad():
         batch_size = 2
         seq_len = 50

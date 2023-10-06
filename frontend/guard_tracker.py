@@ -14,7 +14,7 @@ from .code import ProcessedCode
 from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
-from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin
+from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction
 from . import variables as vs
 from . import dynamic as dyn
 from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module
@@ -213,6 +213,14 @@ class State:
             return StoreInIndex(
                 self.store_pos_in_callee(pos.self_pos, pos.self_id),
                 pos.self_id, pos.self_index)
+        elif isinstance(pos, ExtractFromMethod):
+            return ExtractFromMethod(
+                self.store_pos_in_callee(pos.self_pos, pos.self_id),
+                pos.self_id, pos.method_name)
+        elif isinstance(pos, ExtractFromFunction):
+            return ExtractFromFunction(
+                self.store_pos_in_callee(pos.var_pos, pos.var_id), pos.var_id,
+                pos.func_name)
         else:
             raise NotImplementedError
 
@@ -720,6 +728,22 @@ class GuardTracker:
             self.state.add_submodule(func)
         if func == operator.is_ and args[1] is None:  # is_none check
             return
+        if func == enumerate:
+            assert len(args) == 1
+            assert len(kwargs) == 0
+            var = self.state.objects.get_or_none(args[0])
+            assert var is not None
+            new_store_pos: list[StorePos] = [
+                ExtractFromFunction(pos, id(args[0]), func.__name__)
+                for pos in var.extract_code_at_start
+            ]
+            self.state.set_partial_var({
+                -1: [
+                    PartialVar(node=None,
+                               need_guard_check=False,
+                               extract_code_at_start=new_store_pos)
+                ]
+            })
         if is_user_defined_func(func) or isinstance(func, torch.nn.Sequential):
             stack_objs = get_all_objects_in_stack(self.frame)
             self.state.mark_defer_restart(f"call_function", stack_objs)
@@ -1040,6 +1064,13 @@ class GuardTracker:
 
     def LIST_EXTEND(self, inst: Instruction) -> None:
         pass
+
+    def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
+        seq = get_value_stack_from_top(self.frame, 0)
+        if isinstance(seq, (tuple, list)):
+            pass
+        else:
+            raise NotImplementedError
 
     def POP_TOP(self, _inst: Instruction) -> None:
         pass
