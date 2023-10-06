@@ -35,6 +35,22 @@ class StoreInGlobal(StorePos):
         return f"globals()['{self.name}']"
 
 
+class StoreInBuiltin(StorePos):
+    name: str
+    ty: str  # attr or dict
+
+    def __init__(self, name: str, ty: str) -> None:
+        self.name = name
+        self.ty = ty
+        assert ty in ['attr', 'dict']
+
+    def __repr__(self) -> str:
+        if self.ty == 'dict':
+            return f"globals()['__builtins__']['{self.name}']"
+        else:
+            return f"globals()['__builtins__'].{self.name}"
+
+
 class StoreInAttr(StorePos):
     self_pos: StorePos
     self_id: int
@@ -71,3 +87,32 @@ class StoreInIndex(StorePos):
             return f"{self.self_pos}[{self.self_index}]"
         else:
             return f'list({self.self_pos})[{self.self_index}]'
+
+
+class ExtractFromMethod(StorePos):
+    self_pos: StorePos
+    self_id: int
+    method_name: str
+
+    def __init__(self, self_pos: StorePos, self_id: int,
+                 method_name: str) -> None:
+        self.self_pos = self_pos
+        self.self_id = self_id
+        self.method_name = method_name
+
+    def __str__(self) -> str:
+        return f"{self.self_pos}.{self.method_name}()"
+
+
+class ExtractFromFunction(StorePos):
+    var_pos: StorePos
+    var_id: int
+    func_name: str
+
+    def __init__(self, var_pos: StorePos, var_id: int, func_name: str) -> None:
+        self.var_pos = var_pos
+        self.var_id = var_id
+        self.func_name = func_name
+
+    def __str__(self) -> str:
+        return f"{self.func_name}({self.var_pos})"

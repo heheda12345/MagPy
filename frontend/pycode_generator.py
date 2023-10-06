@@ -16,7 +16,7 @@ class GraphFnCodegen:
     postprossess: PyCodeWriter
     returns: list[Tuple[str, StorePos]]
     imports: set[str]
-    graph_inputs: list[StorePos]
+    graph_inputs: list[tuple[StorePos, bool]]  # (extract_code, to_tensor)
     graph_outputs: list[torch.fx.Node]
     objs: dict[str, Any]  # name -> var
     key: int
@@ -58,9 +58,14 @@ class GraphFnCodegen:
         writer.wl(
             f"print('running graph_fn (key = {self.key})', locals.keys())")
         # TODO: simplify
-        writer.wl(
-            f"graph_out = compiled_graph({', '.join([str(x) for x in self.graph_inputs])})"
-        )  # writer.wl(f"print('graph_out', graph_out)")
+        graph_inputs = []
+        for x, to_tensor in self.graph_inputs:
+            if to_tensor:
+                graph_inputs.append(f"torch.tensor({x})")
+            else:
+                graph_inputs.append(f"{x}.contiguous()")
+        writer.wl(f"graph_out = compiled_graph({', '.join(graph_inputs)})"
+                 )  # writer.wl(f"print('graph_out', graph_out)")
         writer.write(self.postprossess.get_code())
         # writer.wl(f"print('graph_fn done', locals)")
         graph_retures = ", ".join(
@@ -81,8 +86,12 @@ class GraphFnCodegen:
     def get_graph_outputs(self) -> list[torch.fx.Node]:
         return self.graph_outputs
 
-    def add_graph_input(self, extract_code: StorePos) -> None:
-        self.graph_inputs.append(extract_code)
+    def add_graph_input(self,
+                        extract_code: StorePos,
+                        to_tensor: bool = False) -> None:
+        self.graph_inputs.append((extract_code, to_tensor))
+        if to_tensor:
+            self.add_import("torch")
 
     def add_var(self, var: Any, name: str = "") -> str:
         if name == "" or not is_valid_name(name):
@@ -95,21 +104,21 @@ class GraphFnCodegen:
 
 
 class GuardFnCodegen:
-    checks: list[str]
+    checks: set[str]
     imports: set[str]
     vars: dict[str, Variable]  # name -> var
     key: int
     object_refs: list[Any]  # the reference to objects for id check
 
     def __init__(self, key: int) -> None:
-        self.checks = []
+        self.checks = set()
         self.imports = set()
         self.vars = {}
         self.key = key
         self.object_refs = []
 
     def add_check(self, check: str) -> None:
-        self.checks.append(check)
+        self.checks.add(check)
 
     def add_id_check(self, check: str, obj: Any) -> None:
         self.add_check(check)

@@ -166,3 +166,41 @@ def test_binary_op(caplog):
             for b in [1, 2, 3]:
                 run_and_check(compiled_func, [HIT], cache_cnt, caplog,
                               func(a, b), a, b)
+
+
+def add3(a, b, c):
+    return a + b + c
+
+
+def call_add3(a, b, c):
+    return add3(a, b, c)
+
+
+def test_dyn_int(caplog):
+    reset()
+    import frontend.dynamic as dyn
+    a = 1
+    b = 2
+    c = 3
+    dyn.mark_dynamic(a, dyn.ScalarWithUnknownValue())
+    dyn.mark_dynamic(b, dyn.ScalarWithUnknownValue())
+    compiled_fn = compile(add3)
+    run_and_check(compiled_fn, [MISS], 1, caplog, 6, a, b, c)
+    run_and_check(compiled_fn, [HIT], 1, caplog, 6, a, b, c)
+    run_and_check(compiled_fn, [HIT], 1, caplog, 12, 4, 5, 3)
+    run_and_check(compiled_fn, [MISS], 2, caplog, 8, a, b, 5)
+
+
+def test_dyn_int_with_call(caplog):
+    reset()
+    import frontend.dynamic as dyn
+    a = 1
+    b = 2
+    c = 3
+    dyn.mark_dynamic(a, dyn.ScalarWithUnknownValue())
+    dyn.mark_dynamic(b, dyn.ScalarWithUnknownValue())
+    compiled_fn = compile(call_add3)
+    run_and_check(compiled_fn, [MISS, MISS], 1, caplog, 6, a, b, c)
+    run_and_check(compiled_fn, [HIT], 1, caplog, 6, a, b, c)
+    run_and_check(compiled_fn, [HIT], 1, caplog, 12, 4, 5, 3)
+    run_and_check(compiled_fn, [MISS, MISS], 2, caplog, 8, a, b, 5)

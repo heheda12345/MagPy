@@ -7,7 +7,7 @@ from typing import Tuple, Callable
 import copy
 from .bytecode_analysis import stacksize_analysis
 from .instruction import Instruction, convert_instruction, ci, format_insts
-from .code import save_code
+from .code import generate_code_map, ProcessedCode
 from .cache import get_frame_cache, CachedGraph
 from .store_pos import StorePos, StoreInStack, StoreInLocal
 
@@ -308,10 +308,8 @@ def add_callsite(
         in_trace_insts.extend(disable_trace_insts[:-1])
 
     start_stack_size = cached_graphs[0].start_stack_size if cached_graphs else 0
-    end_stack_size = cached_graphs[0].end_stack_size if cached_graphs else 0
     for graph in cached_graphs:
         assert graph.start_stack_size == start_stack_size
-        assert graph.end_stack_size == end_stack_size
 
     prepare_stack_insts = [
         ci("STORE_FAST", f"__stack__{i}") for i in range(start_stack_size)
@@ -407,10 +405,12 @@ def add_callsite(
         *call_guard_insts,
         *match_and_run_insts,
     ]
+    max_end_stack_size = max([g.start_stack_size for g in cached_graphs],
+                             default=0)
     new_names = {
         "varnames": ["__graph_fn", "__case_idx"] + [
             f"__stack__{i}"
-            for i in range(max(start_stack_size, end_stack_size))
+            for i in range(max(start_stack_size, max_end_stack_size))
         ],
         "names": [
             "guard_match", "enable_trace", "disable_trace", "locals",
@@ -429,7 +429,7 @@ def add_name(code_options: Dict[str, Any], varnames: List[str],
 
 
 def rewrite_bytecode(code: types.CodeType, frame_id: int,
-                     is_callee: bool) -> types.CodeType:
+                     is_callee: bool) -> tuple[types.CodeType, ProcessedCode]:
     original_instructions = get_instructions(code)
     instructions = copy.deepcopy(original_instructions)
     virtualize_jumps(instructions)
@@ -437,7 +437,6 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int,
         inst.original_inst = original_inst
     instructions[0].is_start = True
     print(format_insts(instructions))
-    strip_extended_args(instructions)
     frame_cache = get_frame_cache(frame_id)
     # list of (start_pc, traced_instructions)
     run_traced_insts: list[tuple[int, list[Instruction]]] = []
@@ -468,9 +467,11 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int,
     next_original_pc: list[tuple[Instruction, Instruction]] = []
     for i, inst in enumerate(instructions):
         if inst.opname == "RETURN_VALUE":
+            original = inst.original_inst
+            assert original is not None
             instructions[i] = ci("JUMP_ABSOLUTE", target=final_insts[0])
             instructions[i].is_end = True
-            next_original_pc.append((original_instructions[i], instructions[i]))
+            next_original_pc.append((original, instructions[i]))
             in_trace_insts.append(instructions[i])
     run_traced_insts.sort(key=lambda x: x[0], reverse=True)
     for start_pc, traced_code in run_traced_insts:
@@ -491,17 +492,18 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int,
         in_trace_insts.extend(disable_trace_at_start[:-1])
         instructions = disable_trace_at_start + instructions
     instructions.extend(final_insts)
-    print("guarded code")
-    print(format_insts(instructions))
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
     add_name(code_options, list(new_names_all["varnames"]),
              list(new_names_all["names"]))
+    strip_extended_args(instructions)
     fix_instructions_for_assemble(instructions, code_options)
-    save_code(original_instructions, instructions, frame_id, in_trace_insts,
-              next_original_pc)
+    print("guarded code")
+    print(format_insts(instructions))
+    code_map = generate_code_map(original_instructions, instructions,
+                                 in_trace_insts, next_original_pc)
     new_code = assemble_instructions(instructions, code_options)[1]
-    return new_code
+    return new_code, code_map
 
 
 # test code

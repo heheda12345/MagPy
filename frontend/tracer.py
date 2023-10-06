@@ -4,12 +4,12 @@ import traceback
 from types import FrameType, CodeType
 from typing import Any, Callable, Tuple
 import inspect
-from .code import load_code
 from .guard_tracker import push_tracker, pop_tracker, record
 from .cache import enable_cache
 from .fx_graph import set_frame_root
 from .c_api import set_eval_frame
 from .bytecode_writter import rewrite_bytecode
+from .code import ProcessedCode
 
 
 def get_trace_func(frame_id: int) -> Callable[[FrameType, str, Any], None]:
@@ -24,7 +24,7 @@ def get_trace_func(frame_id: int) -> Callable[[FrameType, str, Any], None]:
                 )
                 record(frame, frame_id)
             else:
-                print(f"tracing {event} {arg} in {frame.f_code.co_filename}")
+                print(f"tracing {event} in {frame.f_code.co_filename}")
         except Exception as e:
             print("exception in trace_func:", e, type(e))
             print(traceback.format_exc())
@@ -68,20 +68,22 @@ def get_process_frame(
         f: Callable[..., Any],
         is_callee: bool) -> Tuple[Callable[..., Any], Callable[..., Any]]:
 
-    def preprocess_frame(frame: FrameType,
-                         frame_id: int) -> Tuple[CodeType, Callable[..., Any]]:
+    def preprocess_frame(
+            frame: FrameType, frame_id: int
+    ) -> Tuple[CodeType, Callable[..., Any], ProcessedCode]:
         try:
             print(f"preprocess frame {frame.f_code.co_filename}", frame_id,
                   hex(id(frame)), frame.f_code.co_name)
             enable_cache(frame_id)
             set_frame_root(frame_id, f)
-            new_code = rewrite_bytecode(frame.f_code, frame_id, is_callee)
+            new_code, code_map = rewrite_bytecode(frame.f_code, frame_id,
+                                                  is_callee)
             trace_func = get_trace_func(frame_id)
         except Exception as e:
             print("exception in preprocess:", e, type(e))
             print(traceback.format_exc())
             raise e
-        return (new_code, trace_func)
+        return (new_code, trace_func, code_map)
 
     def postprocess_frame(frame: FrameType) -> None:
         try:

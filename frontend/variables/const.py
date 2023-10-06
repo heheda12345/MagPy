@@ -105,7 +105,9 @@ class SliceVar(Variable):
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
                           idx: int) -> None:
-        codegen.output(name_in_graph_fn, store_pos, "None", in_return, idx)
+        codegen.output(name_in_graph_fn, store_pos,
+                       f"slice({self.start}, {self.stop}, {self.step})",
+                       in_return, idx)
 
     @classmethod
     def from_value(cls,
@@ -123,24 +125,16 @@ class SliceVar(Variable):
         return slice(self.start, self.stop, self.step)
 
 
-class ObjectSrc(Enum):
-    USER_DEFINED = 0
-    TORCH = 1
-
-
 torch_modules = set([torch])
 
 
 class ModuleVar(Variable):
-    src: ObjectSrc
 
     def __init__(self,
                  module: ModuleType,
-                 src: ObjectSrc,
                  need_guard_check: bool,
                  extract_code_at_start: list[StorePos] = []) -> None:
         super().__init__(need_guard_check, module, extract_code_at_start)
-        self.src = src
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
@@ -163,23 +157,16 @@ class ModuleVar(Variable):
                        Variable],
                    _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "ModuleVar":
-        if value in torch_modules:
-            src = ObjectSrc.TORCH
-        else:
-            src = ObjectSrc.USER_DEFINED
-        return cls(value, src, need_guard_check, extract_code_at_start)
+        return cls(value, need_guard_check, extract_code_at_start)
 
 
 class FunctionVar(Variable):
-    src: ObjectSrc
 
     def __init__(self,
                  func: Callable[..., Any],
-                 src: ObjectSrc,
                  need_guard_check: bool,
                  extract_code_at_start: list[StorePos] = []) -> None:
         super().__init__(need_guard_check, func, extract_code_at_start)
-        self.src = src
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
@@ -201,5 +188,46 @@ class FunctionVar(Variable):
                        Variable],
                    _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "FunctionVar":
-        return cls(value, ObjectSrc.USER_DEFINED, need_guard_check,
+        return cls(value, need_guard_check, extract_code_at_start)
+
+
+class RangeVar(Variable):
+    start: Optional[int]
+    stop: Optional[int]
+    step: Optional[int]
+
+    def __init__(self,
+                 start: Optional[int],
+                 stop: Optional[int],
+                 step: Optional[int],
+                 need_guard_check: bool,
+                 obj: range,
+                 extract_code_at_start: list[StorePos] = []) -> None:
+        super().__init__(need_guard_check, obj, extract_code_at_start)
+        self.start = start
+        self.stop = stop
+        self.step = step
+
+    def make_guard_inner(self, codegen: "GuardFnCodegen",
+                         pos: StorePos) -> None:
+        codegen.add_check(
+            f"{pos} == range({self.start}, {self.stop}, {self.step})")
+
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: "GraphFnCodegen", in_return: bool,
+                          idx: int) -> None:
+        codegen.output(name_in_graph_fn, store_pos,
+                       f"range({self.start}, {self.stop}, {self.step})",
+                       in_return, idx)
+
+    @classmethod
+    def from_value(cls,
+                   value: range,
+                   need_guard_check: bool,
+                   _get_or_make_var: Callable[
+                       [Any, bool, Optional[FxGraph], list[StorePos]],
+                       Variable],
+                   _fx_graph: Optional[FxGraph] = None,
+                   extract_code_at_start: list[StorePos] = []) -> "RangeVar":
+        return cls(value.start, value.stop, value.step, need_guard_check, value,
                    extract_code_at_start)

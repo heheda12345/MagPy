@@ -7,6 +7,10 @@ import operator
 from .bytecode_writter import get_code_keys
 from .c_api import get_value_stack_from_top, get_value_stack_size
 import os
+import torch
+import torch._C
+from torch._C import _TensorBase
+
 if TYPE_CHECKING:
     from .instruction import Instruction
 
@@ -91,17 +95,43 @@ fx_graph_functions: set[Callable[..., Any]] = {
 fx_graph_functions = fx_graph_functions.union(fx_graph_inplace_functions)
 
 
-def is_user_defined_func(func: Callable[..., Any]) -> bool:
-    if func in fx_graph_functions:
-        return False
+def get_root_module(func: Callable[..., Any]) -> str:
     module = inspect.getmodule(func)
     if module is None:
-        return True
+        return ""
     module_pack = module.__package__
     if module_pack is None:
-        return True
+        return ""
     root_module = str(module).split('\'')[1].split('.')[0]
-    return root_module not in ('math', 'builtins', 'torch', 'numpy')
+    return root_module
+
+
+def is_user_defined_func(func: Callable[..., Any]) -> bool:
+    if hasattr(func,
+               '__objclass__') and func.__objclass__ == torch._C._TensorBase:
+        return False
+
+    root_module = get_root_module(func)
+    if root_module == '':
+        return True
+    if root_module in ('math', 'builtins', 'torch', 'numpy', '_operator'):
+        return False
+    return True
+
+
+def is_graph_func(func: Callable[..., Any]) -> bool:
+    if func in fx_graph_functions:
+        return True
+    if hasattr(func,
+               '__objclass__') and func.__objclass__ == torch._C._TensorBase:
+        return True
+    if isinstance(func, torch.nn.Module):
+        return True
+
+    root_module = get_root_module(func)
+    if root_module == '':
+        return False
+    return root_module == 'torch'
 
 
 random_state = None

@@ -145,3 +145,45 @@ def test_tensor_functional(caplog):
                   a)
     run_and_check(compiled_tensor_functional, [HIT], 1, caplog, expect_result,
                   a)
+
+
+def fx_nest(x):
+    return torch.cat([x] + [x.mul(0)] * 2, 1)
+
+
+def test_fx_nest(caplog):
+    reset()
+    compiled_fx_nest = compile(fx_nest)
+    a = torch.randn((3, 3))
+    expect_result = fx_nest(a)
+    run_and_check(compiled_fx_nest, [MISS], 1, caplog, expect_result, a)
+    run_and_check(compiled_fx_nest, [HIT], 1, caplog, expect_result, a)
+    b = torch.randn((3, 3))
+    expect_result = fx_nest(b)
+    run_and_check(compiled_fx_nest, [HIT], 1, caplog, expect_result, b)
+
+
+def tensor_shape(a):
+    return a.size(), a.shape
+
+
+def test_tensor_shape(caplog):
+    reset()
+    compiled_tensor_shape = compile(tensor_shape)
+    a = torch.randn((3, 3))
+    expect_result = tensor_shape(a)
+    run_and_check(compiled_tensor_shape, [MISS], 1, caplog, expect_result, a)
+    run_and_check(compiled_tensor_shape, [HIT], 1, caplog, expect_result, a)
+
+
+def tensor_dtype(a):
+    return a.dtype
+
+
+def test_tensor_dtype(caplog):
+    reset()
+    compiled_tensor_dtype = compile(tensor_dtype)
+    a = torch.randn((3, 3))
+    expect_result = tensor_dtype(a)
+    run_and_check(compiled_tensor_dtype, [MISS], 1, caplog, expect_result, a)
+    run_and_check(compiled_tensor_dtype, [HIT], 1, caplog, expect_result, a)
