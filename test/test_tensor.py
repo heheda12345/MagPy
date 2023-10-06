@@ -158,3 +158,16 @@ def test_tensor_shape(caplog):
     expect_result = tensor_shape(a)
     run_and_check(compiled_tensor_shape, [MISS], 1, caplog, expect_result, a)
     run_and_check(compiled_tensor_shape, [HIT], 1, caplog, expect_result, a)
+
+
+def tensor_dtype(a):
+    return a.dtype
+
+
+def test_tensor_dtype(caplog):
+    reset()
+    compiled_tensor_dtype = compile(tensor_dtype)
+    a = torch.randn((3, 3))
+    expect_result = tensor_dtype(a)
+    run_and_check(compiled_tensor_dtype, [MISS], 1, caplog, expect_result, a)
+    run_and_check(compiled_tensor_dtype, [HIT], 1, caplog, expect_result, a)

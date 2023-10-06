@@ -159,3 +159,38 @@ class TorchSizeVar(TupleVar):
         super().make_output_inner(tuple_name, store_pos, codegen, False, idx)
         codegen.output(name_in_graph_fn, store_pos, f"torch.Size({tuple_name})",
                        in_return, idx)
+
+
+class TorchDtypeVar(Variable):
+    dtype: torch.dtype
+
+    def __init__(self,
+                 dtype: torch.dtype,
+                 need_guard_check: bool,
+                 extract_code_at_start: list[StorePos] = []) -> None:
+        super().__init__(need_guard_check, dtype, extract_code_at_start)
+        self.dtype = dtype
+
+    @classmethod
+    def from_value(
+            cls,
+            value: torch.dtype,
+            need_guard_check: bool,
+            _get_or_make_var: Callable[
+                [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
+            _fx_graph: Optional[FxGraph] = None,
+            extract_code_at_start: list[StorePos] = []) -> "TorchDtypeVar":
+        return cls(value, need_guard_check, extract_code_at_start)
+
+    def make_guard_inner(self, codegen: "GuardFnCodegen",
+                         pos: StorePos) -> None:
+        codegen.add_check(f"{pos} == {self.dtype}")
+
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: "GraphFnCodegen", in_return: bool,
+                          idx: int) -> None:
+        codegen.output(name_in_graph_fn, store_pos, f"{self.dtype}", in_return,
+                       idx)
+
+    def as_fx_node(self) -> "NodeArgs":
+        return self.dtype

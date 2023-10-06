@@ -3,7 +3,7 @@ from types import ModuleType
 import torch
 from .base import Variable
 from .scalar import ScalarVar
-from .tensor import TensorVar, TorchParamVar, TorchSizeVar
+from .tensor import TensorVar, TorchParamVar, TorchSizeVar, TorchDtypeVar
 from .torch_module import TorchModuleVar, TorchSequentialVar, TorchModuleListVar
 from .any_ import AnyVar
 from .const import NullVar, NoneVar, SliceVar, ModuleVar, FunctionVar, RangeVar
@@ -26,7 +26,8 @@ ty2var: dict[type[Any], type[Variable]] = {
     tuple: TupleVar,
     list: ListVar,
     set: SetVar,
-    torch.Size: TorchSizeVar
+    torch.Size: TorchSizeVar,
+    torch.dtype: TorchDtypeVar
 }
 
 CONST_TYPES = Union[int, float, bool, str, NullObject, None, slice]

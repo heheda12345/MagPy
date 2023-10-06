@@ -500,6 +500,7 @@ class GuardTracker:
                 # NOTE: DO NOT write any function call after this line
                 # because frame evaluation function may be set during processing the opcode
             except Exception as e:
+                print(traceback.format_exc())
                 self.restart(f"Exception during processing {inst.opname}: {e}")
             if not self.have_error and self.state.defer_restart is None:
                 self.state.is_empty = False
@@ -762,9 +763,11 @@ class GuardTracker:
                     ]
                 })
             return
-        elif self.has_tuple_arg(args, kwargs):
+        elif self.has_tuple_arg(args,
+                                kwargs) and get_root_module(func) != 'torch':
             return
-        elif self.has_list_arg(args, kwargs):
+        elif self.has_list_arg(args,
+                               kwargs) and get_root_module(func) != 'torch':
             set_if_inplace_return()
             return
         elif get_root_module(func) == 'torch' or (self.has_tensor_arg(
