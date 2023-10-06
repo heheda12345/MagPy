@@ -24,7 +24,7 @@ class ObjectTable:
             old_var.extract_code_at_start.extend(var.extract_code_at_start)
             old_var.need_guard_check |= var.need_guard_check
         else:
-            self.objs[id(value)] = var
+            self.add_by_id(var, id(value))
             var.add_subvars_to_table(self)
 
     def add_by_id(self, var: Variable, idx: int) -> None:

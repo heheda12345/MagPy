@@ -147,6 +147,22 @@ def test_tensor_functional(caplog):
                   a)
 
 
+def fx_nest(x):
+    return torch.cat([x] + [x.mul(0)] * 2, 1)
+
+
+def test_fx_nest(caplog):
+    reset()
+    compiled_fx_nest = compile(fx_nest)
+    a = torch.randn((3, 3))
+    expect_result = fx_nest(a)
+    run_and_check(compiled_fx_nest, [MISS], 1, caplog, expect_result, a)
+    run_and_check(compiled_fx_nest, [HIT], 1, caplog, expect_result, a)
+    b = torch.randn((3, 3))
+    expect_result = fx_nest(b)
+    run_and_check(compiled_fx_nest, [HIT], 1, caplog, expect_result, b)
+
+
 def tensor_shape(a):
     return a.size(), a.shape
 

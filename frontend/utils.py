@@ -107,8 +107,6 @@ def get_root_module(func: Callable[..., Any]) -> str:
 
 
 def is_user_defined_func(func: Callable[..., Any]) -> bool:
-    if func in fx_graph_functions:
-        return False
     if hasattr(func,
                '__objclass__') and func.__objclass__ == torch._C._TensorBase:
         return False
@@ -116,7 +114,7 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
     root_module = get_root_module(func)
     if root_module == '':
         return True
-    if root_module in ('math', 'builtins', 'torch', 'numpy'):
+    if root_module in ('math', 'builtins', 'torch', 'numpy', '_operator'):
         return False
     return True
 
