@@ -2,6 +2,7 @@ import dataclasses
 import dis
 import sys
 from typing import Union, List
+from collections import deque
 from .instruction import Instruction
 
 TERMINAL_OPCODES = {
@@ -145,3 +146,86 @@ def stacksize_analysis(instructions: List[Instruction]) -> int:
     assert low >= 0
     assert isinstance(high, int)  # not infinity
     return high
+
+
+def end_of_control_flow(instructions: List[Instruction], start_pc: int) -> int:
+    """
+    Find the end of the control flow block starting at the given instruction.
+    """
+    assert instructions[start_pc].opcode in JUMP_OPCODES
+    assert instructions[start_pc].target is not None
+    indexof = get_indexof(instructions)
+    jump_only_opnames = ['JUMP_FORWARD', 'JUMP_ABSOLUTE']
+    jump_or_next_opnames = [
+        'POP_JUMP_IF_TRUE', 'POP_JUMP_IF_FALSE', 'JUMP_IF_NOT_EXC_MATCH',
+        'JUMP_IF_TRUE_OR_POP', 'JUMP_IF_FALSE_OR_POP', 'FOR_ITER'
+    ]
+    jump_only_opcodes = [dis.opmap[opname] for opname in jump_only_opnames]
+    jump_or_next_opcodes = [
+        dis.opmap[opname] for opname in jump_or_next_opnames
+    ]
+    return_value_opcode = dis.opmap['RETURN_VALUE']
+    possible_end_pcs = set()
+    for end_pc, inst in enumerate(instructions):
+        if end_pc == start_pc:
+            continue
+        inst = instructions[end_pc]
+        if not inst.is_jump_target:
+            continue
+        visited = set()
+        queue = deque([start_pc])
+        reach_end = False
+        while queue and not reach_end:
+            pc = queue.popleft()
+            inst = instructions[pc]
+            targets: list[int] = []
+            if inst.target is not None:
+                if inst.opcode in jump_only_opcodes:
+                    targets = [indexof[inst.target]]
+                elif inst.opcode in jump_or_next_opcodes:
+                    targets = [indexof[inst.target], pc + 1]
+                else:
+                    raise NotImplementedError(f"unhandled {inst.opname}")
+            else:
+                targets = [pc + 1]
+            for target in targets:
+                if instructions[target].opcode == return_value_opcode:
+                    reach_end = True
+                    break
+                if target in visited:
+                    continue
+                if target == end_pc:
+                    continue
+                visited.add(target)
+                queue.append(target)
+        if not reach_end:
+            possible_end_pcs.add(end_pc)
+    visited = set()
+    dist: dict[int, int] = {start_pc: 0}
+    queue = deque([start_pc])
+    while queue:
+        pc = queue.popleft()
+        inst = instructions[pc]
+        if inst.opcode == return_value_opcode:
+            continue
+        targets = []
+        if inst.target is not None:
+            if inst.opcode in jump_only_opcodes:
+                targets = [indexof[inst.target]]
+            elif inst.opcode in jump_or_next_opcodes:
+                targets = [indexof[inst.target], pc + 1]
+            else:
+                raise NotImplementedError(f"unhandled {inst.opname}")
+        else:
+            targets = [pc + 1]
+        for target in targets:
+            if target in visited:
+                continue
+            visited.add(target)
+            dist[target] = dist[pc] + 1
+            queue.append(target)
+    min_dist = min([dist[end_pc] for end_pc in possible_end_pcs])
+    for end_pc in possible_end_pcs:
+        if dist[end_pc] == min_dist:
+            return end_pc
+    return -1
