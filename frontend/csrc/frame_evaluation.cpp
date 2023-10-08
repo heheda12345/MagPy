@@ -2,6 +2,7 @@
 #include "csrc.h"
 #include <Python.h>
 #include <frameobject.h>
+#include <map>
 #include <object.h>
 #include <pythread.h>
 #include <sstream>
@@ -47,6 +48,7 @@ frontend_csrc::ProgramCache program_cache;
 static int frame_count = 0;
 
 bool need_postprocess = false;
+static std::map<size_t, PyObject *> frame_id_to_code_map;
 
 static void pylog(std::string message, const char *level = "info") {
     static PyObject *pModule;
@@ -103,8 +105,8 @@ inline static PyObject *eval_frame_default(PyThreadState *tstate,
 
 inline static PyObject *eval_custom_code(PyThreadState *tstate,
                                          PyFrameObject *frame,
-                                         PyCodeObject *code, int throw_flag,
-                                         bool trace_bytecode,
+                                         PyCodeObject *code, PyObject *code_map,
+                                         int throw_flag, bool trace_bytecode,
                                          PyObject *trace_func) {
     Py_ssize_t ncells = 0;
     Py_ssize_t nfrees = 0;
@@ -143,8 +145,11 @@ inline static PyObject *eval_custom_code(PyThreadState *tstate,
         fastlocals_new[nlocals_new + i] = fastlocals_old[nlocals_old + i];
     }
 
+    frame_id_to_code_map[(size_t)shadow] = code_map;
+    Py_INCREF(code_map);
     PyObject *result = eval_frame_default(tstate, shadow, throw_flag);
-
+    frame_id_to_code_map.erase((size_t)shadow);
+    Py_DECREF(code_map);
     Py_DECREF(shadow);
     return result;
 }
@@ -170,11 +175,13 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
         PyObject_CallFunction(preprocess, "Oi", _frame, frame_id);
     PyObject *new_code = PyTuple_GetItem(result_preprocess, 0);
     PyObject *trace_func = PyTuple_GetItem(result_preprocess, 1);
+    PyObject *code_map = PyTuple_GetItem(result_preprocess, 2);
     Py_INCREF(new_code);
     Py_INCREF(trace_func);
     need_postprocess = false;
-    PyObject *result = eval_custom_code(
-        tstate, _frame, (PyCodeObject *)new_code, false, true, trace_func);
+    PyObject *result =
+        eval_custom_code(tstate, _frame, (PyCodeObject *)new_code, code_map,
+                         false, true, trace_func);
     // _frame->
     // PyObject *result = _PyEval_EvalFrameDefault(tstate, _frame, throw_flag);
     /*
@@ -430,6 +437,35 @@ static PyObject *stack_effect_py(PyObject *self, PyObject *args) {
                          TO_PyBool(effect.global_effect));
 }
 
+static PyObject *get_code_map(PyObject *self, PyObject *args) {
+    PyFrameObject *frame = NULL;
+    if (!PyArg_ParseTuple(args, "O", &frame)) {
+        PRINT_PYERR;
+        PyErr_SetString(PyExc_TypeError, "invalid parameter in get_code_map");
+        return NULL;
+    }
+    PyObject *code_map = frame_id_to_code_map[(size_t)frame];
+    Py_INCREF(code_map);
+    return code_map;
+}
+
+static PyObject *is_bound_method(PyObject *self, PyObject *args) {
+    PyObject *obj;
+    PyObject *name;
+    if (!PyArg_ParseTuple(args, "OO", &obj, &name)) {
+        PRINT_PYERR;
+        PyErr_SetString(PyExc_TypeError, "invalid parameter in get_method");
+        return NULL;
+    }
+    PyObject *meth = NULL;
+    int meth_found = _PyObject_GetMethod(obj, name, &meth);
+    if (meth_found) {
+        return Py_True;
+    } else {
+        return Py_False;
+    }
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame, METH_VARARGS, NULL},
     {"set_skip_files", set_skip_files, METH_VARARGS, NULL},
@@ -453,6 +489,8 @@ static PyMethodDef _methods[] = {
          return PyLong_FromLong(frame_count);
      },
      METH_VARARGS, NULL},
+    {"get_code_map", get_code_map, METH_VARARGS, NULL},
+    {"is_bound_method", is_bound_method, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

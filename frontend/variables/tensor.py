@@ -1,14 +1,13 @@
-from typing import Optional, Any, TYPE_CHECKING
+from typing import Optional, Any, Callable
 import torch
 import torch.fx
 
 from frontend.pycode_generator import GuardFnCodegen, GraphFnCodegen
 from .base import Variable
+from .tuple_ import TupleVar
 from ..pycode_writer import new_name
 from ..fx_graph import FxGraph, NodeArgs
 from ..store_pos import StorePos
-if TYPE_CHECKING:
-    from ..object_table import ReadOnlyObjectTable
 
 
 class TensorVar(Variable):
@@ -27,6 +26,7 @@ class TensorVar(Variable):
     idx: int
 
     def __init__(self,
+                 tensor: torch.Tensor,
                  fx_node: torch.fx.Node,
                  dtype: torch.dtype,
                  device: torch.device,
@@ -42,7 +42,7 @@ class TensorVar(Variable):
                  is_contiguous: Optional[bool] = None,
                  idx: int = 0,
                  extract_code_at_start: list[StorePos] = []) -> None:
-        super().__init__(need_guard_check, extract_code_at_start)
+        super().__init__(need_guard_check, tensor, extract_code_at_start)
         self.fx_node = fx_node
         self.dtype = dtype
         self.device = device
@@ -64,7 +64,7 @@ class TensorVar(Variable):
             fx_node: torch.fx.Node,
             need_guard_check: bool,
             extract_code_at_start: list[StorePos] = []) -> 'TensorVar':
-        var = cls(fx_node, tensor.dtype, tensor.device, tensor.layout,
+        var = cls(tensor, fx_node, tensor.dtype, tensor.device, tensor.layout,
                   tensor.ndim, tensor.requires_grad, tensor.is_quantized,
                   tensor.is_sparse, type(tensor), need_guard_check,
                   tensor.size(), tensor.stride(), tensor.is_contiguous(),
@@ -76,7 +76,9 @@ class TensorVar(Variable):
     def from_value(cls,
                    value: torch.Tensor,
                    need_guard_check: bool,
-                   _object_table: 'ReadOnlyObjectTable',
+                   _get_or_make_var: Callable[
+                       [Any, bool, Optional[FxGraph], list[StorePos]],
+                       Variable],
                    fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> 'TensorVar':
         assert fx_graph is not None
@@ -97,59 +99,98 @@ class TensorVar(Variable):
             self.is_quantized == value.is_quantized and \
             self.is_sparse == value.is_sparse and \
             self.class_type == type(value) and \
-            hasattr(value, 'size') and self.size == value.size() and \
-            hasattr(value, 'stride') and self.stride == value.stride() and \
-            hasattr(value, 'is_contiguous') and self.is_contiguous == value.is_contiguous()
+            hasattr(value, 'size') and self.size == value.size() # and \
+        # hasattr(value, 'stride') and self.stride == value.stride() and \
+        # hasattr(value, 'is_contiguous') and self.is_contiguous == value.is_contiguous()
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
         name_in_codegen = codegen.add_var(self)
         codegen.add_check(f"{name_in_codegen}.tensor_guard_check({pos})")
 
-    def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen") -> None:
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: "GraphFnCodegen", in_return: bool,
+                          idx: int) -> None:
         name_in_graph_output = codegen.add_graph_output(self.fx_node)
-        codegen.output(name_in_graph_fn, store_pos, name_in_graph_output)
-
-    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
-                  codegen: "GraphFnCodegen") -> None:
-        name_in_graph_output = codegen.add_graph_output(self.fx_node)
-        codegen.add_temp(name_in_graph_fn, store_pos, name_in_graph_output)
+        codegen.output(name_in_graph_fn, store_pos, name_in_graph_output,
+                       in_return, idx)
 
 
 class TorchParamVar(Variable):
-    param: torch.nn.Parameter
 
     def __init__(self,
                  param: torch.nn.Parameter,
                  need_guard_check: bool,
                  extract_code_at_start: list[StorePos] = []) -> None:
-        super().__init__(need_guard_check, extract_code_at_start)
+        super().__init__(need_guard_check, param, extract_code_at_start)
         assert len(extract_code_at_start) > 0
-        self.param = param
 
     @classmethod
     def from_value(
             cls,
             value: torch.nn.Parameter,
             need_guard_check: bool,
-            _object_table: 'ReadOnlyObjectTable',
+            _get_or_make_var: Callable[
+                [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
             _fx_graph: Optional[FxGraph] = None,
             extract_code_at_start: list[StorePos] = []) -> "TorchParamVar":
         return cls(value, need_guard_check, extract_code_at_start)
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_id_check(f"id({pos}) == {id(self.param)}", self.param)
+        codegen.add_id_check(f"id({pos}) == {id(self.obj)}", self.obj)
 
-    def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen") -> None:
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: "GraphFnCodegen", in_return: bool,
+                          idx: int) -> None:
         codegen.output(name_in_graph_fn, store_pos,
-                       str(self.extract_code_at_start))
-
-    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
-                  codegen: GraphFnCodegen) -> None:
-        return super().make_temp(name_in_graph_fn, store_pos, codegen)
+                       str(self.extract_code_at_start), in_return, idx)
 
     def as_fx_node(self) -> "NodeArgs":
         raise ValueError("TorchParamVar.as_fx_node should not be called")
+
+
+class TorchSizeVar(TupleVar):
+
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: "GraphFnCodegen", in_return: bool,
+                          idx: int) -> None:
+        tuple_name = name_in_graph_fn + "_tuple"
+        super().make_output_inner(tuple_name, store_pos, codegen, False, idx)
+        codegen.output(name_in_graph_fn, store_pos, f"torch.Size({tuple_name})",
+                       in_return, idx)
+
+
+class TorchDtypeVar(Variable):
+    dtype: torch.dtype
+
+    def __init__(self,
+                 dtype: torch.dtype,
+                 need_guard_check: bool,
+                 extract_code_at_start: list[StorePos] = []) -> None:
+        super().__init__(need_guard_check, dtype, extract_code_at_start)
+        self.dtype = dtype
+
+    @classmethod
+    def from_value(
+            cls,
+            value: torch.dtype,
+            need_guard_check: bool,
+            _get_or_make_var: Callable[
+                [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
+            _fx_graph: Optional[FxGraph] = None,
+            extract_code_at_start: list[StorePos] = []) -> "TorchDtypeVar":
+        return cls(value, need_guard_check, extract_code_at_start)
+
+    def make_guard_inner(self, codegen: "GuardFnCodegen",
+                         pos: StorePos) -> None:
+        codegen.add_check(f"{pos} == {self.dtype}")
+
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: "GraphFnCodegen", in_return: bool,
+                          idx: int) -> None:
+        codegen.output(name_in_graph_fn, store_pos, f"{self.dtype}", in_return,
+                       idx)
+
+    def as_fx_node(self) -> "NodeArgs":
+        return self.dtype

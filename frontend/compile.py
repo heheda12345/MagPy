@@ -8,7 +8,6 @@ import inspect
 import torch
 from . import tracer, utils
 from .c_api import set_eval_frame, set_skip_files, guard_match, c_reset, set_null_object
-from .bytecode_writter import rewrite_bytecode
 from .tracer import enable_trace, disable_trace, get_trace_func, get_process_frame
 from .cache import enable_cache
 from .utils import null_object
@@ -75,8 +74,6 @@ def compile(f: Callable[..., Any]) -> Callable[..., Any]:
 
 def reset() -> None:
     c_reset()
-    from . import code
-    code.reset()
     from . import cache
     cache.reset()
     from . import guard_tracker

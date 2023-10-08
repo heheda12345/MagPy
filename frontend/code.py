@@ -137,7 +137,13 @@ class ProcessedCode:
 
     def get_inst(self, lasti: int) -> Instruction:
         pc = lasti // 2
+        while pc < len(self.guard_insts
+                      ) and self.guard_insts[pc].opname == "EXTENDED_ARG":
+            pc += 1
         return self.guard_insts[pc]
+
+    def get_pc_by_inst(self, inst: Instruction) -> int:
+        return self.guarded_pc[inst]
 
     def get_dependence_of_stack_var(self, original_inst: Instruction,
                                     stack_depth: int) -> list[Instruction]:
@@ -148,22 +154,10 @@ class ProcessedCode:
         raise NotImplementedError
 
 
-processed_codes: dict[int, ProcessedCode] = {}  # frame_id -> ProcessedCode
-
-
-def save_code(original_insts: list[Instruction],
-              generated_insts: list[Instruction], frame_id: int,
-              inside_trace_opcodes: list[Instruction],
-              next_original_pc: list[tuple[Instruction, Instruction]]) -> None:
-    processed_codes[frame_id] = ProcessedCode(original_insts, generated_insts,
-                                              inside_trace_opcodes,
-                                              next_original_pc)
-
-
-def load_code(frame_id: int) -> ProcessedCode:
-    return processed_codes[frame_id]
-
-
-def reset() -> None:
-    global processed_codes
-    processed_codes.clear()
+def generate_code_map(
+        original_insts: list[Instruction], generated_insts: list[Instruction],
+        inside_trace_opcodes: list[Instruction],
+        next_original_pc: list[tuple[Instruction,
+                                     Instruction]]) -> ProcessedCode:
+    return ProcessedCode(original_insts, generated_insts, inside_trace_opcodes,
+                         next_original_pc)

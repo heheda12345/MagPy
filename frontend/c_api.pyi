@@ -1,5 +1,8 @@
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, TYPE_CHECKING
 from types import FrameType
+
+if TYPE_CHECKING:
+    from .code import ProcessedCode
 
 
 def set_eval_frame(
@@ -61,4 +64,12 @@ def set_null_object(obj: Any) -> None:
 
 
 def get_next_frame_id() -> int:
+    pass
+
+
+def get_code_map(frame: FrameType) -> 'ProcessedCode':
+    pass
+
+
+def is_bound_method(obj: Any, name: str) -> bool:
     pass

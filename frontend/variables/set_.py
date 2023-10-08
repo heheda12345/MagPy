@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Tuple, Any, Callable
+from typing import TYPE_CHECKING, Optional, Callable, Any
 from .base import Variable
 from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos, StoreInIndex
@@ -8,13 +8,13 @@ if TYPE_CHECKING:
     from ..object_table import ObjectTable
 
 
-class TupleVar(Variable):
+class SetVar(Variable):
     vars: list[Variable]
     obj_ids: list[int]
     length: int
 
     def __init__(self,
-                 value: tuple[Any, ...],
+                 value: set[Any],
                  need_guard_check: bool,
                  get_or_make_var: Callable[
                      [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
@@ -27,7 +27,7 @@ class TupleVar(Variable):
         self.obj_ids = []
         for i, obj in enumerate(value):
             new_extract: list[StorePos] = [
-                StoreInIndex(pos, id(obj), i)
+                StoreInIndex(pos, id(obj), i, False)
                 for pos in self.extract_code_at_start
             ]
             var = get_or_make_var(obj, need_guard_check, fx_graph, new_extract)
@@ -36,10 +36,10 @@ class TupleVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_check(f"isinstance({pos}, tuple)")
+        codegen.add_check(f'isinstance({pos}, set)')
         codegen.add_check(f"len({pos}) == {self.length}")
         for i, (var, obj) in enumerate(zip(self.vars, self.obj_ids)):
-            var.make_guard_inner(codegen, StoreInIndex(pos, obj, i))
+            var.make_guard_inner(codegen, StoreInIndex(pos, obj, i, False))
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
@@ -50,18 +50,18 @@ class TupleVar(Variable):
 
         codegen.output(
             name_in_graph_fn, store_pos,
-            f"({','.join(f'{name_in_graph_fn}_{j}' for j in range(len(self.vars)))},)",
+            f"{{{','.join(f'{name_in_graph_fn}_{j}' for j in range(len(self.vars)))},}}",
             in_return, idx)
 
     @classmethod
     def from_value(cls,
-                   value: Tuple[Any, ...],
+                   value: set[Any],
                    need_guard_check: bool,
                    get_or_make_var: Callable[
                        [Any, bool, Optional[FxGraph], list[StorePos]],
                        Variable],
                    fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: list[StorePos] = []) -> "TupleVar":
+                   extract_code_at_start: list[StorePos] = []) -> "SetVar":
         return cls(value, need_guard_check, get_or_make_var, fx_graph,
                    extract_code_at_start)
 
@@ -73,7 +73,7 @@ class TupleVar(Variable):
             old_var = table.get_or_none_by_id(idx)
             if old_var is not None:
                 new_extract: list[StorePos] = [
-                    StoreInIndex(pos, idx, i)
+                    StoreInIndex(pos, idx, i, False)
                     for pos in self.extract_code_at_start
                 ]
                 old_var.extract_code_at_start.extend(new_extract)

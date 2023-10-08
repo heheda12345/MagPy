@@ -1,56 +1,97 @@
-from typing import TYPE_CHECKING, Union, Optional
+from typing import TYPE_CHECKING, Union, Optional, Callable, Any
 
 import torch.fx
 from .base import Variable
 from ..pycode_writer import get_float_string
 from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos
+from ..pycode_writer import new_name
+from .. import dynamic as dyn
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
-    from ..object_table import ReadOnlyObjectTable
 
 ScalarType = Union[int, float, bool, str]
 
 
 class ScalarVar(Variable):
-    value: ScalarType
+    value_fix: bool
+    fx_node: Optional[torch.fx.Node]
 
     def __init__(self,
                  value: ScalarType,
+                 value_fix: bool,
                  need_guard_check: bool,
+                 fx_node: Optional[torch.fx.Node] = None,
                  extract_code_at_start: list[StorePos] = []) -> None:
-        super().__init__(need_guard_check, extract_code_at_start)
-        self.value = value
+        super().__init__(need_guard_check, value, extract_code_at_start)
+        if not value_fix:
+            assert fx_node is not None
+        self.value_fix = value_fix
+        self.fx_node = fx_node
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        if type(self.value) == float:
-            codegen.add_check(f"{pos} == {get_float_string(self.value)}")
-            codegen.add_import("struct")
-        else:
-            codegen.add_check(f"{pos} == {self.value}")
+        codegen.add_check(f"isinstance({pos}, {type(self.obj).__name__})")
+        if self.value_fix:
+            if type(self.obj) == float:
+                codegen.add_check(f"{pos} == {get_float_string(self.obj)}")
+                codegen.add_import("struct")
+            else:
+                codegen.add_check(f"{pos} == {self.obj}")
 
-    def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
-                    codegen: "GraphFnCodegen") -> None:
-        if type(self.value) == float:
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: "GraphFnCodegen", in_return: bool,
+                          idx: int) -> None:
+        if self.value_fix:
+            if type(self.obj) == float:
+                codegen.output(name_in_graph_fn, store_pos,
+                               f"{get_float_string(self.obj)} # {self.obj}",
+                               in_return, idx)
+                codegen.add_import("struct")
+            else:
+                codegen.output(name_in_graph_fn, store_pos, str(self.obj),
+                               in_return, idx)
+        else:
+            name_in_graph_output = codegen.add_graph_output(self.fx_node)
             codegen.output(name_in_graph_fn, store_pos,
-                           f"{get_float_string(self.value)} # {self.value}")
-            codegen.add_import("struct")
-        else:
-            codegen.output(name_in_graph_fn, store_pos, str(self.value))
-
-    def make_temp(self, name_in_graph_fn: str, store_pos: StorePos,
-                  codegen: "GraphFnCodegen") -> None:
-        codegen.add_temp(name_in_graph_fn, store_pos, str(self.value))
+                           name_in_graph_output + '.item()', in_return, idx)
 
     @classmethod
     def from_value(cls,
                    value: ScalarType,
                    need_guard_check: bool,
-                   _object_table: 'ReadOnlyObjectTable',
-                   _fx_graph: Optional[FxGraph] = None,
+                   _get_or_make_var: Callable[
+                       [Any, bool, Optional[FxGraph], list[StorePos]],
+                       Variable],
+                   fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "ScalarVar":
-        return cls(value, need_guard_check, extract_code_at_start)
+        if id(value) not in dyn.dynamics:
+            return cls(value, True, need_guard_check, None,
+                       extract_code_at_start)
+        else:
+            assert fx_graph is not None
+            assert len(extract_code_at_start) > 0
+            name = new_name('scalar')
+            fx_node = fx_graph.create_input(torch.tensor(value), name, (), {},
+                                            name)
+            var = cls.from_value_and_node(value, fx_node, need_guard_check,
+                                          extract_code_at_start)
+            return var
+
+    @classmethod
+    def from_value_and_node(
+            cls,
+            value: ScalarType,
+            fx_node: torch.fx.Node,
+            need_guard_check: bool,
+            extract_code_at_start: list[StorePos] = []) -> 'ScalarVar':
+        var = cls(value, False, need_guard_check, fx_node,
+                  extract_code_at_start)
+        fx_node.meta["var"] = var
+        return var
 
     def as_fx_node(self) -> NodeArgs:
-        return self.value
+        if self.value_fix:
+            return self.obj
+        else:
+            return self.fx_node
