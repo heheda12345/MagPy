@@ -28,14 +28,15 @@ class Variable:
 
     @classmethod
     @abstractmethod
-    def from_value(self,
-                   value: Any,
-                   need_guard_check: bool,
-                   get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       'Variable'],
-                   fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: list[StorePos] = []) -> 'Variable':
+    def from_value(
+        self,
+        value: Any,
+        need_guard_check: bool,
+        get_or_make_var: Callable[
+            [Any, bool, Optional[FxGraph], list[StorePos]], 'Variable'],
+        fx_graph: Optional[FxGraph],
+        extract_code_at_start: list[StorePos],
+    ) -> 'Variable':
         raise NotImplementedError
 
     def make_guard(self, codegen: "GuardFnCodegen") -> None:

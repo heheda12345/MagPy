@@ -17,12 +17,9 @@ class ScalarVar(Variable):
     value_fix: bool
     fx_node: Optional[torch.fx.Node]
 
-    def __init__(self,
-                 value: ScalarType,
-                 value_fix: bool,
-                 need_guard_check: bool,
-                 fx_node: Optional[torch.fx.Node] = None,
-                 extract_code_at_start: list[StorePos] = []) -> None:
+    def __init__(self, value: ScalarType, value_fix: bool,
+                 need_guard_check: bool, fx_node: Optional[torch.fx.Node],
+                 extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, value, extract_code_at_start)
         if not value_fix:
             assert fx_node is not None
@@ -57,15 +54,12 @@ class ScalarVar(Variable):
                            name_in_graph_output + '.item()', in_return, idx)
 
     @classmethod
-    def from_value(cls,
-                   value: ScalarType,
-                   need_guard_check: bool,
+    def from_value(cls, value: ScalarType, need_guard_check: bool,
                    _get_or_make_var: Callable[
                        [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable],
-                   fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: list[StorePos] = []) -> "ScalarVar":
-        if id(value) not in dyn.dynamics:
+                       Variable], fx_graph: Optional[FxGraph],
+                   extract_code_at_start: list[StorePos]) -> "ScalarVar":
+        if id(value) not in dyn.dynamic_vars:
             return cls(value, True, need_guard_check, None,
                        extract_code_at_start)
         else:
@@ -80,11 +74,9 @@ class ScalarVar(Variable):
 
     @classmethod
     def from_value_and_node(
-            cls,
-            value: ScalarType,
-            fx_node: torch.fx.Node,
+            cls, value: ScalarType, fx_node: torch.fx.Node,
             need_guard_check: bool,
-            extract_code_at_start: list[StorePos] = []) -> 'ScalarVar':
+            extract_code_at_start: list[StorePos]) -> 'ScalarVar':
         var = cls(value, False, need_guard_check, fx_node,
                   extract_code_at_start)
         fx_node.meta["var"] = var

@@ -27,5 +27,7 @@ struct StackEffect {
     bool local_effect, global_effect;
 };
 StackEffect stack_effect(int opcode, int oparg, int jump);
+PyObject *parse_rangeiterobject(PyObject *self, PyObject *args);
+PyObject *make_rangeiterobject(PyObject *self, PyObject *args);
 
 } // namespace frontend_csrc

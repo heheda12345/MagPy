@@ -1,5 +1,6 @@
 from typing import Any, get_args, Optional, Tuple, Generic
 from .variables.base import Variable
+from .variables.any_ import AnyVar
 from .variables import CONST_TYPES, ScalarVar, make_var_from_value
 from .variables.tuple_ import TupleVar
 from .utils import NullObject, ReadOnlyObject
@@ -21,6 +22,9 @@ class ObjectTable:
             self.objs_no_id.append(var)
         elif id(value) in self.objs:
             old_var = self.objs[id(value)]
+            if isinstance(old_var, AnyVar) and not isinstance(var, AnyVar):
+                self.objs[id(value)] = var
+                var, old_var = old_var, var
             old_var.extract_code_at_start.extend(var.extract_code_at_start)
             old_var.need_guard_check |= var.need_guard_check
         else:
@@ -48,14 +52,15 @@ class ObjectTable:
 
     def get(self, value: Any, allow_unexist_const: bool = False) -> Variable:
         if isinstance(value, bool):
-            return ScalarVar(value, True, False)
+            return ScalarVar(value, True, False, None, [])
         elif id(value) in self.objs:
             return self.objs[id(value)]
         elif allow_unexist_const:
             if isinstance(value, get_args(CONST_TYPES)) or isinstance(
                     value, (list, tuple, set)):
                 return make_var_from_value(value, False, self.get_or_make_var)
-        raise RuntimeError(f"Object {value} not found in object table")
+        raise RuntimeError(
+            f"Object {value}({id(value)}) not found in object table")
 
     def get_or_none(self, value: Any) -> Optional[Variable]:
         if id(value) in self.objs:
@@ -75,7 +80,7 @@ class ObjectTable:
                         fx_graph: Optional[FxGraph] = None,
                         extract_code_at_start: list[StorePos] = []) -> Variable:
         if isinstance(value, bool):
-            return ScalarVar(value, True, need_guard_check,
+            return ScalarVar(value, True, need_guard_check, None,
                              extract_code_at_start)
         elif id(value) in self.objs:
             return self.objs[id(value)]

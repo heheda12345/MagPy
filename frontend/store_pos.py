@@ -82,7 +82,7 @@ class StoreInIndex(StorePos):
         self.self_index = self_index
         self.subscriptable = subscritable
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         if self.subscriptable:
             return f"{self.self_pos}[{self.self_index}]"
         else:
@@ -100,7 +100,7 @@ class ExtractFromMethod(StorePos):
         self.self_id = self_id
         self.method_name = method_name
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"{self.self_pos}.{self.method_name}()"
 
 
@@ -114,5 +114,5 @@ class ExtractFromFunction(StorePos):
         self.var_id = var_id
         self.func_name = func_name
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"{self.func_name}({self.var_pos})"

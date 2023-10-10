@@ -1,5 +1,5 @@
 from types import FrameType
-from typing import Dict, Any, Callable, List, Optional
+from typing import Dict, Any, Callable, List, Optional, cast
 import inspect
 import logging
 import itertools
@@ -22,9 +22,14 @@ from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject,
 from .object_table import ObjectTable
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
 from .fx_graph import FxGraph, get_frame_root, is_leaf_module, NodeArgs
-from .bytecode_analysis import livevars_analysis
+from .bytecode_analysis import livevars_analysis, end_of_control_flow
 from .variables.tuple_ import TupleVar
 from .variables.base import Variable
+
+MAKE_VAR_FN_TYPE = Callable[[
+    Any, bool, Callable[[Any, bool, Optional[FxGraph], list[StorePos]],
+                        Variable], Optional[FxGraph], Optional[list[StorePos]]
+], Variable]
 
 
 @dataclasses.dataclass
@@ -33,6 +38,15 @@ class PartialVar:
     need_guard_check: bool
     extract_code_at_start: list[StorePos]
     inplace_ref: Any = None  # None if not inplace
+    make_var_fn: Optional[MAKE_VAR_FN_TYPE] = None
+
+
+@dataclasses.dataclass
+class DeferRestartState:
+    stack_objs: list[Any]
+    live_vars: list[tuple[str, Any]]
+    guard_lasti: int
+    reason: str
 
 
 class State:
@@ -49,8 +63,7 @@ class State:
     submodule_paths: dict[torch.nn.Module, str]
     subparam_paths: dict[torch.nn.Parameter, str]
     written: bool
-    defer_restart: Optional[str]  # None if no need to restart
-    stack_objs: Optional[list[Any]]
+    defer_restart: Optional[DeferRestartState]  # None if no need to restart
     object_refs: list[Any]  # hold the reference of objects to avoid GC
     inplace_update_objs: list[Any]
 
@@ -230,7 +243,7 @@ class State:
         else:
             raise NotImplementedError
 
-    def merge_call(self, state: 'State', return_value: Any) -> None:
+    def merge_call(self, state: 'State', stack_objs: list[Any]) -> None:
         if self.defer_restart is None:  # callee will not perform defer restart
             print("skip merge call due to defer_restart")
             return
@@ -251,14 +264,17 @@ class State:
                                 "full graph should not contain guard in stack")
                         elif isinstance(pos, StoreInGlobal):
                             new_var.extract_code_at_start.append(pos)
-                        elif isinstance(pos, StoreInAttr):
+                        elif isinstance(
+                                pos, (StoreInAttr, StoreInIndex,
+                                      ExtractFromMethod, ExtractFromFunction)):
                             self_pos = self.store_pos_in_callee(pos, idx)
-                            assert self_pos is not None
-                            new_var.extract_code_at_start.append(self_pos)
-                        elif isinstance(pos, StoreInIndex):
-                            self_pos = self.store_pos_in_callee(pos, idx)
-                            assert self_pos is not None
-                            new_var.extract_code_at_start.append(self_pos)
+                            if self_pos is None:
+                                print(
+                                    "\033[34m[warning] cannot find store pos in calleem, skip guard check\033[0m",
+                                    var)
+                                new_var.need_guard_check = False
+                            else:
+                                new_var.extract_code_at_start.append(self_pos)
                         else:
                             raise NotImplementedError(pos)
 
@@ -363,8 +379,12 @@ class State:
                             extract_code_at_start)
                     else:
                         new_var = vs.make_var_from_value(
-                            obj, need_guard_check, get_or_make_var, fx_graph,
-                            extract_code_at_start)
+                            obj,
+                            need_guard_check,
+                            get_or_make_var,
+                            fx_graph,
+                            extract_code_at_start,
+                        )
                     self.objects.update_by_id(new_var, id(obj))
                 elif self.objects.contains(
                         obj):  # value from caller, unmodified
@@ -414,10 +434,11 @@ class State:
                     get_or_make_var(var.obj, var.need_guard_check,
                                     self.fx_graph, new_extract)
 
-            var = state.objects.get(return_value, allow_unexist_const=True)
-            new_extract = get_new_store_pos(var.extract_code_at_start,
-                                            id(var.obj))
-            get_or_make_var(return_value, False, self.fx_graph, new_extract)
+            for obj in stack_objs:
+                var = state.objects.get(obj, allow_unexist_const=True)
+                new_extract = get_new_store_pos(var.extract_code_at_start,
+                                                id(var.obj))
+                get_or_make_var(obj, False, self.fx_graph, new_extract)
 
         if len(state.objects.objs_no_id) > 0:
             raise NotImplementedError
@@ -426,9 +447,9 @@ class State:
         merge_output()
         self.object_refs.extend(state.object_refs)
 
-    def mark_defer_restart(self, reason: str, stack_objs: list[Any]) -> None:
-        self.defer_restart = reason
-        self.stack_objs = stack_objs
+    def mark_defer_restart(self,
+                           defer_restart_state: DeferRestartState) -> None:
+        self.defer_restart = defer_restart_state
 
     def add_inplace_update_obj(self, obj: Any) -> None:
         self.written = True
@@ -449,19 +470,25 @@ class GuardTracker:
     have_error: bool
     frame_root: torch.nn.Module
     caller: Optional['GuardTracker']
+    end_pc: int  # -1 if not set
+    num_breaks: int
 
     def __init__(self,
                  frame: FrameType,
                  frame_id: int,
-                 caller: Optional['GuardTracker'] = None):
+                 caller: Optional['GuardTracker'] = None,
+                 read_stack: bool = False,
+                 end_pc: int = -1):
         self.code = get_code_map(frame)
         self.frame = frame
         self.frame_id = frame_id
         self.frame_root = get_frame_root(frame_id)
         self.caller = caller
         self.init_state(
-            read_stack=False
+            read_stack=read_stack
         )  # stack pointer is not initialized at the creation of a stack frame
+        self.end_pc = end_pc
+        self.num_breaks = 0
 
     def init_state(self, read_stack: bool = True) -> None:
         if hasattr(self, "state"):
@@ -478,6 +505,9 @@ class GuardTracker:
         self.process_last_inst()
 
         pc, inst = self.code.get_orig_inst(self.frame.f_lasti)
+        if self.end_pc != -1 and pc == self.end_pc:
+            self.restart("reach end of nested tracker")
+            return
         if inst is None:
             self.restart(
                 f"running injected code (f_lasti={self.frame.f_lasti})")
@@ -528,14 +558,15 @@ class GuardTracker:
         else:
             self.restart(f"unknown opcode {inst.opname}")
 
-    def commit(self, break_before_cur_inst: bool) -> None:
+    def commit(self) -> None:
         assert not self.state.written
         if self.state.is_empty:
             return
         assert self.state.start_pc >= 0
-        lasti = self.frame.f_lasti
-        if break_before_cur_inst:
-            lasti -= 2
+        if self.state.defer_restart is not None:
+            lasti = self.state.defer_restart.guard_lasti
+        else:
+            lasti = self.frame.f_lasti
         end_pc = self.code.get_orig_pc(lasti)
         if end_pc == -1:
             end_pc = self.code.get_next_orig_pc(lasti)
@@ -563,16 +594,18 @@ class GuardTracker:
         # livevars_analysis should return the same result when passing self.code.guard_insts
         # and self.code.original_insts, but as current_inst may not be in original_insts,
         # we pass guard_insts here
-        live_vars = livevars_analysis(self.code.guard_insts, current_inst)
-        live_vars = live_vars.intersection(self.state.stored_locals)
-        for i, live_var in enumerate(live_vars):
-            value = self.frame.f_locals[live_var]
-            var = self.state.objects.get(value, allow_unexist_const=True)
-            var.make_output(f"__live_{i}", StoreInLocal(live_var),
-                            graph_codegen, True, id(value))
+        if self.state.defer_restart is not None:
+            live_vars = self.state.defer_restart.live_vars
+        else:
+            live_vars = self.get_live_vars()
+
+        for i, (live_name, live_obj) in enumerate(live_vars):
+            var = self.state.objects.get(live_obj, allow_unexist_const=True)
+            var.make_output(f"__live_{i}", StoreInLocal(live_name),
+                            graph_codegen, True, id(live_obj))
         # TODO: can be optimized by only reproduce the modified variables
-        if break_before_cur_inst:
-            stack_objs = self.state.stack_objs
+        if self.state.defer_restart is not None:
+            stack_objs = self.state.defer_restart.stack_objs
             assert stack_objs is not None
         else:
             stack_objs = get_all_objects_in_stack(self.frame)
@@ -598,8 +631,16 @@ class GuardTracker:
                 end_pc].opname == "RETURN_VALUE" and self.caller is not None:
             print("callee is full graph, merge to caller")
             assert len(stack_objs) == 1
-            self.caller.state.merge_call(
-                self.state, get_value_stack_from_top(self.frame, 0))
+            caller = self.caller
+            assert caller is not None
+            caller.state.merge_call(self.state,
+                                    [get_value_stack_from_top(self.frame, 0)])
+        elif self.end_pc != -1 and self.num_breaks == 1 and self.end_pc == end_pc:
+            print("reach end of nested tracker, merge to caller")
+            stack_objs = get_all_objects_in_stack(self.frame)
+            nest_caller = self.caller
+            assert nest_caller is not None
+            nest_caller.state.merge_call(self.state, stack_objs)
         else:
             graph_code = graph_codegen.get_code()
             compiled_graph = self.state.fx_graph.compile()
@@ -674,10 +715,14 @@ class GuardTracker:
                 )
                 dyn.mark_dynamic(value, dyn.ScalarWithUnknownValue())
             else:
-                var = vs.make_var_from_value(value, partial.need_guard_check,
-                                             self.state.objects.get_or_make_var,
-                                             self.state.fx_graph,
-                                             partial.extract_code_at_start)
+                default_make_var_fn: MAKE_VAR_FN_TYPE = vs.make_var_from_value
+                partial_make_var_fn: Optional[
+                    MAKE_VAR_FN_TYPE] = partial.make_var_fn
+                make_var_fn: MAKE_VAR_FN_TYPE = partial_make_var_fn if partial_make_var_fn is not None else default_make_var_fn
+                var = make_var_fn(value, partial.need_guard_check,
+                                  self.state.objects.get_or_make_var,
+                                  self.state.fx_graph,
+                                  partial.extract_code_at_start)
             if partial.inplace_ref is None:
                 self.state.objects.add(var, value)
             else:
@@ -685,15 +730,17 @@ class GuardTracker:
         self.state.inplace_update_objs.clear()
         self.state.partial_var.clear()
         if self.state.defer_restart is not None:
-            self.restart("defered restart " + self.state.defer_restart,
-                         break_before_cur_inst=True)
+            self.restart("defered restart " + self.state.defer_restart.reason)
 
-    def restart(self,
-                restart_reason: str,
-                break_before_cur_inst: bool = False) -> None:
+    def restart(self, restart_reason: str) -> None:
         print(f"restart: {restart_reason}")
         self.have_error = True
-        self.commit(break_before_cur_inst)
+        self.num_breaks += 1
+        self.commit()
+        if self.end_pc != -1 and self.end_pc == self.code.get_orig_pc(
+                self.frame.f_lasti):
+            self.state.is_empty = True
+            pop_tracker(self.frame_id)
 
     @classmethod
     def has_tensor_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
@@ -725,6 +772,12 @@ class GuardTracker:
         return any(
             isinstance(self.state.objects.get_or_none(i), vs.AnyVar)
             for i in itertools.chain(args, kwargs.values()))
+
+    def get_live_vars(self) -> list[tuple[str, Any]]:
+        live_names = livevars_analysis(self.code.guard_insts,
+                                       self.code.get_inst(self.frame.f_lasti))
+        live_names = live_names.intersection(self.state.stored_locals)
+        return [(name, self.frame.f_locals[name]) for name in live_names]
 
     def call_function(
         self,
@@ -759,7 +812,9 @@ class GuardTracker:
         if is_user_defined_func(func) or isinstance(func, torch.nn.Sequential):
             print("run into user defined function")
             stack_objs = get_all_objects_in_stack(self.frame)
-            self.state.mark_defer_restart(f"call_function", stack_objs)
+            self.state.mark_defer_restart(
+                DeferRestartState(stack_objs, self.get_live_vars(),
+                                  self.frame.f_lasti, f"call_function"))
             from .tracer import get_process_frame
             preprocess_frame, post_process_frame = get_process_frame(func, True)
             prior = set_eval_frame((preprocess_frame, post_process_frame))
@@ -1135,50 +1190,123 @@ class GuardTracker:
             ExtractFromMethod(pos, id(obj), '__iter__')
             for pos in obj_var.extract_code_at_start
         ]
+
+        def make_iterable_fn(
+                value: Any, need_guard_check: bool, get_or_make_var: Callable[
+                    [Any, bool, Optional[FxGraph], list[StorePos]],
+                    Variable], fx_graph: Optional[FxGraph],
+                extract_code_at_start: Optional[list[StorePos]]) -> vs.Variable:
+            if extract_code_at_start is None:
+                extract_code_at_start = []
+            return vs.IteratorVar.from_parent_var(value, obj_var, id(obj), 0,
+                                                  need_guard_check,
+                                                  get_or_make_var,
+                                                  extract_code_at_start)
+
+        make_var_fn: Optional[
+            MAKE_VAR_FN_TYPE] = make_iterable_fn if not isinstance(
+                obj, range) else None
+
         self.state.set_partial_var({
             -1: [
                 PartialVar(node=None,
                            need_guard_check=False,
-                           extract_code_at_start=extract_code_at_start)
+                           extract_code_at_start=extract_code_at_start,
+                           make_var_fn=make_var_fn)
             ]
         })
 
-    def FOR_ITER(self, _inst: Instruction) -> None:
-        obj = get_value_stack_from_top(self.frame, 0)
-        obj_var = self.state.objects.get(obj)
-        extract_code_at_start: list[StorePos] = [
-            ExtractFromMethod(pos, id(obj), '__next__')
-            for pos in obj_var.extract_code_at_start
-        ]
-        normal_pc = self.frame.f_lasti // 2 + 1
-        guard_inst = self.code.get_inst(self.frame.f_lasti)
-        guard_target = guard_inst.target
-        assert guard_target is not None
-        end_loop_pc = self.code.get_pc_by_inst(guard_target)
-        self.state.set_partial_var({
-            normal_pc: [
-                PartialVar(node=None,
-                           need_guard_check=False,
-                           extract_code_at_start=[]),
-                PartialVar(node=None,
-                           need_guard_check=False,
-                           extract_code_at_start=extract_code_at_start)
-            ],
-            end_loop_pc: []
-        })
+    def FOR_ITER(self, _original_inst: Instruction) -> None:
+        original_pc, original_inst = self.code.get_orig_inst(self.frame.f_lasti)
+        iterator = get_value_stack_from_top(self.frame, 0)
+        is_dynamic = dyn.contains_pc(self.frame_id,
+                                     original_pc)  # TODO: remove hardcode
+        if is_dynamic:
+            end_pc_original = end_of_control_flow(self.code.original_insts,
+                                                  original_pc)
+            end_pc_guard = end_of_control_flow(self.code.guard_insts,
+                                               self.frame.f_lasti // 2)
+            if self.code.is_match(
+                    end_pc_original,
+                    end_pc_guard):  # have graph break in control flow
+                stack_objs = get_all_objects_in_stack(self.frame)
+                self.state.mark_defer_restart(
+                    DeferRestartState(stack_objs, self.get_live_vars(),
+                                      self.frame.f_lasti, f"dynamic for_iter"))
+                dyn.pop_dynamic_pc(self.frame_id, original_pc)
+                new_tracker = push_tracker(self.frame,
+                                           self.frame_id,
+                                           read_stack=True,
+                                           end_pc=end_pc_original)
+                for obj in stack_objs:
+                    var = self.state.objects.get_or_none(obj)
+                    if var is not None:
+                        new_tracker.state.objects.add(var, obj)
+                new_tracker.record(self.frame, self.frame_id)
+                return
+            else:
+                raise NotImplementedError("orz")
+        else:
+            obj = get_value_stack_from_top(self.frame, 0)
+            obj_var = self.state.objects.get(obj)
+            normal_pc = self.frame.f_lasti // 2 + 1
+            guard_inst = self.code.get_inst(self.frame.f_lasti)
+            guard_target = guard_inst.target
+            assert guard_target is not None
+            end_loop_pc = self.code.get_pc_by_inst(guard_target)
+
+            def make_iterable_fn(
+                    value: Any, need_guard_check: bool,
+                    get_or_make_var: Callable[
+                        [Any, bool, Optional[FxGraph], list[StorePos]],
+                        Variable], fx_graph: Optional[FxGraph],
+                    extract_code_at_start: Optional[list[StorePos]]
+            ) -> vs.Variable:
+                assert isinstance(obj_var, vs.IteratorVar)
+                if extract_code_at_start is None:
+                    extract_code_at_start = []
+                return vs.IteratorVar.from_parent_var(value, obj_var.parent_var,
+                                                      obj_var.parent_idx,
+                                                      obj_var.num_iters + 1,
+                                                      need_guard_check,
+                                                      get_or_make_var,
+                                                      extract_code_at_start)
+
+            make_var_fn = make_iterable_fn if not isinstance(
+                obj, type(range(0).__iter__())) else None
+
+            self.state.set_partial_var({
+                normal_pc: [
+                    PartialVar(node=None,
+                               need_guard_check=False,
+                               extract_code_at_start=[]),
+                    PartialVar(node=None,
+                               need_guard_check=False,
+                               extract_code_at_start=[],
+                               inplace_ref=obj,
+                               make_var_fn=make_var_fn)
+                ],
+                end_loop_pc: []
+            })
 
 
 trackers: list[GuardTracker] = []
 
 
-def push_tracker(frame: FrameType, frame_id: int) -> None:
+def push_tracker(frame: FrameType,
+                 frame_id: int,
+                 read_stack: bool = False,
+                 end_pc: int = -1) -> GuardTracker:
     if len(trackers) > 0:
         caller = trackers[-1]
     else:
         caller = None
-    trackers.append(GuardTracker(frame, frame_id, caller))
+    new_tracker = GuardTracker(frame, frame_id, caller, read_stack, end_pc)
+    trackers.append(new_tracker)
     print("push tracker", frame_id, "frame", hex(id(frame)), "frame_id",
-          frame_id, "all", [t.frame_id for t in trackers])
+          frame_id, "read_stack", read_stack, "end_pc", end_pc, "all",
+          [t.frame_id for t in trackers])
+    return new_tracker
 
 
 def pop_tracker(frame_id: int) -> None:

@@ -491,6 +491,10 @@ static PyMethodDef _methods[] = {
      METH_VARARGS, NULL},
     {"get_code_map", get_code_map, METH_VARARGS, NULL},
     {"is_bound_method", is_bound_method, METH_VARARGS, NULL},
+    {"parse_rangeiterobject", frontend_csrc::parse_rangeiterobject,
+     METH_VARARGS, NULL},
+    {"make_rangeiterobject", frontend_csrc::make_rangeiterobject, METH_VARARGS,
+     NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

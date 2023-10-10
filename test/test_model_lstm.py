@@ -4,6 +4,7 @@ from frontend.utils import add_force_graph_break
 from frontend.c_api import get_next_frame_id
 import logging
 from common.checker import run_and_check, HIT, MISS
+from frontend.dynamic import DynamicControlFlow, mark_dynamic_pc
 
 import torch
 import torch.nn as nn
@@ -182,3 +183,43 @@ def test_lstm_unroll(caplog):
         compiled = compile(model)
         run_and_check(compiled, [MISS], 1, caplog, expect_result, inputs)
         run_and_check(compiled, [HIT], 1, caplog, expect_result, inputs)
+
+
+class SingleLayerRNN(nn.Module):
+
+    def __init__(self, input_size, hidden_size):
+        super(SingleLayerRNN, self).__init__()
+        self.hidden_size = hidden_size
+        self.weight_ih = nn.Parameter(
+            torch.randn(input_size, hidden_size, dtype=torch.float32))
+        self.weight_hh = nn.Parameter(
+            torch.randn(hidden_size, hidden_size, dtype=torch.float32))
+
+    def forward(self, x):
+        h = torch.zeros(x.shape[1], self.hidden_size)
+        for i in range(x.size()[0]):
+            h = torch.matmul(x[i], self.weight_ih) + torch.matmul(
+                h, self.weight_hh)
+            h = torch.tanh(h)
+        return h
+
+
+def test_rnn(caplog):
+    reset()
+    with torch.no_grad():
+        hidden_size = 4
+        seq_len = 3
+        batch_size = 2
+        model = SingleLayerRNN(hidden_size, hidden_size).eval()
+        inputs = torch.randn(seq_len, batch_size, hidden_size)
+        expected = model(inputs)
+        print(expected)
+        mark_dynamic_pc(0, 18, DynamicControlFlow(18, "FOR_ITER"))
+        add_force_graph_break(get_next_frame_id(), 27)
+        compiled = compile(model)
+        run_and_check(compiled, [MISS], 4, caplog, expected, inputs)
+        run_and_check(compiled, [HIT, HIT, HIT, HIT], 4, caplog, expected,
+                      inputs)
+
+
+# '''
