@@ -721,6 +721,11 @@ class GuardTracker:
         return any(
             isinstance(i, list) for i in itertools.chain(args, kwargs.values()))
 
+    @classmethod
+    def has_dict_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
+        return any(
+            isinstance(i, dict) for i in itertools.chain(args, kwargs.values()))
+
     def has_unknown_arg(self, args: List[Any], kwargs: Dict[str, Any]) -> bool:
         return any(
             isinstance(self.state.objects.get_or_none(i), vs.AnyVar)
@@ -806,6 +811,9 @@ class GuardTracker:
         elif self.has_list_arg(args,
                                kwargs) and get_root_module(func) != 'torch':
             set_if_inplace_return()
+            return
+        elif self.has_dict_arg(args,
+                               kwargs) and get_root_module(func) != 'torch':
             return
         elif get_root_module(func) == 'torch' or (self.has_tensor_arg(
                 args, kwargs) and is_graph_func(func)):
@@ -1039,8 +1047,6 @@ class GuardTracker:
         args = args[:-len(kw_names)]
         self.call_function(func, args, kwargs)
 
-    '''
-    not tested due to lack of dict and list type
     def CALL_FUNCTION_EX(self, inst: Instruction) -> None:
         offset = inst.argval & 1
         func = get_value_stack_from_top(self.frame, 1 + offset)
@@ -1050,7 +1056,6 @@ class GuardTracker:
         else:
             kwargs = {}
         self.call_function(func, args, kwargs)
-    '''
 
     def STORE_FAST(self, inst: Instruction) -> None:
         self.state.add_stored_locals(inst.argval)
@@ -1079,10 +1084,19 @@ class GuardTracker:
     def BUILD_SET(self, inst: Instruction) -> None:
         pass
 
-    # def LIST_TO_TUPLE(self, inst: Instruction) -> None:
-    #     pass
+    def BUILD_CONST_KEY_MAP(self, inst: Instruction) -> None:
+        pass
+
+    def BUILD_MAP(self, inst: Instruction) -> None:
+        pass
+
+    def LIST_TO_TUPLE(self, inst: Instruction) -> None:
+        pass
 
     def LIST_EXTEND(self, inst: Instruction) -> None:
+        pass
+
+    def DICT_MERGE(self, inst: Instruction) -> None:
         pass
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
