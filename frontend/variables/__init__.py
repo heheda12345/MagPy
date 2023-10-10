@@ -11,6 +11,7 @@ from .iterator import IteratorVar, RangeIterVar
 from .tuple_ import TupleVar
 from .set_ import SetVar
 from .list_ import ListVar
+from .dict_ import DictVar
 from ..fx_graph import FxGraph
 from ..utils import NullObject, UnknownTypeError
 from ..store_pos import StorePos
@@ -28,7 +29,8 @@ ty2var: dict[type[Any], type[Variable]] = {
     list: ListVar,
     set: SetVar,
     torch.Size: TorchSizeVar,
-    torch.dtype: TorchDtypeVar
+    torch.dtype: TorchDtypeVar,
+    dict: DictVar,
 }
 
 CONST_TYPES = Union[int, float, bool, str, NullObject, None, slice]

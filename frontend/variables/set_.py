@@ -34,7 +34,10 @@ class SetVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
+        codegen.add_check(f'isinstance({pos}, set)')
         codegen.add_check(f"len({pos}) == {self.length}")
+        for i, (var, obj) in enumerate(zip(self.vars, self.obj_ids)):
+            var.make_guard_inner(codegen, StoreInIndex(pos, obj, i, False))
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
@@ -61,4 +64,15 @@ class SetVar(Variable):
         return self.value
 
     def add_subvars_to_table(self, table: 'ObjectTable') -> None:
-        pass
+        for i, (var, idx) in enumerate(zip(self.vars, self.obj_ids)):
+            old_var = table.get_or_none_by_id(idx)
+            if old_var is not None:
+                new_extract: list[StorePos] = [
+                    StoreInIndex(pos, idx, i, False)
+                    for pos in self.extract_code_at_start
+                ]
+                old_var.extract_code_at_start.extend(new_extract)
+                old_var.need_guard_check |= self.need_guard_check
+            else:
+                table.add_by_id(var, idx)
+                var.add_subvars_to_table(table)
