@@ -107,12 +107,18 @@ def get_root_module(func: Callable[..., Any]) -> str:
 
 
 def is_user_defined_func(func: Callable[..., Any]) -> bool:
+    # print([(x,getattr(func, x)) for x in dir(func)])
     if hasattr(func,
                '__objclass__') and func.__objclass__ == torch._C._TensorBase:
         return False
 
+    if hasattr(func, '__self__') and isinstance(func.__self__, torch.Tensor):
+        return False
+
     root_module = get_root_module(func)
     if root_module == '':
+        # if type(func) == type(len):
+        #     return False
         return True
     if root_module in ('math', 'builtins', 'torch', 'numpy', '_operator'):
         return False

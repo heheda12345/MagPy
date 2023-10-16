@@ -41,6 +41,7 @@ class AnyVar(Variable):
                        Variable],
                    _fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "AnyVar":
+        print(f'in any, id is {id(value)}')
         return cls(need_guard_check, value, extract_code_at_start)
 
     def as_fx_node(self) -> NodeArgs:

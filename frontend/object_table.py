@@ -5,6 +5,7 @@ from .variables.tuple_ import TupleVar
 from .utils import NullObject, ReadOnlyObject
 from .store_pos import StorePos
 from .fx_graph import FxGraph
+import torch
 
 
 class ObjectTable:
@@ -18,7 +19,9 @@ class ObjectTable:
 
     def add(self, var: Variable, value: Any) -> None:
         if isinstance(value, bool):
-            self.objs_no_id.append(var)
+            pass
+            # print('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+            # self.objs_no_id.append(var)
         elif id(value) in self.objs:
             old_var = self.objs[id(value)]
             old_var.extract_code_at_start.extend(var.extract_code_at_start)
@@ -55,7 +58,8 @@ class ObjectTable:
             if isinstance(value, get_args(CONST_TYPES)) or isinstance(
                     value, (list, tuple, set, dict)):
                 return make_var_from_value(value, False, self.get_or_make_var)
-        raise RuntimeError(f"Object {value} not found in object table")
+        print(f'the super value come here, the type is {type(value)}, id is {id(value)}')
+        raise RuntimeError(f"Object {id(value)} not found in object table")
 
     def get_or_none(self, value: Any) -> Optional[Variable]:
         if id(value) in self.objs:

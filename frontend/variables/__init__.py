@@ -3,7 +3,7 @@ from types import ModuleType
 import torch
 from .base import Variable
 from .scalar import ScalarVar
-from .tensor import TensorVar, TorchParamVar, TorchSizeVar, TorchDtypeVar
+from .tensor import TensorVar, TorchParamVar, TorchSizeVar, TorchDtypeVar, TorchDeviceVar
 from .torch_module import TorchModuleVar, TorchSequentialVar, TorchModuleListVar
 from .any_ import AnyVar
 from .const import NullVar, NoneVar, SliceVar, ModuleVar, FunctionVar, RangeVar
@@ -29,6 +29,7 @@ ty2var: dict[type[Any], type[Variable]] = {
     set: SetVar,
     torch.Size: TorchSizeVar,
     torch.dtype: TorchDtypeVar,
+    torch.device: TorchDeviceVar,
     dict: DictVar,
 }
 
@@ -43,23 +44,29 @@ def make_var_from_value(value: Any,
                         fx_graph: Optional[FxGraph] = None,
                         extract_code_at_start: list[StorePos] = []) -> Variable:
     if type(value) in ty2var:
+        # print('super 1')
         return ty2var[type(value)].from_value(value, need_guard_check,
                                               get_or_make_var, fx_graph,
                                               extract_code_at_start)
     elif isinstance(value, torch.nn.Module):
+        # print('super 2')
         return TorchModuleVar.from_value(value, need_guard_check,
                                          get_or_make_var, fx_graph,
                                          extract_code_at_start)
     elif isinstance(value, ModuleType):
+        # print('super 3')
         return ModuleVar.from_value(value, need_guard_check, get_or_make_var,
                                     fx_graph, extract_code_at_start)
     elif callable(value):
+        # print('super 4')
         return FunctionVar.from_value(value, need_guard_check, get_or_make_var,
                                       fx_graph, extract_code_at_start)
     elif isinstance(value, range):
+        # print('super 5')
         return RangeVar.from_value(value, need_guard_check, get_or_make_var,
                                    fx_graph, extract_code_at_start)
     else:
+        # print('let hope super dont come here')
         return AnyVar.from_value(value, need_guard_check, get_or_make_var,
                                  fx_graph, extract_code_at_start)
 
