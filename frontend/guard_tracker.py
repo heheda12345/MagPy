@@ -23,7 +23,6 @@ from .object_table import ObjectTable
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
 from .fx_graph import FxGraph, get_frame_root, is_leaf_module, NodeArgs
 from .bytecode_analysis import livevars_analysis
-from .variables.tuple_ import TupleVar
 from .variables.base import Variable
 
 
@@ -33,6 +32,23 @@ class PartialVar:
     need_guard_check: bool
     extract_code_at_start: list[StorePos]
     inplace_ref: Any = None  # None if not inplace
+
+
+class Bool_():
+    value: bool
+
+    def __init__(self, value: bool) -> None:
+        self.value = value
+
+    #todo: overwirte xor, or, and, others uses super()
+    def __and__(self, operator: bool) -> "Bool_":
+        return Bool_(self.value and operator)
+
+    def __or__(self, operator: bool) -> "Bool_":
+        return Bool_(self.value or operator)
+
+    def __not__(self) -> "Bool_":
+        return Bool_(not self.value)
 
 
 class State:
@@ -645,7 +661,13 @@ class GuardTracker:
             self.state.num_new_refs = get_value_stack_size(self.frame)
         for i in range(self.state.num_new_refs):
             obj = get_value_stack_from_top(self.frame, i)
-            self.state.object_refs.append(id(obj))
+            if isinstance(obj, bool):
+                new_bool = Bool_(obj)
+                var_bool = vs.ScalarVar(obj, True, False)
+                self.state.objects.update_by_id(var_bool, id(new_bool))
+                self.state.object_refs.append(new_bool)
+            else:
+                self.state.object_refs.append(obj)
             print(f'unhandled obj:, and id: {id(obj)}')
             if isinstance(obj, super):
                 print("handle pre super")
