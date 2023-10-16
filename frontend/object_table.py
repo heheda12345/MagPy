@@ -17,9 +17,7 @@ class ObjectTable:
         self.objs_no_id = []
 
     def add(self, var: Variable, value: Any) -> None:
-        if isinstance(value, bool):
-            self.objs_no_id.append(var)
-        elif id(value) in self.objs:
+        if id(value) in self.objs:
             old_var = self.objs[id(value)]
             old_var.extract_code_at_start.extend(var.extract_code_at_start)
             old_var.need_guard_check |= var.need_guard_check
@@ -47,9 +45,7 @@ class ObjectTable:
         return list(self.objs.items())
 
     def get(self, value: Any, allow_unexist_const: bool = False) -> Variable:
-        if isinstance(value, bool):
-            return ScalarVar(value, True, False)
-        elif id(value) in self.objs:
+        if id(value) in self.objs:
             return self.objs[id(value)]
         elif allow_unexist_const:
             if isinstance(value, get_args(CONST_TYPES)) or isinstance(
@@ -74,10 +70,7 @@ class ObjectTable:
                         need_guard_check: bool,
                         fx_graph: Optional[FxGraph] = None,
                         extract_code_at_start: list[StorePos] = []) -> Variable:
-        if isinstance(value, bool):
-            return ScalarVar(value, True, need_guard_check,
-                             extract_code_at_start)
-        elif id(value) in self.objs:
+        if id(value) in self.objs:
             return self.objs[id(value)]
         else:
             return make_var_from_value(value, need_guard_check,
