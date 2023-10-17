@@ -319,6 +319,21 @@ static PyObject *get_value_stack_from_top(PyObject *self, PyObject *args) {
     return value;
 }
 
+static PyObject *set_value_stack_from_top(PyObject *self, PyObject *args) {
+    PyFrameObject *frame = NULL;
+    int index = 0;
+    PyObject *obj;
+    if (!PyArg_ParseTuple(args, "OiO", &frame, &index, &obj)) {
+        PRINT_PYERR;
+        PyErr_SetString(PyExc_TypeError,
+                        "invalid parameter in set_value_stack_from_top");
+        return NULL;
+    }
+    frame->f_stacktop[-index - 1] = obj;
+    Py_INCREF(obj);
+    Py_RETURN_NONE;
+}
+
 static PyObject *get_value_stack_size(PyObject *self, PyObject *args) {
     PyFrameObject *frame = NULL;
     if (!PyArg_ParseTuple(args, "O", &frame)) {
@@ -471,6 +486,7 @@ static PyMethodDef _methods[] = {
     {"set_skip_files", set_skip_files, METH_VARARGS, NULL},
     {"set_null_object", set_null_object, METH_VARARGS, NULL},
     {"get_value_stack_from_top", get_value_stack_from_top, METH_VARARGS, NULL},
+    {"set_value_stack_from_top", set_value_stack_from_top, METH_VARARGS, NULL},
     {"get_value_stack_size", get_value_stack_size, METH_VARARGS, NULL},
     {"guard_match", guard_match, METH_VARARGS, NULL},
     {"add_to_cache", add_to_cache, METH_VARARGS, NULL},

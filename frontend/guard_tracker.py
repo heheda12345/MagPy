@@ -12,7 +12,7 @@ import copy
 import dataclasses
 import torch.fx.immutable_collections as fx_immutable
 from .code import ProcessedCode
-from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method
+from .c_api import get_value_stack_from_top, set_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
 from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction
@@ -34,21 +34,19 @@ class PartialVar:
     inplace_ref: Any = None  # None if not inplace
 
 
-class Bool_():
-    value: bool
+class Bool(int):
 
-    def __init__(self, value: bool) -> None:
-        self.value = value
+    def __new__(cls, value: bool) -> "Bool":
+        return super().__new__(cls, int(value))
 
-    #todo: overwirte xor, or, and, others uses super()
-    def __and__(self, operator: bool) -> "Bool_":
-        return Bool_(self.value and operator)
+    def __and__(self, rhs: Any) -> "Bool":
+        return Bool(bool(self) and rhs)
 
-    def __or__(self, operator: bool) -> "Bool_":
-        return Bool_(self.value or operator)
+    def __or__(self, rhs: Any) -> "Bool":
+        return Bool(bool(self) or rhs)
 
-    def __not__(self) -> "Bool_":
-        return Bool_(not self.value)
+    def __not__(self) -> "Bool":
+        return Bool(not bool(self))
 
 
 class State:
@@ -657,9 +655,10 @@ class GuardTracker:
         for i in range(self.state.num_new_refs):
             obj = get_value_stack_from_top(self.frame, i)
             if isinstance(obj, bool):
-                new_bool = Bool_(obj)
+                new_bool = Bool(obj)
                 var_bool = vs.ScalarVar(obj, True, False)
-                self.state.objects.update_by_id(var_bool, id(new_bool))
+                set_value_stack_from_top(self.frame, i, new_bool)
+                self.state.objects.add(var_bool, new_bool)
                 self.state.object_refs.append(new_bool)
             else:
                 self.state.object_refs.append(obj)
