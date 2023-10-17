@@ -116,3 +116,12 @@ class ExtractFromFunction(StorePos):
 
     def __repr__(self) -> str:
         return f"{self.func_name}({self.var_pos})"
+
+
+class IterValue(StorePos):
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def __repr__(self) -> str:
+        return "__iter_value__"

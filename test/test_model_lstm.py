@@ -5,7 +5,6 @@ from frontend.c_api import get_next_frame_id
 import logging
 from common.checker import run_and_check, HIT, MISS
 from frontend.dynamic import DynamicControlFlow, mark_dynamic_pc
-
 import torch
 import torch.nn as nn
 
@@ -204,7 +203,7 @@ class SingleLayerRNN(nn.Module):
         return h
 
 
-def test_rnn(caplog):
+def test_rnn_break(caplog):
     reset()
     with torch.no_grad():
         hidden_size = 4
@@ -222,4 +221,17 @@ def test_rnn(caplog):
                       inputs)
 
 
-# '''
+def test_rnn_no_break(caplog):
+    reset()
+    with torch.no_grad():
+        hidden_size = 4
+        seq_len = 3
+        batch_size = 2
+        model = SingleLayerRNN(hidden_size, hidden_size).eval()
+        inputs = torch.randn(seq_len, batch_size, hidden_size)
+        expected = model(inputs)
+        print(expected)
+        mark_dynamic_pc(0, 18, DynamicControlFlow(18, "FOR_ITER"))
+        compiled = compile(model)
+        run_and_check(compiled, [MISS], 1, caplog, expected, inputs)
+        run_and_check(compiled, [HIT], 1, caplog, expected, inputs)

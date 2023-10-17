@@ -10,6 +10,7 @@ import os
 import torch
 import torch._C
 from torch._C import _TensorBase
+from .config import get_config, set_config
 
 if TYPE_CHECKING:
     from .instruction import Instruction
@@ -239,3 +240,21 @@ class ReadOnlyObject(Generic[T]):
             raise AttributeError(
                 f"Attribute {attr} should not be called in reader of {self.obj}"
             )
+
+
+class SetConfig:
+    config_old: dict[str, Any]
+    config_new: dict[str, Any]
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        self.config_new = config
+        self.config_old = {}
+
+    def __enter__(self) -> None:
+        for k, v in self.config_new.items():
+            self.config_old[k] = get_config(k)
+            set_config(k, v)
+
+    def __exit__(self, *args: Any) -> None:
+        for k, v in self.config_old.items():
+            set_config(k, v)

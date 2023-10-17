@@ -1,6 +1,7 @@
 import dataclasses
 import dis
 import sys
+import functools
 from typing import Union, List
 from collections import deque
 from .instruction import Instruction
@@ -18,6 +19,10 @@ else:
     TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
 JUMP_OPCODES = set(dis.hasjrel + dis.hasjabs)
 JUMP_OPNAMES = {dis.opname[opcode] for opcode in JUMP_OPCODES}
+MUST_JUMP_OPCODES = {
+    dis.opmap["JUMP_FORWARD"],
+    dis.opmap["JUMP_ABSOLUTE"],
+}
 HASLOCAL = set(dis.haslocal)
 HASFREE = set(dis.hasfree)
 
@@ -44,39 +49,80 @@ class ReadsWrites:
 def livevars_analysis(instructions: List[Instruction],
                       instruction: Instruction) -> set[str]:
     indexof = get_indexof(instructions)
-    must = ReadsWrites(set(), set(), set())
-    may = ReadsWrites(set(), set(), set())
 
-    def walk(state: ReadsWrites, start: int) -> None:
-        if start in state.visited:
-            return
-        state.visited.add(start)
+    prev: dict[int, list[int]] = {}
+    succ: dict[int, list[int]] = {}
+    prev[0] = []
+    for i, inst in enumerate(instructions):
+        if inst.opcode not in TERMINAL_OPCODES:
+            prev[i + 1] = [i]
+            succ[i] = [i + 1]
+        else:
+            prev[i + 1] = []
+            succ[i] = []
+    for i, inst in enumerate(instructions):
+        if inst.opcode in JUMP_OPCODES:
+            assert inst.target is not None
+            target_pc = indexof[inst.target]
+            prev[target_pc].append(i)
+            succ[i].append(target_pc)
 
-        for i in range(start, len(instructions)):
-            inst = instructions[i]
-            if inst.opcode in HASLOCAL or inst.opcode in HASFREE:
-                if "LOAD" in inst.opname or "DELETE" in inst.opname:
-                    assert isinstance(inst.argval, str)
-                    if inst.argval not in must.writes:
-                        state.reads.add(inst.argval)
-                elif "STORE" in inst.opname:
-                    assert isinstance(inst.argval, str)
-                    state.writes.add(inst.argval)
-                elif inst.opname == "MAKE_CELL":
-                    pass
-                else:
-                    raise NotImplementedError(f"unhandled {inst.opname}")
-            # if inst.exn_tab_entry:
-            #     walk(may, indexof[inst.exn_tab_entry.target])
-            if inst.opcode in JUMP_OPCODES:
-                assert inst.target is not None
-                walk(may, indexof[inst.target])
-                state = may
-            if inst.opcode in TERMINAL_OPCODES:
-                return
+    live_vars: dict[int, frozenset[str]] = {}
 
-    walk(must, indexof[instruction])
-    return must.reads | may.reads
+    start_pc = indexof[instruction]
+    to_visit = deque([
+        pc for pc in range(len(instructions))
+        if instructions[pc].opcode in TERMINAL_OPCODES
+    ])
+    in_progress: set[int] = set(to_visit)
+
+    def join_fn(a: frozenset[str], b: frozenset[str]) -> frozenset[str]:
+        return frozenset(a | b)
+
+    def gen_fn(
+            inst: Instruction,
+            incoming: frozenset[str]) -> tuple[frozenset[str], frozenset[str]]:
+        gen = set()
+        kill = set()
+        if inst.opcode in HASLOCAL or inst.opcode in HASFREE:
+            if "LOAD" in inst.opname or "DELETE" in inst.opname:
+                assert isinstance(inst.argval, str)
+                gen.add(inst.argval)
+            elif "STORE" in inst.opname:
+                assert isinstance(inst.argval, str)
+                kill.add(inst.argval)
+            elif inst.opname == "MAKE_CELL":
+                pass
+            else:
+                raise NotImplementedError(f"unhandled {inst.opname}")
+
+        return frozenset(gen), frozenset(kill)
+
+    while len(to_visit) > 0:
+        pc = to_visit.popleft()
+        in_progress.remove(pc)
+        if pc in live_vars:
+            before = hash(live_vars[pc])
+        else:
+            before = None
+        succs = [
+            live_vars[succ_pc] for succ_pc in succ[pc] if succ_pc in live_vars
+        ]
+        if len(succs) > 0:
+            incoming = functools.reduce(join_fn, succs)
+        else:
+            incoming = frozenset()
+
+        gen, kill = gen_fn(instructions[pc], incoming)
+
+        out = (incoming - kill) | gen
+        live_vars[pc] = out
+        if hash(out) != before:
+            for prev_pc in prev[pc]:
+                if prev_pc not in in_progress:
+                    to_visit.append(prev_pc)
+                    in_progress.add(prev_pc)
+    return set(live_vars[start_pc])
 
 
 stack_effect = dis.stack_effect

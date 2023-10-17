@@ -75,5 +75,5 @@ def make_var_from_value(
 __all__ = [
     'make_var_from_value', 'Variable', 'ScalarVar', 'TensorVar',
     'TorchModuleVar', 'NullVar', 'NoneVar', "ModuleVar", "FunctionVar",
-    "TorchParamVar", "AnyVar", "IteratorVar"
+    "TorchParamVar", "AnyVar", "IteratorVar", "RangeIterVar"
 ]

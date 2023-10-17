@@ -84,3 +84,6 @@ class Variable:
         while ret.prev is not None:
             ret = ret.prev
         return ret
+
+    def disable_guard_check(self) -> None:
+        self.need_guard_check = False
