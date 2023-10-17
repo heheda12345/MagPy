@@ -265,6 +265,7 @@ class State:
                         if isinstance(pos, StoreInLocal):
                             continue
                         elif isinstance(pos, StoreInStack):
+                            print(f"see who: {var}, and pos:{pos}")
                             raise ValueError(
                                 "full graph should not contain guard in stack")
                         elif isinstance(pos, StoreInGlobal):
@@ -656,6 +657,15 @@ class GuardTracker:
 
         self.state.is_empty = True
 
+    def fetch_function_parameters(self, obj, index: int) -> None:
+        print(f'try fetch obj id:{id(obj)}')
+        if not self.state.objects.contains(obj):
+            # print("handle pre torch.tensor")
+            var = vs.make_var_from_value(obj, False,
+                                            self.state.objects.get_or_make_var,
+                                            self.state.fx_graph, [StoreInStack(index)])
+            self.state.objects.add_by_id(var, id(obj))
+
     def process_last_inst(self) -> None:
         if self.state.num_new_refs == -1:
             self.state.num_new_refs = get_value_stack_size(self.frame)
@@ -668,19 +678,13 @@ class GuardTracker:
                 self.state.object_refs.append(new_bool)
             else:
                 self.state.object_refs.append(obj)
-            print(f'unhandled obj:, and id: {id(obj)}')
+            print(f'unhandled obj:{obj}, and id: {id(obj)}')
             if isinstance(obj, super):
                 print("handle pre super")
                 var = vs.make_var_from_value(obj, False,
                                              self.state.objects.get_or_make_var,
                                              self.state.fx_graph, [StoreInStack(i)])
                 self.state.objects.add_by_id(var, id(obj))
-            # elif isinstance(obj, torch.Tensor) and not self.state.objects.contains(obj):
-            #     print("handle pre torch.tensor")
-            #     var = vs.make_var_from_value(obj, False,
-            #                                  self.state.objects.get_or_make_var,
-            #                                  self.state.fx_graph, [StoreInStack(i)])
-            #     self.state.objects.add_by_id(var, id(obj))
         self.state.num_new_refs = 0
         for i, obj in enumerate(self.state.inplace_update_objs):
             assert not isinstance(obj, torch.Tensor)
@@ -702,7 +706,6 @@ class GuardTracker:
             value = get_value_stack_from_top(self.frame, i)
             node = partial.node
             if isinstance(value, torch.Tensor):
-                print(type(value))
                 if isinstance(value, torch.nn.Parameter):
                     node = self.state.fx_graph.create_node("get_attr",
                                                     self.state.subparam_paths[value],
@@ -720,7 +723,6 @@ class GuardTracker:
                 )
                 dyn.mark_dynamic(value, dyn.ScalarWithUnknownValue())
             else:
-                print("from partial created")
                 var = vs.make_var_from_value(value, partial.need_guard_check,
                                              self.state.objects.get_or_make_var,
                                              self.state.fx_graph,
@@ -855,16 +857,6 @@ class GuardTracker:
                     ]
                 })
             return
-        # elif self.has_tuple_arg(args,
-        #                         kwargs) and get_root_module(func) != 'torch':
-        #     return
-        # elif self.has_list_arg(args,
-        #                        kwargs) and get_root_module(func) != 'torch':
-        #     set_if_inplace_return()
-        #     return
-        # elif self.has_dict_arg(args,
-        #                        kwargs) and get_root_module(func) != 'torch':
-        #     return
         elif get_root_module(func) == 'torch' or (self.has_tensor_arg(
                 args, kwargs) and is_graph_func(func)):
             # print('load method should come here')
@@ -1000,10 +992,24 @@ class GuardTracker:
         if inst.argval not in self.state.stored_locals:
             obj = self.frame.f_locals[inst.argval]
             pos = StoreInLocal(inst.argval)
-            # print(f'obj and id: {obj}, {id(obj)}')
+            print(f'obj and id:, {id(obj)}')
             if not self.state.objects.contains(obj):
                 # print('not contained should only be once')
                 var = vs.make_var_from_value(obj, True,
+                                             self.state.objects.get_or_make_var,
+                                             self.state.fx_graph, [pos])
+                self.state.add_object(var, obj)
+            else:
+                var = self.state.objects.get(obj)
+                var.extract_code_at_start.append(pos)
+        else:
+            # print("try to find some special cases")
+            obj = self.frame.f_locals[inst.argval]
+            pos = StoreInLocal(inst.argval)
+            print(f'obj and id:, {id(obj)}')
+            if not self.state.objects.contains(obj):
+                # print('not contained, but i think it should be in table')
+                var = vs.make_var_from_value(obj, False,
                                              self.state.objects.get_or_make_var,
                                              self.state.fx_graph, [pos])
                 self.state.add_object(var, obj)
@@ -1044,14 +1050,6 @@ class GuardTracker:
                                          self.state.fx_graph, [store_pos])
             self.state.add_object(var, obj)
 
-    def fetch_function_parameters(self, obj, index: int) -> None:
-        if id(obj) in self.state.object_refs and not self.state.objects.contains(obj):
-            print("handle pre torch.tensor")
-            var = vs.make_var_from_value(obj, False,
-                                            self.state.objects.get_or_make_var,
-                                            self.state.fx_graph, [StoreInStack(index)])
-            self.state.objects.add_by_id(var, id(obj))
-
     def LOAD_METHOD(self, inst: Instruction) -> None:
         self_obj = get_value_stack_from_top(self.frame, 0)
         # print(f"load method obj and id: {self_obj}, {id(self_obj)}")
@@ -1086,18 +1084,12 @@ class GuardTracker:
             StoreInAttr(pos, id(obj), inst.argval)
             for pos in obj_var.extract_code_at_start
         ]
-        print(f"attr value: {attr}, and type: {type(attr)}, and id: {(id(attr))}")
+        # print(f"attr value: {attr}, and type: {type(attr)}, and id: {(id(attr))}")
         partial = [
             PartialVar(node=None, need_guard_check=obj_var.need_guard_check, extract_code_at_start=new_extract)
         ]
 
         self.state.set_partial_var({-1: partial})
-        # attr_var = vs.make_var_from_value(attr,
-        #                                   obj_var.need_guard_check,
-        #                                   self.state.objects.get_or_make_var,
-        #                                   self.state.fx_graph,
-        #                                   extract_code_at_start=new_extract)
-        # self.state.add_object(attr_var, attr)
 
     def CALL_FUNCTION(self, inst: Instruction) -> None:
         num_args = inst.argval
@@ -1106,6 +1098,8 @@ class GuardTracker:
             for i in range(num_args - 1, -1, -1)
         ]
         kwargs: dict[str, Any] = {}
+        for i, obj in enumerate(itertools.chain(args, kwargs.values())):
+            self.fetch_function_parameters(obj, i)
         func = get_value_stack_from_top(self.frame, num_args)
         self.call_function(func, args, kwargs)
 

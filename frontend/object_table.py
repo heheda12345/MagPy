@@ -7,7 +7,6 @@ from .store_pos import StorePos
 from .fx_graph import FxGraph
 import torch
 
-
 class ObjectTable:
     objs: dict[int, Variable]  # id -> object
     # Python caches small integers, so int variables don't have unique ids
@@ -52,7 +51,7 @@ class ObjectTable:
             if isinstance(value, get_args(CONST_TYPES)) or isinstance(
                     value, (list, tuple, set, dict)):
                 return make_var_from_value(value, False, self.get_or_make_var)
-        print(f'the super value come here, the type is {type(value)}, id is {id(value)}')
+        # print(f'the super value come here, the type is {type(value)}, id is {id(value)}')
         raise RuntimeError(f"Object {id(value)} not found in object table")
 
     def get_or_none(self, value: Any) -> Optional[Variable]:
