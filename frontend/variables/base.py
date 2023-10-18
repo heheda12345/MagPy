@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 class Variable:
     need_guard_check: bool
     extract_code_at_start: list[StorePos]
+    extract_code_hashs: set[int]
     obj: Any
     prev: Optional['Variable'] = None
 
@@ -23,6 +24,9 @@ class Variable:
         self.need_guard_check = need_guard_check
         self.obj = obj
         self.extract_code_at_start = extract_code_at_start
+        self.extract_code_hashs = set()
+        for pos in extract_code_at_start:
+            self.extract_code_hashs.add(str(pos).__hash__())
         if need_guard_check:
             assert len(extract_code_at_start) > 0
 
@@ -87,3 +91,13 @@ class Variable:
 
     def disable_guard_check(self) -> None:
         self.need_guard_check = False
+
+    def clear_extract_code_at_start(self) -> None:
+        self.extract_code_at_start = []
+        self.extract_code_hashs = set()
+
+    def add_extract_code_at_start(self, pos: StorePos) -> None:
+        hash_value = str(pos).__hash__()
+        if hash_value not in self.extract_code_hashs:
+            self.extract_code_at_start.append(pos)
+            self.extract_code_hashs.add(hash_value)

@@ -259,7 +259,7 @@ class State:
             for idx, var in state.objects.objs.items():
                 if var.need_guard_check:
                     new_var = copy.copy(var)
-                    new_var.extract_code_at_start = []
+                    new_var.clear_extract_code_at_start()
                     for pos in var.extract_code_at_start:
                         if isinstance(pos, StoreInLocal):
                             continue
@@ -267,7 +267,7 @@ class State:
                             raise ValueError(
                                 "full graph should not contain guard in stack")
                         elif isinstance(pos, (StoreInGlobal, StoreInBuiltin)):
-                            new_var.extract_code_at_start.append(pos)
+                            new_var.add_extract_code_at_start(pos)
                         elif isinstance(
                                 pos, (StoreInAttr, StoreInIndex,
                                       ExtractFromMethod, ExtractFromFunction)):
@@ -278,7 +278,7 @@ class State:
                                     var)
                                 new_var.need_guard_check = False
                             else:
-                                new_var.extract_code_at_start.append(self_pos)
+                                new_var.add_extract_code_at_start(self_pos)
                         else:
                             raise NotImplementedError(pos, type(pos))
 
@@ -322,7 +322,7 @@ class State:
                                           (vs.TensorVar, vs.ScalarVar))
                         if new_tensor_var.need_guard_check:
                             raise NotImplementedError
-                        new_tensor_var.extract_code_at_start = []
+                        new_tensor_var.clear_extract_code_at_start()
                         new_tensor_var.fx_node = replacement_fn(arg)
                         self.objects.add_by_id(new_tensor_var, tensor_idx)
                     continue
@@ -1201,7 +1201,7 @@ class GuardTracker:
                 self.state.add_object(var, obj)
             else:
                 var = self.state.objects.get(obj)
-                var.extract_code_at_start.append(pos)
+                var.add_extract_code_at_start(pos)
 
     def LOAD_GLOBAL(self, inst: Instruction) -> None:
         if inst.argval not in self.state.stored_globals:

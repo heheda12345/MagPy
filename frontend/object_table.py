@@ -25,7 +25,8 @@ class ObjectTable:
             if isinstance(old_var, AnyVar) and not isinstance(var, AnyVar):
                 self.objs[id(value)] = var
                 var, old_var = old_var, var
-            old_var.extract_code_at_start.extend(var.extract_code_at_start)
+            for pos in var.extract_code_at_start:
+                old_var.add_extract_code_at_start(pos)
             old_var.need_guard_check |= var.need_guard_check
         else:
             self.add_by_id(var, id(value))
