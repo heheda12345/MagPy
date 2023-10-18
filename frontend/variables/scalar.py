@@ -33,6 +33,8 @@ class ScalarVar(Variable):
             if type(self.obj) == float:
                 codegen.add_check(f"{pos} == {get_float_string(self.obj)}")
                 codegen.add_import("struct")
+            elif isinstance(self.obj, str):
+                codegen.add_check(f"{pos} == '{self.obj}'")
             else:
                 codegen.add_check(f"{pos} == {self.obj}")
 
@@ -45,6 +47,9 @@ class ScalarVar(Variable):
                                f"{get_float_string(self.obj)} # {self.obj}",
                                in_return, idx)
                 codegen.add_import("struct")
+            elif isinstance(self.obj, str):
+                codegen.output(name_in_graph_fn, store_pos, f"'{self.obj}'",
+                               in_return, idx)
             else:
                 codegen.output(name_in_graph_fn, store_pos, str(self.obj),
                                in_return, idx)

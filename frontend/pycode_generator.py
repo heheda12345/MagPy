@@ -8,8 +8,8 @@ from .variables import Variable
 
 
 def gen_imports(writer: PyCodeWriter, imports: set[str]) -> None:
-    for module_name in imports:
-        writer.wl(f"import {module_name}")
+    for module_import in imports:
+        writer.wl(module_import)
 
 
 class GraphFnCodegen:
@@ -41,7 +41,10 @@ class GraphFnCodegen:
             self.returns.append((name_in_graph_fn, store_pos))
 
     def add_import(self, module_name: str) -> None:
-        self.imports.add(module_name)
+        self.imports.add(f"import {module_name}")
+
+    def add_import_from(self, module_name: str, name: str) -> None:
+        self.imports.add(f"from {module_name} import {name}")
 
     def add_stmt(self, stmt: str) -> None:
         self.postprossess.wl(stmt)
@@ -109,6 +112,7 @@ class GuardFnCodegen:
     vars: dict[str, Variable]  # name -> var
     key: int
     object_refs: list[Any]  # the reference to objects for id check
+    preprocess: PyCodeWriter
 
     def __init__(self, key: int) -> None:
         self.checks = set()
@@ -116,6 +120,7 @@ class GuardFnCodegen:
         self.vars = {}
         self.key = key
         self.object_refs = []
+        self.preprocess = PyCodeWriter()
 
     def add_check(self, check: str) -> None:
         self.checks.add(check)
@@ -125,7 +130,10 @@ class GuardFnCodegen:
         self.object_refs.append(obj)
 
     def add_import(self, module_name: str) -> None:
-        self.imports.add(module_name)
+        self.imports.add(f"import {module_name}")
+
+    def add_import_from(self, module_name: str, name: str) -> None:
+        self.imports.add(f"from {module_name} import {name}")
 
     def get_code(self) -> str:
         writer = PyCodeWriter()
@@ -138,6 +146,7 @@ class GuardFnCodegen:
         writer.block_start()
         writer.wl(
             f"print('running guard_fn (key = {self.key})', locals.keys())")
+        writer.write(self.preprocess.get_code())
         if len(self.checks) == 0:
             writer.wl(f"ok = True")
         else:
@@ -169,3 +178,6 @@ class GuardFnCodegen:
 
     def get_object_refs(self) -> list[Any]:
         return self.object_refs
+
+    def add_stmt(self, stmt: str) -> None:
+        self.preprocess.wl(stmt)
