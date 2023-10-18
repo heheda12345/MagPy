@@ -15,10 +15,8 @@ if TYPE_CHECKING:
 
 class NoneVar(Variable):
 
-    def __init__(self,
-                 need_guard_check: bool,
-                 obj: None,
-                 extract_code_at_start: list[StorePos] = []) -> None:
+    def __init__(self, need_guard_check: bool, obj: None,
+                 extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, obj, extract_code_at_start)
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
@@ -32,14 +30,11 @@ class NoneVar(Variable):
         codegen.output(name_in_graph_fn, store_pos, "None", in_return, idx)
 
     @classmethod
-    def from_value(cls,
-                   value: None,
-                   need_guard_check: bool,
+    def from_value(cls, value: None, need_guard_check: bool,
                    _get_or_make_var: Callable[
                        [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable],
-                   _fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: list[StorePos] = []) -> "NoneVar":
+                       Variable], _fx_graph: Optional[FxGraph],
+                   extract_code_at_start: list[StorePos]) -> "NoneVar":
         return cls(need_guard_check, value, extract_code_at_start)
 
     def as_fx_node(self) -> NodeArgs:
@@ -48,10 +43,8 @@ class NoneVar(Variable):
 
 class NullVar(Variable):
 
-    def __init__(self,
-                 need_guard_check: bool,
-                 obj: NullObject,
-                 extract_code_at_start: list[StorePos] = []) -> None:
+    def __init__(self, need_guard_check: bool, obj: NullObject,
+                 extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, obj, extract_code_at_start)
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
@@ -66,14 +59,11 @@ class NullVar(Variable):
                        in_return, idx)
 
     @classmethod
-    def from_value(cls,
-                   value: NullObject,
-                   need_guard_check: bool,
+    def from_value(cls, value: NullObject, need_guard_check: bool,
                    _get_or_make_var: Callable[
                        [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable],
-                   _fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: list[StorePos] = []) -> "NullVar":
+                       Variable], _fx_graph: Optional[FxGraph],
+                   extract_code_at_start: list[StorePos]) -> "NullVar":
         return cls(need_guard_check, value, extract_code_at_start)
 
     def as_fx_node(self) -> NodeArgs:
@@ -85,13 +75,9 @@ class SliceVar(Variable):
     stop: Optional[int]
     step: Optional[int]
 
-    def __init__(self,
-                 start: Optional[int],
-                 stop: Optional[int],
-                 step: Optional[int],
-                 need_guard_check: bool,
-                 obj: slice,
-                 extract_code_at_start: list[StorePos] = []) -> None:
+    def __init__(self, start: Optional[int], stop: Optional[int],
+                 step: Optional[int], need_guard_check: bool, obj: slice,
+                 extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, obj, extract_code_at_start)
         self.start = start
         self.stop = stop
@@ -110,14 +96,11 @@ class SliceVar(Variable):
                        in_return, idx)
 
     @classmethod
-    def from_value(cls,
-                   value: slice,
-                   need_guard_check: bool,
+    def from_value(cls, value: slice, need_guard_check: bool,
                    _get_or_make_var: Callable[
                        [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable],
-                   _fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: list[StorePos] = []) -> "SliceVar":
+                       Variable], _fx_graph: Optional[FxGraph],
+                   extract_code_at_start: list[StorePos]) -> "SliceVar":
         return cls(value.start, value.stop, value.step, need_guard_check, value,
                    extract_code_at_start)
 
@@ -130,10 +113,8 @@ torch_modules = set([torch])
 
 class ModuleVar(Variable):
 
-    def __init__(self,
-                 module: ModuleType,
-                 need_guard_check: bool,
-                 extract_code_at_start: list[StorePos] = []) -> None:
+    def __init__(self, module: ModuleType, need_guard_check: bool,
+                 extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, module, extract_code_at_start)
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
@@ -149,23 +130,18 @@ class ModuleVar(Variable):
                        idx)
 
     @classmethod
-    def from_value(cls,
-                   value: ModuleType,
-                   need_guard_check: bool,
+    def from_value(cls, value: ModuleType, need_guard_check: bool,
                    _get_or_make_var: Callable[
                        [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable],
-                   _fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: list[StorePos] = []) -> "ModuleVar":
+                       Variable], _fx_graph: Optional[FxGraph],
+                   extract_code_at_start: list[StorePos]) -> "ModuleVar":
         return cls(value, need_guard_check, extract_code_at_start)
 
 
 class FunctionVar(Variable):
 
-    def __init__(self,
-                 func: Callable[..., Any],
-                 need_guard_check: bool,
-                 extract_code_at_start: list[StorePos] = []) -> None:
+    def __init__(self, func: Callable[..., Any], need_guard_check: bool,
+                 extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, func, extract_code_at_start)
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
@@ -180,14 +156,11 @@ class FunctionVar(Variable):
                        idx)
 
     @classmethod
-    def from_value(cls,
-                   value: Callable[..., Any],
-                   need_guard_check: bool,
+    def from_value(cls, value: Callable[..., Any], need_guard_check: bool,
                    _get_or_make_var: Callable[
                        [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable],
-                   _fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: list[StorePos] = []) -> "FunctionVar":
+                       Variable], _fx_graph: Optional[FxGraph],
+                   extract_code_at_start: list[StorePos]) -> "FunctionVar":
         return cls(value, need_guard_check, extract_code_at_start)
 
 
@@ -196,13 +169,9 @@ class RangeVar(Variable):
     stop: Optional[int]
     step: Optional[int]
 
-    def __init__(self,
-                 start: Optional[int],
-                 stop: Optional[int],
-                 step: Optional[int],
-                 need_guard_check: bool,
-                 obj: range,
-                 extract_code_at_start: list[StorePos] = []) -> None:
+    def __init__(self, start: Optional[int], stop: Optional[int],
+                 step: Optional[int], need_guard_check: bool, obj: range,
+                 extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, obj, extract_code_at_start)
         self.start = start
         self.stop = stop
@@ -221,13 +190,10 @@ class RangeVar(Variable):
                        in_return, idx)
 
     @classmethod
-    def from_value(cls,
-                   value: range,
-                   need_guard_check: bool,
+    def from_value(cls, value: range, need_guard_check: bool,
                    _get_or_make_var: Callable[
                        [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable],
-                   _fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: list[StorePos] = []) -> "RangeVar":
+                       Variable], _fx_graph: Optional[FxGraph],
+                   extract_code_at_start: list[StorePos]) -> "RangeVar":
         return cls(value.start, value.stop, value.step, need_guard_check, value,
                    extract_code_at_start)

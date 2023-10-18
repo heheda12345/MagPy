@@ -1,11 +1,13 @@
 from typing import Any, get_args, Optional, Tuple, Generic
 from .variables.base import Variable
+from .variables.any_ import AnyVar
 from .variables import CONST_TYPES, ScalarVar, make_var_from_value
 from .variables.tuple_ import TupleVar
 from .utils import NullObject, ReadOnlyObject
 from .store_pos import StorePos
 from .fx_graph import FxGraph
 import torch
+
 
 class ObjectTable:
     objs: dict[int, Variable]  # id -> object
@@ -19,7 +21,11 @@ class ObjectTable:
     def add(self, var: Variable, value: Any) -> None:
         if id(value) in self.objs:
             old_var = self.objs[id(value)]
-            old_var.extract_code_at_start.extend(var.extract_code_at_start)
+            if isinstance(old_var, AnyVar) and not isinstance(var, AnyVar):
+                self.objs[id(value)] = var
+                var, old_var = old_var, var
+            for pos in var.extract_code_at_start:
+                old_var.add_extract_code_at_start(pos)
             old_var.need_guard_check |= var.need_guard_check
         else:
             self.add_by_id(var, id(value))
@@ -51,7 +57,8 @@ class ObjectTable:
             if isinstance(value, get_args(CONST_TYPES)) or isinstance(
                     value, (list, tuple, set, dict)):
                 return make_var_from_value(value, False, self.get_or_make_var)
-        raise RuntimeError(f"Object {id(value)} not found in object table")
+        raise RuntimeError(
+            f"Object {value}({id(value)}) not found in object table")
 
     def get_or_none(self, value: Any) -> Optional[Variable]:
         if id(value) in self.objs:

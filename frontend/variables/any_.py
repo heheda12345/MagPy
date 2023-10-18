@@ -13,10 +13,8 @@ if TYPE_CHECKING:
 
 class AnyVar(Variable):
 
-    def __init__(self,
-                 need_guard_check: bool,
-                 obj: Any,
-                 extract_code_at_start: list[StorePos] = []) -> None:
+    def __init__(self, need_guard_check: bool, obj: Any,
+                 extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, obj, extract_code_at_start)
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
@@ -33,15 +31,11 @@ class AnyVar(Variable):
             raise NotImplementedError()
 
     @classmethod
-    def from_value(cls,
-                   value: None,
-                   need_guard_check: bool,
+    def from_value(cls, value: None, need_guard_check: bool,
                    _get_or_make_var: Callable[
                        [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable],
-                   _fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: list[StorePos] = []) -> "AnyVar":
-        # print(f'in any, id is {id(value)}')
+                       Variable], _fx_graph: Optional[FxGraph],
+                   extract_code_at_start: list[StorePos]) -> "AnyVar":
         return cls(need_guard_check, value, extract_code_at_start)
 
     def as_fx_node(self) -> NodeArgs:
