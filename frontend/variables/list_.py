@@ -13,13 +13,11 @@ class ListVar(Variable):
     obj_ids: list[int]
     length: int
 
-    def __init__(self,
-                 value: list[Any],
-                 need_guard_check: bool,
+    def __init__(self, value: list[Any], need_guard_check: bool,
                  get_or_make_var: Callable[
-                     [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
-                 fx_graph: Optional[FxGraph] = None,
-                 extract_code_at_start: list[StorePos] = []) -> None:
+                     [Any, bool, Optional[FxGraph], list[StorePos]],
+                     Variable], fx_graph: Optional[FxGraph],
+                 extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, value, extract_code_at_start)
         self.value = value
         self.length = len(value)
@@ -64,14 +62,11 @@ class ListVar(Variable):
                 if len(self.vars) > 0 else "[]", in_return, idx)
 
     @classmethod
-    def from_value(cls,
-                   value: list[Any],
-                   need_guard_check: bool,
+    def from_value(cls, value: list[Any], need_guard_check: bool,
                    get_or_make_var: Callable[
                        [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable],
-                   fx_graph: Optional[FxGraph] = None,
-                   extract_code_at_start: list[StorePos] = []) -> "ListVar":
+                       Variable], fx_graph: Optional[FxGraph],
+                   extract_code_at_start: list[StorePos]) -> "ListVar":
         return cls(value, need_guard_check, get_or_make_var, fx_graph,
                    extract_code_at_start)
 

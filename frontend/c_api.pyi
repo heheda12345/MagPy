@@ -73,3 +73,11 @@ def get_code_map(frame: FrameType) -> 'ProcessedCode':
 
 def is_bound_method(obj: Any, name: str) -> bool:
     pass
+
+
+def parse_rangeiterobject(obj: Any) -> Tuple[int, int, int, int]:
+    pass
+
+
+def make_rangeiterobject(start: int, stop: int, step: int) -> Any:
+    pass
