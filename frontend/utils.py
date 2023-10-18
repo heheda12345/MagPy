@@ -96,6 +96,14 @@ fx_graph_functions = fx_graph_functions.union(fx_graph_inplace_functions)
 
 
 def get_root_module(func: Callable[..., Any]) -> str:
+    # print([(x, getattr(func, x)) for x in dir(func)])
+    if hasattr(func,
+               '__objclass__') and func.__objclass__ == torch._C._TensorBase:
+        return 'torch'
+
+    if hasattr(func, '__self__') and isinstance(func.__self__, torch.Tensor):
+        return 'torch'
+    
     module = inspect.getmodule(func)
     if module is None:
         return ""
@@ -116,9 +124,8 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
         return False
 
     root_module = get_root_module(func)
+    # print(f"root module:{root_module}")
     if root_module == '':
-        # if type(func) == type(len):
-        #     return False
         return True
     if root_module in ('math', 'builtins', 'torch', 'numpy', '_operator'):
         return False

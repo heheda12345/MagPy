@@ -51,7 +51,6 @@ class ObjectTable:
             if isinstance(value, get_args(CONST_TYPES)) or isinstance(
                     value, (list, tuple, set, dict)):
                 return make_var_from_value(value, False, self.get_or_make_var)
-        # print(f'the super value come here, the type is {type(value)}, id is {id(value)}')
         raise RuntimeError(f"Object {id(value)} not found in object table")
 
     def get_or_none(self, value: Any) -> Optional[Variable]:
