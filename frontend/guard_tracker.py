@@ -165,13 +165,10 @@ class State:
                 for k, v in self.submodule_paths.items():
                     print(id(k), v, k)
                 raise NotImplementedError(func)
-        elif hasattr(func, '__self__') and isinstance(func.__self__, torch.Tensor):
-            fx_node = self.fx_graph.create_node(
-                "call_method",
-                func.__name__,
-                pargs,
-                pkwargs
-                )
+        elif hasattr(func, '__self__') and isinstance(func.__self__,
+                                                      torch.Tensor):
+            fx_node = self.fx_graph.create_node("call_method", func.__name__,
+                                                pargs, pkwargs)
             if add_partial_var:
                 self.partial_var = {
                     -1: [
@@ -295,7 +292,7 @@ class State:
                                     var)
                                 new_var.need_guard_check = False
                             else:
-                                new_var.add_extract_code_at_start(self_pos)
+                                new_var.extract_code_at_start.append(self_pos)
                         else:
                             raise NotImplementedError(pos, type(pos))
 
@@ -886,12 +883,12 @@ class GuardTracker:
 
         self.state.is_empty = True
 
-    def fetch_function_parameters(self, obj, index: int) -> None:
+    def fetch_function_parameters(self, obj: Any) -> None:
         # print(f'try fetch obj id:{id(obj)}')
         if not self.state.objects.contains(obj):
             var = vs.make_var_from_value(obj, False,
-                                            self.state.objects.get_or_make_var,
-                                            self.state.fx_graph, [StoreInStack(index)])
+                                         self.state.objects.get_or_make_var,
+                                         self.state.fx_graph, [])
             self.state.objects.add_by_id(var, id(obj))
 
     def process_last_inst(self) -> None:
@@ -927,9 +924,8 @@ class GuardTracker:
             node = partial.node
             if isinstance(value, torch.Tensor):
                 if isinstance(value, torch.nn.Parameter):
-                    node = self.state.fx_graph.create_node("get_attr",
-                                                    self.state.subparam_paths[value],
-                                                    (), {})
+                    node = self.state.fx_graph.create_node(
+                        "get_attr", self.state.subparam_paths[value], (), {})
                 assert node is not None
                 var: vs.Variable = vs.TensorVar.from_tensor_and_node(
                     value, node, partial.need_guard_check,
@@ -1127,9 +1123,6 @@ class GuardTracker:
         elif self.has_set_arg(args,
                               kwargs) and get_root_module(func) != 'torch':
             return
-        elif self.has_set_arg(args,
-                              kwargs) and get_root_module(func) != 'torch':
-            return
         elif len(args) > 0 and isinstance(args[0], torch.nn.ModuleList):
             return
         raise NotImplementedError(func, args, kwargs)
@@ -1277,7 +1270,7 @@ class GuardTracker:
 
     def LOAD_METHOD(self, inst: Instruction) -> None:
         self_obj = get_value_stack_from_top(self.frame, 0)
-        self.fetch_function_parameters(self_obj, 0)
+        self.fetch_function_parameters(self_obj)
         self_var = self.state.objects.get(self_obj)
         is_bound = is_bound_method(self_obj, inst.argval)
         extract_code_at_start: list[StorePos] = [
@@ -1307,8 +1300,10 @@ class GuardTracker:
             StoreInAttr(pos, id(obj), inst.argval)
             for pos in obj_var.extract_code_at_start
         ]
-        partial = [
-            PartialVar(node=None, need_guard_check=obj_var.need_guard_check, extract_code_at_start=new_extract)
+        partial: list[Optional[PartialVar]] = [
+            PartialVar(node=None,
+                       need_guard_check=obj_var.need_guard_check,
+                       extract_code_at_start=new_extract)
         ]
 
         self.state.set_partial_var({-1: partial})
@@ -1321,7 +1316,7 @@ class GuardTracker:
         ]
         kwargs: dict[str, Any] = {}
         for i, obj in enumerate(itertools.chain(args, kwargs.values())):
-            self.fetch_function_parameters(obj, i)
+            self.fetch_function_parameters(obj)
         func = get_value_stack_from_top(self.frame, num_args)
         # print(f"function: {func}, type: {type(func)},args:{args}, kwargs:{kwargs}")
         self.call_function(func, args, kwargs)
@@ -1334,7 +1329,7 @@ class GuardTracker:
         ]
         kwargs: dict[str, Any] = {}
         for i, obj in enumerate(itertools.chain(args, kwargs.values())):
-            self.fetch_function_parameters(obj, i)
+            self.fetch_function_parameters(obj)
         self_val = get_value_stack_from_top(self.frame, num_args)
         meth_val = get_value_stack_from_top(self.frame, num_args + 1)
         if isinstance(meth_val, NullObject):

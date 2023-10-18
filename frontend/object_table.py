@@ -8,6 +8,7 @@ from .store_pos import StorePos
 from .fx_graph import FxGraph
 import torch
 
+
 class ObjectTable:
     objs: dict[int, Variable]  # id -> object
     # Python caches small integers, so int variables don't have unique ids

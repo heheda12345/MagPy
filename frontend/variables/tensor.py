@@ -172,7 +172,6 @@ class TorchDtypeVar(Variable):
                        [Any, bool, Optional[FxGraph], list[StorePos]],
                        Variable], _fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "TorchDtypeVar":
-        print(f'try to find who is defined this dtype, and id is {id(value)}')
         return cls(value, need_guard_check, extract_code_at_start)
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",

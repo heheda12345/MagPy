@@ -122,12 +122,9 @@ def get_root_module(func: Callable[..., Any]) -> str:
 
     if hasattr(func, '__self__') and isinstance(func.__self__, torch.Tensor):
         return 'torch'
-    
+
     module = inspect.getmodule(func)
     if module is None:
-        return ""
-    module_pack = module.__package__
-    if module_pack is None:
         return ""
     root_module = str(module).split('\'')[1].split('.')[0]
     return root_module
