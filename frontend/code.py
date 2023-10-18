@@ -145,6 +145,9 @@ class ProcessedCode:
     def get_pc_by_inst(self, inst: Instruction) -> int:
         return self.guarded_pc[inst]
 
+    def is_match(self, original_pc: int, guard_pc: int) -> bool:
+        return self.pc_guarded_to_origin[guard_pc] == original_pc
+
     def get_dependence_of_stack_var(self, original_inst: Instruction,
                                     stack_depth: int) -> list[Instruction]:
         raise NotImplementedError

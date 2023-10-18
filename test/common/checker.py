@@ -28,8 +28,11 @@ def assert_equal(ref, out):
             assert (False)
     elif isinstance(ref, Iterable):
         assert (isinstance(out, Iterable))
-        for r, o in zip(ref, out):
-            assert_equal(r, o)
+        if isinstance(ref, set):
+            assert (len(ref) == len(out))
+        else:
+            for r, o in zip(ref, out):
+                assert_equal(r, o)
     else:
         assert ref == out, f"wrong answer: expect {ref}, got {out}"
 

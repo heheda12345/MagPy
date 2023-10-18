@@ -14,21 +14,20 @@ ScalarType = Union[int, float, bool, str]
 
 class TorchModuleVar(Variable):
 
-    def __init__(self,
-                 value: torch.nn.Module,
-                 need_guard_check: bool,
-                 extract_code_at_start: list[StorePos] = []) -> None:
+    def __init__(self, value: torch.nn.Module, need_guard_check: bool,
+                 extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, value, extract_code_at_start)
 
     @classmethod
     def from_value(
-            cls,
-            value: torch.nn.Module,
-            need_guard_check: bool,
-            get_or_make_var: Callable[
-                [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
-            _fx_graph: Optional[FxGraph] = None,
-            extract_code_at_start: list[StorePos] = []) -> "TorchModuleVar":
+        cls,
+        value: torch.nn.Module,
+        need_guard_check: bool,
+        get_or_make_var: Callable[
+            [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
+        _fx_graph: Optional[FxGraph],
+        extract_code_at_start: list[StorePos],
+    ) -> "TorchModuleVar":
         if isinstance(value, torch.nn.Sequential):
             return TorchSequentialVar(value, need_guard_check, get_or_make_var,
                                       extract_code_at_start)
@@ -56,12 +55,10 @@ class TorchSequentialVar(TorchModuleVar):
     submodules: list[TorchModuleVar]
     submodule_ids: list[int]
 
-    def __init__(self,
-                 value: torch.nn.Sequential,
-                 need_guard_check: bool,
+    def __init__(self, value: torch.nn.Sequential, need_guard_check: bool,
                  get_or_make_var: Callable[
                      [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
-                 extract_code_at_start: list[StorePos] = []) -> None:
+                 extract_code_at_start: list[StorePos]) -> None:
         super().__init__(value, need_guard_check, extract_code_at_start)
         self.submodules = []
         self.submodule_ids = []
@@ -95,12 +92,10 @@ class TorchModuleListVar(TorchModuleVar):
     submodules: list[TorchModuleVar]
     submodule_ids: list[int]
 
-    def __init__(self,
-                 value: torch.nn.ModuleList,
-                 need_guard_check: bool,
+    def __init__(self, value: torch.nn.ModuleList, need_guard_check: bool,
                  get_or_make_var: Callable[
                      [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
-                 extract_code_at_start: list[StorePos] = []) -> None:
+                 extract_code_at_start: list[StorePos]) -> None:
         super().__init__(value, need_guard_check, extract_code_at_start)
         self.submodules = []
         self.submodule_ids = []
