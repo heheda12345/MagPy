@@ -46,3 +46,9 @@ def contains_pc(frame_id: int, pc: int) -> bool:
 
 def pop_dynamic_pc(frame_id: int, pc: int) -> Dynamic:
     return dynamic_pcs.pop((frame_id, pc))
+
+
+def reset() -> None:
+    dynamic_vars.clear()
+    dynamic_refs.clear()
+    dynamic_pcs.clear()

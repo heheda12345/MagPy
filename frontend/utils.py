@@ -95,6 +95,24 @@ fx_graph_functions: set[Callable[..., Any]] = {
 }
 fx_graph_functions = fx_graph_functions.union(fx_graph_inplace_functions)
 
+torch_inplace_funcs = {
+    "abs_", "acos_", "acosh_", "add_", "addcmul_", "addcdiv_", "asin_",
+    "asinh_", "atan_", "atanh_", "atan2_", "bitwise_and_",
+    "bitwise_left_shift_", "bitwise_not_", "bitwise_or_",
+    "bitwise_right_shift_", "bitwise_xor_", "ceil_", "clamp_", "clamp_min_",
+    "clamp_max_", "conj_physical_", "copy_", "copysign_", "cos_", "cosh_",
+    "cumsum_", "digamma_", "div_", "eq_", "erf_", "erfc_", "erfinv_", "exp_",
+    "exp2_", "expm1_", "float_power_", "floor_", "floor_divide_", "fmod_",
+    "frac_", "gcd_", "ge_", "gt_", "heaviside_", "hypot_", "igamma_",
+    "igammac_", "i0_", "lcm_", "le_", "lerp_", "lgamma_", "log10_", "log1p_",
+    "log2_", "log_", "logical_and_", "logical_not_", "logical_or_",
+    "logical_xor_", "lt_", "mul_", "mvlgamma_", "nan_to_num_", "ne_", "neg_",
+    "nextafter_", "pow_", "reciprocal_", "remainder_", "rsqrt_", "sgn_",
+    "sigmoid_", "sign_", "sin_", "sinc_", "sinh_", "sqrt_", "square_", "sub_",
+    "tan_", "tanh_", "tril_", "triu_", "true_divide_", "trunc_", "xlogy_",
+    "cauchy_", "exponential_", "geometric_", "log_normal_", "zero_"
+}
+
 
 def get_root_module(func: Callable[..., Any]) -> str:
     module = inspect.getmodule(func)

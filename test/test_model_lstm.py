@@ -168,6 +168,25 @@ def test_lstm_cell(caplog):
                       c, h)
 
 
+def test_lstm_loop(caplog):
+    reset()
+    with torch.no_grad():
+        seq_len = 4
+        num_layers = 10
+        hidden_size = 16
+        batch_size = 16
+        model = LSTM(batch_size, hidden_size, hidden_size, num_layers).cuda()
+        model.eval()
+        inputs = torch.randn(seq_len, batch_size, hidden_size, device='cuda')
+        expect_result = model(inputs)
+        for_iter_pc = 193
+        mark_dynamic_pc(get_next_frame_id(), for_iter_pc,
+                        DynamicControlFlow(for_iter_pc, "FOR_ITER"))
+        compiled = compile(model)
+        run_and_check(compiled, [MISS], 1, caplog, expect_result, inputs)
+        run_and_check(compiled, [HIT], 1, caplog, expect_result, inputs)
+
+
 def test_lstm_unroll(caplog):
     reset()
     with torch.no_grad():

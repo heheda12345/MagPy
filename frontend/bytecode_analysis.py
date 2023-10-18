@@ -198,6 +198,8 @@ def end_of_control_flow(instructions: List[Instruction], start_pc: int) -> int:
     """
     Find the end of the control flow block starting at the given instruction.
     """
+    while instructions[start_pc].opname == 'EXTENDED_ARG':
+        start_pc += 1
     assert instructions[start_pc].opcode in JUMP_OPCODES
     assert instructions[start_pc].target is not None
     indexof = get_indexof(instructions)

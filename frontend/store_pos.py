@@ -1,8 +1,12 @@
 from typing import Any
+from types import FrameType
+from .c_api import get_value_stack_from_top
 
 
 class StorePos:
-    pass
+
+    def get_value_from_frame(self, frame: FrameType) -> Any:
+        raise NotImplementedError
 
 
 class StoreInStack(StorePos):
@@ -14,6 +18,9 @@ class StoreInStack(StorePos):
     def __repr__(self) -> str:
         return f"__stack__{self.idx}"
 
+    def get_value_from_frame(self, frame: FrameType) -> Any:
+        return get_value_stack_from_top(frame, self.idx)
+
 
 class StoreInLocal(StorePos):
     name: str
@@ -24,6 +31,9 @@ class StoreInLocal(StorePos):
     def __repr__(self) -> str:
         return f"locals['{self.name}']"
 
+    def get_value_from_frame(self, frame: FrameType) -> Any:
+        return frame.f_locals[self.name]
+
 
 class StoreInGlobal(StorePos):
     name: str
@@ -33,6 +43,9 @@ class StoreInGlobal(StorePos):
 
     def __repr__(self) -> str:
         return f"globals()['{self.name}']"
+
+    def get_value_from_frame(self, frame: FrameType) -> Any:
+        return frame.f_globals[self.name]
 
 
 class StoreInBuiltin(StorePos):
@@ -50,6 +63,12 @@ class StoreInBuiltin(StorePos):
         else:
             return f"globals()['__builtins__'].{self.name}"
 
+    def get_value_from_frame(self, frame: FrameType) -> Any:
+        if self.ty == 'dict':
+            return frame.f_globals['__builtins__'][self.name]
+        else:
+            return getattr(frame.f_globals['__builtins__'], self.name)
+
 
 class StoreInAttr(StorePos):
     self_pos: StorePos
@@ -64,6 +83,10 @@ class StoreInAttr(StorePos):
 
     def __repr__(self) -> str:
         return f"{self.self_pos}.{self.attr_name}"
+
+    def get_value_from_frame(self, frame: FrameType) -> Any:
+        return getattr(self.self_pos.get_value_from_frame(frame),
+                       self.attr_name)
 
 
 class StoreInIndex(StorePos):
@@ -88,6 +111,13 @@ class StoreInIndex(StorePos):
         else:
             return f'list({self.self_pos})[{self.self_index}]'
 
+    def get_value_from_frame(self, frame: FrameType) -> Any:
+        if self.subscriptable:
+            return self.self_pos.get_value_from_frame(frame)[self.self_index]
+        else:
+            return list(
+                self.self_pos.get_value_from_frame(frame))[self.self_index]
+
 
 class ExtractFromMethod(StorePos):
     self_pos: StorePos
@@ -103,6 +133,10 @@ class ExtractFromMethod(StorePos):
     def __repr__(self) -> str:
         return f"{self.self_pos}.{self.method_name}()"
 
+    def get_value_from_frame(self, frame: FrameType) -> Any:
+        return getattr(self.self_pos.get_value_from_frame(frame),
+                       self.method_name)()
+
 
 class ExtractFromFunction(StorePos):
     var_pos: StorePos
@@ -116,6 +150,10 @@ class ExtractFromFunction(StorePos):
 
     def __repr__(self) -> str:
         return f"{self.func_name}({self.var_pos})"
+
+    def get_value_from_frame(self, frame: FrameType) -> Any:
+        return getattr(self.var_pos.get_value_from_frame(frame),
+                       self.func_name)()
 
 
 class IterValue(StorePos):

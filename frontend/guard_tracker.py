@@ -18,7 +18,7 @@ from .cache import CachedGraph, get_frame_cache
 from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue
 from . import variables as vs
 from . import dynamic as dyn
-from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module
+from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs
 from .object_table import ObjectTable
 from .pycode_writer import new_name
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -266,7 +266,7 @@ class State:
                         elif isinstance(pos, StoreInStack):
                             raise ValueError(
                                 "full graph should not contain guard in stack")
-                        elif isinstance(pos, StoreInGlobal):
+                        elif isinstance(pos, (StoreInGlobal, StoreInBuiltin)):
                             new_var.extract_code_at_start.append(pos)
                         elif isinstance(
                                 pos, (StoreInAttr, StoreInIndex,
@@ -274,13 +274,13 @@ class State:
                             self_pos = self.store_pos_in_callee(pos, idx)
                             if self_pos is None:
                                 print(
-                                    "\033[34m[warning] cannot find store pos in calleem, skip guard check\033[0m",
+                                    "\033[34m[warning] cannot find store pos in callee, skip guard check\033[0m",
                                     var)
                                 new_var.need_guard_check = False
                             else:
                                 new_var.extract_code_at_start.append(self_pos)
                         else:
-                            raise NotImplementedError(pos)
+                            raise NotImplementedError(pos, type(pos))
 
         def merge_fx_graph() -> None:
             self.update_subpath(self.root, "")
@@ -597,6 +597,7 @@ class GuardTracker:
             pos2output: dict[str, tuple[StorePos, torch.fx.Node]] = {}
 
             live_objs = self.get_live_objs(self.state.guarded_pcs[-2])
+
             for live_name, obj in live_objs:
                 if not isinstance(obj, torch.Tensor) and not is_scalar(obj):
                     raise NotImplementedError
@@ -610,7 +611,15 @@ class GuardTracker:
                     pos2output[str(pos)] = (pos, fx_node)
                 else:
                     raise NotImplementedError
-
+            for var in self.state.objects.get_all():
+                if var.prev is not None:
+                    if isinstance(var, vs.RangeIterVar):
+                        continue
+                    oldest = var.get_oldest_var()
+                    for pos in oldest.extract_code_at_start:
+                        fx_node = var.as_fx_node()
+                        assert isinstance(fx_node, torch.fx.Node)
+                        pos2output[str(pos)] = (pos, fx_node)
             input_only_pos: list[tuple[str, StorePos]] = []
             joint_pos: list[tuple[str, StorePos]] = []
             output_only_pos: list[tuple[str, StorePos]] = []
@@ -696,12 +705,7 @@ class GuardTracker:
                 for pos in var.extract_code_at_start:
                     if isinstance(pos, IterValue):
                         continue
-                    if isinstance(pos, StoreInLocal):
-                        input_nodes[str(pos)] = node
-                    elif isinstance(pos, StoreInGlobal):
-                        input_nodes[str(pos)] = node
-                    else:
-                        raise NotImplementedError(pos)
+                    input_nodes[str(pos)] = node
             elif node.op == "output":
                 fx_graph.result_graph.inserting_before(node)
         input_args = [
@@ -714,13 +718,7 @@ class GuardTracker:
         output_vars = []
         for _, pos in itertools.chain(pos_map.joint_pos,
                                       pos_map.output_only_pos):
-            obj = None
-            if isinstance(pos, StoreInLocal):
-                obj = self.frame.f_locals[pos.name]
-            elif isinstance(pos, StoreInGlobal):
-                obj = self.frame.f_globals[pos.name]
-            else:
-                raise NotImplementedError()
+            obj = pos.get_value_from_frame(self.frame)
             var = self.state.objects.get(obj)
             assert isinstance(var, (vs.TensorVar, vs.ScalarVar))
             output_args.append(var.as_fx_node())
@@ -1026,7 +1024,8 @@ class GuardTracker:
             assert prior is None
             assert self.state.written == False
             return
-        if func in fx_graph_inplace_functions:
+        if func in fx_graph_inplace_functions or (hasattr(
+                func, '__name__') and func.__name__ in torch_inplace_funcs):
             if len(args) == 0:
                 raise NotImplementedError
             if not self.state.objects.contains(args[0]):
@@ -1435,6 +1434,10 @@ class GuardTracker:
 
     def FOR_ITER(self, _original_inst: Instruction) -> None:
         original_pc, original_inst = self.code.get_orig_inst(self.frame.f_lasti)
+        guard_pc = self.frame.f_lasti // 2
+        while self.code.guard_insts[guard_pc].opname == "EXTENDED_ARG":
+            guard_pc += 1
+        guard_inst = self.code.guard_insts[guard_pc]
         iterator = get_value_stack_from_top(self.frame, 0)
         is_dynamic = dyn.contains_pc(self.frame_id,
                                      original_pc)  # TODO: remove hardcode
@@ -1474,8 +1477,7 @@ class GuardTracker:
         else:
             obj = get_value_stack_from_top(self.frame, 0)
             obj_var = self.state.objects.get(obj)
-            normal_pc = self.frame.f_lasti // 2 + 1
-            guard_inst = self.code.get_inst(self.frame.f_lasti)
+            normal_pc = guard_pc + 1
             guard_target = guard_inst.target
             assert guard_target is not None
             end_loop_pc = self.code.get_pc_by_inst(guard_target)
@@ -1508,8 +1510,9 @@ class GuardTracker:
                 dyn.mark_dynamic(value, dyn.ScalarWithUnknownValue())
                 if extract_code_at_start is None:
                     extract_code_at_start = []
-                return get_or_make_var(value, need_guard_check, fx_graph,
-                                       extract_code_at_start)
+                var = get_or_make_var(value, need_guard_check, fx_graph,
+                                      extract_code_at_start)
+                return var
 
             make_iter_fn = make_iterable_fn if not isinstance(
                 obj, type(range(0).__iter__())) else None
