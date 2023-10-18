@@ -20,6 +20,7 @@ ty2var: dict[type[Any], type[Variable]] = {
     float: ScalarVar,
     int: ScalarVar,
     str: ScalarVar,
+    bool: ScalarVar,
     torch.Tensor: TensorVar,
     NullObject: NullVar,
     type(None): NoneVar,

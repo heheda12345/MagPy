@@ -872,8 +872,8 @@ class GuardTracker:
         if self.state.num_new_refs == -1:
             self.state.num_new_refs = get_value_stack_size(self.frame)
         for i in range(self.state.num_new_refs):
-            self.state.object_refs.append(
-                get_value_stack_from_top(self.frame, i))
+            obj = get_value_stack_from_top(self.frame, i)
+            self.state.object_refs.append(obj)
         self.state.num_new_refs = 0
         for i, obj in enumerate(self.state.inplace_update_objs):
             assert not isinstance(obj, torch.Tensor)
