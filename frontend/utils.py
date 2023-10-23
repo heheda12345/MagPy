@@ -92,6 +92,7 @@ fx_graph_functions: set[Callable[..., Any]] = {
     operator.and_,
     operator.or_,
     operator.xor,
+    operator.eq,
 }
 fx_graph_functions = fx_graph_functions.union(fx_graph_inplace_functions)
 
@@ -133,10 +134,11 @@ def get_root_module(func: Callable[..., Any]) -> str:
 def is_user_defined_func(func: Callable[..., Any]) -> bool:
     # print([(x,getattr(func, x)) for x in dir(func)])
     if hasattr(func,
-               '__objclass__') and func.__objclass__ == torch._C._TensorBase:
+               '__objclass__') and func.__objclass__ in (torch._C._TensorBase, dict):
         return False
 
-    if hasattr(func, '__self__') and isinstance(func.__self__, torch.Tensor):
+    # random should call, not be a builtin
+    if hasattr(func, '__self__') and isinstance(func.__self__, (torch.Tensor, random.Random)):
         return False
 
     root_module = get_root_module(func)

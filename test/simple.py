@@ -1282,7 +1282,7 @@ device = "cpu"
 
 def get_model():
     config = AutoConfig.from_pretrained(model_name)
-    config.return_dict = True
+    config.return_dict = False
     # model = AutoModel.from_config(config).to(device)
     model = BartModel(config).to(device)
     # print(model)
@@ -1303,10 +1303,11 @@ def get_input(batch_size):
 
 
 if __name__ == "__main__":
-    model = get_model()
-    input_args, input_kwargs = get_input(batch_size=1)
-    # print([x.shape for x in input_args])
-    outputs = model(*input_args, **input_kwargs)
-    # print(outputs)
-    compiled = compile(model)
-    print(compiled(*input_args, **input_kwargs))
+    with torch.no_grad():
+        model = get_model()
+        input_args, input_kwargs = get_input(batch_size=1)
+        # print([x.shape for x in input_args])
+        outputs = model(*input_args, **input_kwargs)
+        # print(outputs)
+        compiled = compile(model)
+        print(compiled(*input_args, **input_kwargs))

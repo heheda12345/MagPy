@@ -901,7 +901,8 @@ class GuardTracker:
             if isinstance(obj, super):
                 var = vs.make_var_from_value(obj, False,
                                              self.state.objects.get_or_make_var,
-                                             self.state.fx_graph, [StoreInStack(i)])
+                                             self.state.fx_graph,
+                                             [StoreInStack(i)])
                 self.state.objects.add_by_id(var, id(obj))
         self.state.num_new_refs = 0
         for i, obj in enumerate(self.state.inplace_update_objs):
@@ -954,7 +955,7 @@ class GuardTracker:
         self.state.inplace_update_objs.clear()
         self.state.partial_var.clear()
         self.state.written = False
-        # print('process last instruction done')
+        print('process last instruction done')
         if self.state.defer_restart is not None:
             self.restart("defered restart " + self.state.defer_restart.reason)
 
@@ -1022,9 +1023,9 @@ class GuardTracker:
         args: List[Any],
         kwargs: Dict[str, Any],
     ) -> None:
-        if self.has_unknown_arg(args, kwargs):
-            # print(f"func is {func}, {is_user_defined_func(func)},args: {args}, kwargs:{kwargs}")
-            raise NotImplementedError
+        # if self.has_unknown_arg(args, kwargs):
+        #     print(f"func is {func}, {is_user_defined_func(func)},args: {args}, kwargs:{kwargs}")
+        #     raise NotImplementedError
         if isinstance(
                 func,
                 torch.nn.Module) and func not in self.state.submodule_paths:
@@ -1100,7 +1101,7 @@ class GuardTracker:
                                        inplace_ref=inplace_ref)
             return
         elif self.all_scalar_arg(args, kwargs) and self.all_static_arg(
-                args, kwargs) and get_root_module(func) != 'torch':
+                args, kwargs):
             if func == range:
                 self.state.set_partial_var({
                     -1: [
@@ -1110,21 +1111,23 @@ class GuardTracker:
                     ]
                 })
             return
-        elif self.has_tuple_arg(args,
-                                kwargs) and get_root_module(func) != 'torch':
+        elif self.has_tuple_arg(args, kwargs):
             return
-        elif self.has_list_arg(args,
-                               kwargs) and get_root_module(func) != 'torch':
+        elif self.has_list_arg(args, kwargs):
             set_if_inplace_return()
             return
-        elif self.has_dict_arg(args,
-                               kwargs) and get_root_module(func) != 'torch':
+        elif self.has_dict_arg(args, kwargs):
+            print("come here")
             return
-        elif self.has_set_arg(args,
-                              kwargs) and get_root_module(func) != 'torch':
+        elif self.has_set_arg(args, kwargs):
+            return
+        elif is_graph_func(func):
             return
         elif len(args) > 0 and isinstance(args[0], torch.nn.ModuleList):
             return
+        if self.has_unknown_arg(args, kwargs):
+            print(f"func is {func}, {is_user_defined_func(func)},args: {args}, kwargs:{kwargs}")
+            raise NotImplementedError
         raise NotImplementedError(func, args, kwargs)
 
     def binary_operation(self, func: Callable[..., Any]) -> None:
@@ -1308,6 +1311,9 @@ class GuardTracker:
 
         self.state.set_partial_var({-1: partial})
 
+    def STORE_ATTR(self, inst: Instruction) -> None:
+        pass
+
     def CALL_FUNCTION(self, inst: Instruction) -> None:
         num_args = inst.argval
         args = [
@@ -1423,6 +1429,9 @@ class GuardTracker:
     def POP_TOP(self, _inst: Instruction) -> None:
         pass
 
+    def POP_BLOCK(self, _inst: Instruction) -> None:
+        pass
+
     def ROT_TWO(self, _inst: Instruction) -> None:
         pass
 
@@ -1461,6 +1470,7 @@ class GuardTracker:
 
     def GET_ITER(self, _inst: Instruction) -> None:
         obj = get_value_stack_from_top(self.frame, 0)
+        self.fetch_function_parameters(obj)
         obj_var = self.state.objects.get(obj)
         extract_code_at_start: list[StorePos] = [
             ExtractFromMethod(pos, id(obj), '__iter__')
@@ -1537,6 +1547,7 @@ class GuardTracker:
         else:
             obj = get_value_stack_from_top(self.frame, 0)
             obj_var = self.state.objects.get(obj)
+            # print("obj_var", type(obj_var))
             normal_pc = guard_pc + 1
             guard_target = guard_inst.target
             assert guard_target is not None
@@ -1549,6 +1560,7 @@ class GuardTracker:
                         Variable], fx_graph: Optional[FxGraph],
                     extract_code_at_start: Optional[list[StorePos]]
             ) -> vs.Variable:
+                # print("obj var: ", obj_var)
                 assert isinstance(obj_var, vs.IteratorVar)
                 if extract_code_at_start is None:
                     extract_code_at_start = []
