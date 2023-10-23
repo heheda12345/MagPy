@@ -116,9 +116,11 @@ torch_inplace_funcs = {
 
 def get_root_module(func: Callable[..., Any]) -> str:
     # print([(x, getattr(func, x)) for x in dir(func)])
-    if hasattr(func,
-               '__objclass__') and func.__objclass__ == torch._C._TensorBase:
-        return 'torch'
+    if hasattr(func, '__objclass__'):
+        if func.__objclass__ == torch._C._TensorBase:
+            return 'torch'
+        elif func.__objclass__ in (list, tuple, set, dict):
+            return 'builtins'
 
     if hasattr(func, '__self__') and isinstance(func.__self__, torch.Tensor):
         return 'torch'
@@ -131,7 +133,7 @@ def get_root_module(func: Callable[..., Any]) -> str:
 
 
 def is_user_defined_func(func: Callable[..., Any]) -> bool:
-    # print([(x,getattr(func, x)) for x in dir(func)])
+    # print([(x, getattr(func, x)) for x in dir(func)])
     if hasattr(func,
                '__objclass__') and func.__objclass__ == torch._C._TensorBase:
         return False

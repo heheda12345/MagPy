@@ -2,7 +2,7 @@ from frontend.compile import compile
 from frontend.utils import add_force_graph_break
 from frontend.c_api import get_next_frame_id
 from frontend.compile import reset
-from common.checker import assert_equal, run_and_check_cache, run_and_check, HIT, MISS
+from common.checker import assert_equal, run_and_check_cache, run_and_check, HIT, MISS, ALL_MISS
 import re
 import torch
 import torch.nn as nn
@@ -29,7 +29,6 @@ model_urls = {
 def _bn_function_factory(norm, relu, conv):
 
     def bn_function(*inputs):
-        print("bn function", [x.shape for x in inputs], norm, relu, conv)
         concated_features = torch.cat(inputs, 1)
         bottleneck_output = conv(relu(norm(concated_features)))
         return bottleneck_output
@@ -275,3 +274,14 @@ def test_bn_function_factory_break(caplog):
     out_fn = compiled(norm, relu, conv)
     out = out_fn(*inputs)
     assert_equal(out, expect)
+
+
+def test_model_densenet(caplog):
+    reset()
+    model = get_model()
+    inputs = get_input(1)
+    expect = model(*inputs[0], **inputs[1])
+    compiled = compile(model)
+    run_and_check(compiled, [ALL_MISS], 1, caplog, expect, *inputs[0],
+                  **inputs[1])
+    run_and_check(compiled, [HIT], 1, caplog, expect, *inputs[0], **inputs[1])

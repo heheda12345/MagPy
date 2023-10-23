@@ -6,6 +6,7 @@ from frontend import cache
 
 HIT = 1
 MISS = 2
+ALL_MISS = 3
 
 
 def assert_equal(ref, out):
@@ -47,6 +48,8 @@ def check_cache_log(caplog, expect_cache_logs, expect_cache_size: int):
                 recorded_cache_logs.append(MISS)
             else:
                 assert (False), "unknown cache log"
+    if len(expect_cache_logs) == 1 and expect_cache_logs[0] == ALL_MISS:
+        expect_cache_logs = [MISS for _ in range(len(recorded_cache_logs))]
     assert len(recorded_cache_logs) == len(
         expect_cache_logs
     ), f"wrong cache log: expect {expect_cache_logs}, got {recorded_cache_logs}"
