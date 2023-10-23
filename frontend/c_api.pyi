@@ -81,3 +81,7 @@ def parse_rangeiterobject(obj: Any) -> Tuple[int, int, int, int]:
 
 def make_rangeiterobject(start: int, stop: int, step: int) -> Any:
     pass
+
+
+def get_from_freevars(frame: FrameType, idx: int) -> Any:
+    pass

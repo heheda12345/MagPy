@@ -48,6 +48,20 @@ class StoreInGlobal(StorePos):
         return frame.f_globals[self.name]
 
 
+class StoreInFreeVar(StorePos):
+    free_idx: int
+
+    def __init__(self, free_idx: int) -> None:
+        super().__init__()
+        self.free_idx = free_idx
+
+    def __repr__(self) -> str:
+        return f"get_from_freevars(frame, {self.free_idx})"
+
+    def get_value_from_frame(self, frame: FrameType) -> Any:
+        raise NotImplementedError
+
+
 class StoreInBuiltin(StorePos):
     name: str
     ty: str  # attr or dict

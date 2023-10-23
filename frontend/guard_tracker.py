@@ -12,13 +12,13 @@ import copy
 import dataclasses
 import torch.fx.immutable_collections as fx_immutable
 from .code import ProcessedCode
-from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method
+from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method, get_from_freevars
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
-from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue
+from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar
 from . import variables as vs
 from . import dynamic as dyn
-from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs
+from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs, print_bytecode
 from .object_table import ObjectTable
 from .pycode_writer import new_name
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -274,7 +274,7 @@ class State:
                     new_var = copy.copy(var)
                     new_var.clear_extract_code_at_start()
                     for pos in var.extract_code_at_start:
-                        if isinstance(pos, StoreInLocal):
+                        if isinstance(pos, (StoreInLocal, StoreInFreeVar)):
                             continue
                         elif isinstance(pos, StoreInStack):
                             # print(f"see who: {var}, and pos:{pos}")
@@ -776,7 +776,7 @@ class GuardTracker:
         end_pc = self.code.get_orig_pc(lasti)
         if end_pc == -1:
             end_pc = self.code.get_next_orig_pc(lasti)
-        print("commiting", self.state.start_pc, end_pc,
+        print("commiting", self.frame_id, self.state.start_pc, end_pc,
               self.code.original_insts[end_pc], lasti)
         key = new_random_key()
         guard_codegen = GuardFnCodegen(key=key)
@@ -1049,7 +1049,7 @@ class GuardTracker:
                 ]
             })
         if is_user_defined_func(func) or isinstance(func, torch.nn.Sequential):
-            print("run into user defined function")
+            print("run into user defined function", func)
             stack_objs = get_all_objects_in_stack(self.frame)
             self.state.mark_defer_restart(
                 DeferRestartState(stack_objs, self.get_live_objs(),
@@ -1313,6 +1313,17 @@ class GuardTracker:
 
     def STORE_ATTR(self, inst: Instruction) -> None:
         pass
+    def LOAD_CLOSURE(self, inst: Instruction) -> None:
+        obj = get_from_freevars(self.frame, inst.arg)
+        pos = StoreInFreeVar(inst.arg)
+        if not self.state.objects.contains(obj):
+            var = vs.make_var_from_value(obj, True,
+                                         self.state.objects.get_or_make_var,
+                                         self.state.fx_graph, [pos])
+            self.state.add_object(var, obj)
+        else:
+            var = self.state.objects.get(obj)
+            var.add_extract_code_at_start(pos)
 
     def CALL_FUNCTION(self, inst: Instruction) -> None:
         num_args = inst.argval
@@ -1626,6 +1637,15 @@ class GuardTracker:
                 ],
                 end_loop_pc: []
             })
+
+    def MAKE_FUNCTION(self, _inst: Instruction) -> None:
+        self.state.set_partial_var({
+            -1: [
+                PartialVar(node=None,
+                           need_guard_check=False,
+                           extract_code_at_start=[])
+            ]
+        })
 
 
 trackers: list[GuardTracker] = []

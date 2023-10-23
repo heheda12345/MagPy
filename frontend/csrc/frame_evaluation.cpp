@@ -1,6 +1,7 @@
 #define PY_SSIZE_T_CLEAN
 #include "csrc.h"
 #include <Python.h>
+#include <cellobject.h>
 #include <frameobject.h>
 #include <map>
 #include <object.h>
@@ -466,6 +467,24 @@ static PyObject *is_bound_method(PyObject *self, PyObject *args) {
     }
 }
 
+static PyObject *get_from_freevars(PyObject *self, PyObject *args) {
+    PyObject *frame;
+    int index;
+    if (!PyArg_ParseTuple(args, "Oi", &frame, &index)) {
+        PRINT_PYERR;
+        PyErr_SetString(PyExc_TypeError,
+                        "invalid parameter in get_from_freevars");
+        return NULL;
+    }
+    PyFrameObject *f = (PyFrameObject *)frame;
+    PyObject *value = f->f_localsplus[index + f->f_code->co_nlocals];
+    if (value == NULL) {
+        value = null_object;
+    }
+    Py_INCREF(value);
+    return value;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame, METH_VARARGS, NULL},
     {"set_skip_files", set_skip_files, METH_VARARGS, NULL},
@@ -491,6 +510,7 @@ static PyMethodDef _methods[] = {
      METH_VARARGS, NULL},
     {"get_code_map", get_code_map, METH_VARARGS, NULL},
     {"is_bound_method", is_bound_method, METH_VARARGS, NULL},
+    {"get_from_freevars", get_from_freevars, METH_VARARGS, NULL},
     {"parse_rangeiterobject", frontend_csrc::parse_rangeiterobject,
      METH_VARARGS, NULL},
     {"make_rangeiterobject", frontend_csrc::make_rangeiterobject, METH_VARARGS,
@@ -512,5 +532,7 @@ PyMODINIT_FUNC PyInit_c_api(void) {
     CHECK(result == 0);
     Py_INCREF(Py_None);
     set_eval_frame_callback(Py_None);
-    return PyModule_Create(&_module);
+
+    PyObject *m = PyModule_Create(&_module);
+    return m;
 }
