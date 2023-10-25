@@ -1,5 +1,5 @@
 from types import FrameType
-from typing import Dict, Any, Callable, List, Optional, cast
+from typing import Dict, Any, Callable, List, Optional, cast, Union
 import inspect
 import logging
 import itertools
@@ -11,6 +11,7 @@ import traceback
 import copy
 import dataclasses
 import torch.fx.immutable_collections as fx_immutable
+import numpy as np
 from .code import ProcessedCode
 from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method, get_from_freevars
 from .instruction import Instruction, ci
@@ -547,6 +548,7 @@ class GuardTracker:
             except Exception as e:
                 self.restart(f"Exception during init: {e}")
                 print(traceback.format_exc())
+                # raise e
                 return
         if self.state.start_pc == -1:
             self.state.start_pc = pc
@@ -920,10 +922,20 @@ class GuardTracker:
                 if isinstance(value, torch.nn.Parameter):
                     node = self.state.fx_graph.create_node(
                         "get_attr", self.state.subparam_paths[value], (), {})
-                assert node is not None
-                var: vs.Variable = vs.TensorVar.from_tensor_and_node(
-                    value, node, partial.need_guard_check,
-                    partial.extract_code_at_start)
+                if node is None:
+                    if len(partial.extract_code_at_start) > 0:
+                        var: vs.Variable = vs.TensorVar.from_value(
+                            value, partial.need_guard_check,
+                            self.state.objects.get_or_make_var,
+                            self.state.fx_graph, partial.extract_code_at_start)
+                    elif self.state.objects.contains(value):
+                        var = self.state.objects.get(value)
+                    else:
+                        raise ValueError("Unknown node for tensor object")
+                else:
+                    var = vs.TensorVar.from_tensor_and_node(
+                        value, node, partial.need_guard_check,
+                        partial.extract_code_at_start)
             elif is_scalar(value) and node is not None:
                 var = vs.ScalarVar.from_value_and_node(
                     value,
@@ -978,24 +990,12 @@ class GuardTracker:
             not dyn.contains(i) for i in itertools.chain(args, kwargs.values()))
 
     @classmethod
-    def has_tuple_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
+    def has_arg_of_type(
+            cls, args: List[Any], kwargs: Dict[str, Any],
+            arg_type: Union[type[Any], tuple[type[Any], ...]]) -> bool:
         return any(
-            isinstance(i, tuple)
+            isinstance(i, arg_type)
             for i in itertools.chain(args, kwargs.values()))
-
-    @classmethod
-    def has_list_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
-        return any(
-            isinstance(i, list) for i in itertools.chain(args, kwargs.values()))
-
-    @classmethod
-    def has_dict_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
-        return any(
-            isinstance(i, dict) for i in itertools.chain(args, kwargs.values()))
-
-    def has_set_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
-        return any(
-            isinstance(i, set) for i in itertools.chain(args, kwargs.values()))
 
     def has_unknown_arg(self, args: List[Any], kwargs: Dict[str, Any]) -> bool:
         return any(
@@ -1017,7 +1017,9 @@ class GuardTracker:
         kwargs: Dict[str, Any],
     ) -> None:
         if self.has_unknown_arg(args, kwargs):
-            # print(f"func is {func}, {is_user_defined_func(func)},args: {args}, kwargs:{kwargs}")
+            print(
+                f"func is {func}, {is_user_defined_func(func)}, args: {args}, kwargs:{kwargs}"
+            )
             raise NotImplementedError
         if isinstance(
                 func,
@@ -1042,6 +1044,9 @@ class GuardTracker:
                 ]
             })
         if is_user_defined_func(func) or isinstance(func, torch.nn.Sequential):
+            if inspect.isclass(func):
+                if func.__new__ != object.__new__:  # type: ignore[comparison-overlap]
+                    raise NotImplementedError("user defined __new__")
             print("run into user defined function", func)
             stack_objs = get_all_objects_in_stack(self.frame)
             self.state.mark_defer_restart(
@@ -1104,21 +1109,20 @@ class GuardTracker:
                     ]
                 })
             return
-        elif self.has_tuple_arg(args,
-                                kwargs) and get_root_module(func) != 'torch':
+        elif self.has_arg_of_type(args, kwargs,
+                                  tuple) and get_root_module(func) != 'torch':
             return
-        elif self.has_list_arg(args,
-                               kwargs) and get_root_module(func) != 'torch':
+        elif self.has_arg_of_type(
+                args, kwargs,
+            (set, list, dict)) and get_root_module(func) != 'torch':
             set_if_inplace_return()
             return
-        elif self.has_dict_arg(args,
-                               kwargs) and get_root_module(func) != 'torch':
-            return
-        elif self.has_set_arg(args,
-                              kwargs) and get_root_module(func) != 'torch':
+        elif self.has_arg_of_type(args, kwargs, np.generic):
             return
         elif len(args) > 0 and isinstance(args[0], torch.nn.ModuleList):
             return
+        print(type(args[0]), is_scalar(args[0]), dyn.contains(args[0]),
+              get_root_module(func))
         raise NotImplementedError(func, args, kwargs)
 
     def binary_operation(self, func: Callable[..., Any]) -> None:
@@ -1231,7 +1235,8 @@ class GuardTracker:
                 self.state.add_object(var, obj)
             else:
                 var = self.state.objects.get(obj)
-                var.add_extract_code_at_start(pos)
+                if var.prev is None:
+                    var.add_extract_code_at_start(pos)
 
     def LOAD_DEREF(self, inst: Instruction) -> None:
         self.LOAD_FAST(inst)
@@ -1388,6 +1393,18 @@ class GuardTracker:
                                        add_partial_var=False)
         else:
             self.state.add_inplace_update_obj(target)
+
+    def STORE_ATTR(self, inst: Instruction) -> None:
+        value = get_value_stack_from_top(self.frame, 1)
+        self_obj = get_value_stack_from_top(self.frame, 0)
+        self.fetch_function_parameters(self_obj)
+        self.fetch_function_parameters(value)
+        value_var = self.state.objects.get(value)
+        new_self_var = vs.make_var_from_value(
+            self_obj, False, self.state.objects.get_or_make_var,
+            self.state.fx_graph, [])
+        new_self_var.add_modified_attr(inst.argval, value_var)
+        self.state.objects.update_by_id(new_self_var, id(self_obj))
 
     def IS_OP(self, inst: Instruction) -> None:
         self.binary_operation(operator.is_)

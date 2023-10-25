@@ -1,8 +1,9 @@
 from typing import Any, Union, Optional, Tuple, TYPE_CHECKING, Callable
 from types import ModuleType, CodeType, CellType
 import torch
+import numpy as np
 from .base import Variable
-from .scalar import ScalarVar
+from .scalar import ScalarVar, NumpyScalarVar
 from .tensor import TensorVar, TorchParamVar, TorchSizeVar, TorchDtypeVar, TorchDeviceVar
 from .torch_module import TorchModuleVar, TorchSequentialVar, TorchModuleListVar
 from .any_ import AnyVar
@@ -72,6 +73,10 @@ def make_var_from_value(
     elif isinstance(value, CellType):
         return CellVar.from_value(value, need_guard_check, get_or_make_var,
                                   fx_graph, extract_code_at_start)
+    elif isinstance(value, np.generic):
+        return NumpyScalarVar.from_value(value, need_guard_check,
+                                         get_or_make_var, fx_graph,
+                                         extract_code_at_start)
     else:
         # NOTE: use any instead of iteartor_var to represent iterator with unknown source due to the hardness of getting iterable and num_iters
         print("generate any for", value, type(value), extract_code_at_start)

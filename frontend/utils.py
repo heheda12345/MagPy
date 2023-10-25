@@ -11,6 +11,7 @@ import torch
 import torch._C
 from torch._C import _TensorBase
 from .config import get_config, set_config
+import numpy as np
 
 if TYPE_CHECKING:
     from .instruction import Instruction
@@ -124,6 +125,9 @@ def get_root_module(func: Callable[..., Any]) -> str:
 
     if hasattr(func, '__self__') and isinstance(func.__self__, torch.Tensor):
         return 'torch'
+
+    if hasattr(func, '__class__') and func.__class__ == np.ufunc:
+        return 'numpy'
 
     module = inspect.getmodule(func)
     if module is None:

@@ -3,7 +3,7 @@ from abc import abstractmethod
 from typing import Any, TYPE_CHECKING, Optional, Tuple, Iterable, Callable
 from copy import copy
 from ..fx_graph import FxGraph
-from ..store_pos import StorePos
+from ..store_pos import StorePos, StoreInAttr
 if TYPE_CHECKING:
     import torch.fx
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -17,6 +17,7 @@ class Variable:
     extract_code_at_start: list[StorePos]
     extract_code_hashs: set[int]
     obj: Any
+    modified_attrs: dict[str, 'Variable']
     prev: Optional['Variable'] = None
 
     def __init__(self, need_guard_check: bool, obj: Any,
@@ -29,6 +30,7 @@ class Variable:
             self.extract_code_hashs.add(str(pos).__hash__())
         if need_guard_check:
             assert len(extract_code_at_start) > 0
+        self.modified_attrs = dict()
 
     @classmethod
     @abstractmethod
@@ -63,6 +65,13 @@ class Variable:
         else:
             self.make_output_inner(name_in_graph_fn, store_pos, codegen,
                                    in_return, idx)
+            for attr, var in self.modified_attrs.items():
+                var.make_output(f'{name_in_graph_fn}_dot_{attr}',
+                                StoreInAttr(store_pos, id(self.obj), attr),
+                                codegen, False, id(getattr(self.obj, attr)))
+                codegen.add_stmt(
+                    f"setattr({name_in_graph_fn}, '{attr}', {name_in_graph_fn}_dot_{attr})"
+                )
 
     @abstractmethod
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
@@ -101,3 +110,12 @@ class Variable:
         if hash_value not in self.extract_code_hashs:
             self.extract_code_at_start.append(pos)
             self.extract_code_hashs.add(hash_value)
+
+    def add_modified_attr(self, attr: str, var: 'Variable') -> None:
+        self.modified_attrs[attr] = var
+
+    def fetch_extract_code_at_start(self) -> list[StorePos]:
+        prev = self
+        while prev.prev is not None and prev.prev.modified_attrs != prev.modified_attrs:
+            prev = prev.prev
+        return prev.extract_code_at_start
