@@ -499,6 +499,7 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int,
     strip_extended_args(instructions)
     fix_instructions_for_assemble(instructions, code_options)
     print("guarded code")
+    frame_cache.pre_instructions = instructions
     print(format_insts(instructions))
     code_map = generate_code_map(original_instructions, instructions,
                                  in_trace_insts, next_original_pc)

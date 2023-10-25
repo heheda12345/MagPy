@@ -5,11 +5,12 @@ from types import FrameType, CodeType
 from typing import Any, Callable, Tuple
 import inspect
 from .guard_tracker import push_tracker, pop_tracker, record
-from .cache import enable_cache
+from .cache import enable_cache, check_cache_updated, get_frame_cache
 from .fx_graph import set_frame_root
-from .c_api import set_eval_frame
+from .c_api import set_eval_frame, mark_need_postprocess
 from .bytecode_writter import rewrite_bytecode
 from .code import ProcessedCode
+from .instruction import format_insts
 
 
 def get_trace_func(frame_id: int) -> Callable[[FrameType, str, Any], None]:
@@ -75,9 +76,21 @@ def get_process_frame(
             print(f"preprocess frame {frame.f_code.co_filename}", frame_id,
                   hex(id(frame)), frame.f_code.co_name)
             enable_cache(frame_id)
-            set_frame_root(frame_id, f)
-            new_code, code_map = rewrite_bytecode(frame.f_code, frame_id,
-                                                  is_callee)
+            
+            print("old bytecode: \n")
+            print(format_insts(get_frame_cache(frame_id).pre_instructions))
+            if len(get_frame_cache(frame_id).pre_instructions) != 0:
+                new_code = get_frame_cache(frame_id).new_code
+                code_map = get_frame_cache(frame_id).code_map
+
+            if check_cache_updated(frame_id):
+                mark_need_postprocess()
+                print("new bytecode: \n")
+                set_frame_root(frame_id, f)
+                new_code, code_map = rewrite_bytecode(frame.f_code, frame_id,
+                                                    is_callee)
+                get_frame_cache(frame_id).new_code = new_code
+                get_frame_cache(frame_id).code_map = code_map
             trace_func = get_trace_func(frame_id)
         except Exception as e:
             print("exception in preprocess:", e, type(e))
@@ -85,13 +98,16 @@ def get_process_frame(
             raise e
         return (new_code, trace_func, code_map)
 
-    def postprocess_frame(frame: FrameType) -> None:
+    def postprocess_frame(frame: FrameType, frame_id: int) -> None:
         try:
             print(f"postprocess frame {frame.f_code.co_filename}")
+            set_frame_root(frame_id, f)
+            new_code = get_frame_cache(frame_id).new_code
+            code_map = get_frame_cache(frame_id).code_map
         except Exception as e:
             print("exception in postprocess:", e, type(e))
             print(traceback.format_exc())
             raise e
-        return None
+        return (new_code, code_map)
 
     return (preprocess_frame, postprocess_frame)

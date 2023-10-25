@@ -178,7 +178,6 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     PyObject *code_map = PyTuple_GetItem(result_preprocess, 2);
     Py_INCREF(new_code);
     Py_INCREF(trace_func);
-    need_postprocess = false;
     PyObject *result =
         eval_custom_code(tstate, _frame, (PyCodeObject *)new_code, code_map,
                          false, true, trace_func);
@@ -189,7 +188,8 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     */
     if (need_postprocess) {
         PyObject *result_postprocess =
-            PyObject_CallFunction(postprocess, "O", (PyObject *)_frame);
+            PyObject_CallFunction(postprocess, "Oi", (PyObject *)_frame, frame_id);
+        need_postprocess = false;
     }
     Py_DECREF(_frame);
     Py_DECREF(preprocess);
