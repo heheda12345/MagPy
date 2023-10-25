@@ -44,6 +44,10 @@ class ObjectTable:
             old_var = None
         var.set_prev(old_var)
         self.objs[idx] = var
+        if old_var is not None:
+            for attr_name, attr_var in old_var.modified_attrs.items():
+                if attr_name not in var.modified_attrs:
+                    var.add_modified_attr(attr_name, attr_var)
 
     def get_all(self) -> list[Variable]:
         return list(self.objs.values()) + self.objs_no_id

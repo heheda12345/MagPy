@@ -1,12 +1,18 @@
-from typing import Any
+from typing import Any, Optional, TYPE_CHECKING
 from types import FrameType
+
 from .c_api import get_value_stack_from_top
+if TYPE_CHECKING:
+    from .pycode_generator import FnCodegen
 
 
 class StorePos:
 
     def get_value_from_frame(self, frame: FrameType) -> Any:
         raise NotImplementedError
+
+    def add_name_to_fn(self, codegen: 'FnCodegen') -> None:
+        pass
 
 
 class StoreInStack(StorePos):
@@ -60,6 +66,11 @@ class StoreInFreeVar(StorePos):
 
     def get_value_from_frame(self, frame: FrameType) -> Any:
         raise NotImplementedError
+
+    def add_name_to_fn(self, codegen: 'FnCodegen') -> None:
+        codegen.add_import_from("frontend.c_api", "get_from_freevars")
+        codegen.add_import("inspect")
+        codegen.add_stmt("frame = inspect.currentframe().f_back")
 
 
 class StoreInBuiltin(StorePos):
@@ -168,6 +179,30 @@ class ExtractFromFunction(StorePos):
     def get_value_from_frame(self, frame: FrameType) -> Any:
         return getattr(self.var_pos.get_value_from_frame(frame),
                        self.func_name)()
+
+
+class ExtractFromConstructor(StorePos):
+    type_obj: Any
+    preserved_name: Optional[str]
+
+    def __init__(self, type_obj: Any) -> None:
+        self.type_obj = type_obj
+        self.preserved_name = None
+
+    def gen_preserved_name(self) -> str:
+        if self.preserved_name is None:
+            from .pycode_writer import new_name
+            self.preserved_name = new_name(f"class_{self.type_obj.__name__}")
+        return self.preserved_name
+
+    def __repr__(self) -> str:
+        return f"object.__new__({self.gen_preserved_name()})"
+
+    def get_value_from_frame(self, frame: FrameType) -> Any:
+        return self.type_obj.__new__(self.type_obj)
+
+    def add_name_to_fn(self, codegen: 'FnCodegen') -> None:
+        codegen.add_obj(self.type_obj, self.gen_preserved_name(), force=True)
 
 
 class IterValue(StorePos):

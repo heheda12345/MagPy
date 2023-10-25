@@ -24,11 +24,11 @@ class AnyVar(Variable):
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
                           idx: int) -> None:
-        if len(self.extract_code_at_start) > 0:
-            codegen.output(name_in_graph_fn, store_pos,
-                           str(self.extract_code_at_start[0]), in_return, idx)
-        else:
-            raise NotImplementedError()
+        extract_pos = self.fetch_extract_code_at_start()
+        assert len(extract_pos) > 0
+        extract_pos[0].add_name_to_fn(codegen)
+        codegen.output(name_in_graph_fn, store_pos, str(extract_pos[0]),
+                       in_return, idx)
 
     @classmethod
     def from_value(cls, value: None, need_guard_check: bool,

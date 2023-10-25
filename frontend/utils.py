@@ -4,12 +4,9 @@ from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic
 from types import FrameType
 import random
 import operator
-from .bytecode_writter import get_code_keys
-from .c_api import get_value_stack_from_top, get_value_stack_size
 import os
 import torch
 import torch._C
-from torch._C import _TensorBase
 from .config import get_config, set_config
 
 if TYPE_CHECKING:
@@ -42,6 +39,7 @@ def print_bytecode() -> None:
     insts = dis.Bytecode(code)
     for inst in insts:
         print(inst)
+    from .bytecode_writter import get_code_keys
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
     for k, v in code_options.items():
@@ -125,6 +123,10 @@ def get_root_module(func: Callable[..., Any]) -> str:
 
     if hasattr(func, '__self__') and isinstance(func.__self__, torch.Tensor):
         return 'torch'
+
+    import numpy as np
+    if hasattr(func, '__class__') and func.__class__ == np.ufunc:
+        return 'numpy'
 
     module = inspect.getmodule(func)
     if module is None:
@@ -250,6 +252,7 @@ class UnknownTypeError(Exception):
 
 
 def get_all_objects_in_stack(frame: FrameType) -> list[Any]:
+    from .c_api import get_value_stack_from_top, get_value_stack_size
     stack_size = get_value_stack_size(frame)
     return [get_value_stack_from_top(frame, i) for i in range(stack_size)]
 
