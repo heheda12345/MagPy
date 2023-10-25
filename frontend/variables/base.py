@@ -49,6 +49,7 @@ class Variable:
         if self.need_guard_check:
             assert len(self.extract_code_at_start) > 0
             for pos in self.extract_code_at_start:
+                pos.add_name_to_fn(codegen)
                 self.make_guard_inner(codegen, pos)
 
     @abstractmethod
@@ -115,7 +116,17 @@ class Variable:
         self.modified_attrs[attr] = var
 
     def fetch_extract_code_at_start(self) -> list[StorePos]:
+
+        def is_same(a: dict[str, Variable], b: dict[str, Variable]) -> bool:
+            if len(a) != len(b):
+                return False
+            for k, v in a.items():
+                if k not in b or id(b[k]) != id(v):
+                    return False
+            return True
+
         prev = self
-        while prev.prev is not None and prev.prev.modified_attrs != prev.modified_attrs:
+        while prev.prev is not None and not is_same(prev.prev.modified_attrs,
+                                                    prev.modified_attrs):
             prev = prev.prev
         return prev.extract_code_at_start

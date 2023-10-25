@@ -103,7 +103,7 @@ class TensorVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        name_in_codegen = codegen.add_var(self)
+        name_in_codegen = codegen.add_obj(self)
         codegen.add_check(f"{name_in_codegen}.tensor_guard_check({pos})")
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,

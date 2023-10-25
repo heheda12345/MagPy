@@ -32,11 +32,6 @@ class CellVar(Variable):
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
         codegen.add_import_from("types", "CellType")
-        for pos in self.extract_code_at_start:
-            if isinstance(pos, StoreInFreeVar):
-                codegen.add_import_from("frontend.c_api", "get_from_freevars")
-                codegen.add_import("inspect")
-                codegen.add_stmt("frame = inspect.currentframe().f_back")
         codegen.add_check(f"isinstance({pos}, CellType)")
         self.sub_var.make_guard_inner(
             codegen, StoreInAttr(pos, self.sub_id, "cell_contents"))
@@ -48,7 +43,10 @@ class CellVar(Variable):
         codegen.add_import_from("frontend.c_api", "get_from_freevars")
         codegen.output(f"{name_in_graph_fn}_frame", store_pos,
                        "inspect.currentframe().f_back", False, idx)
-        cell_pos = self.extract_code_at_start[0]
+        extract_pos = self.fetch_extract_code_at_start()
+        assert len(extract_pos) > 0
+        extract_pos[0].add_name_to_fn(codegen)
+        cell_pos = extract_pos[0]
         if isinstance(cell_pos, StoreInFreeVar):
             codegen.output(
                 name_in_graph_fn, store_pos,

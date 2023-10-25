@@ -54,7 +54,7 @@ class NullVar(Variable):
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
                           idx: int) -> None:
-        name_in_codegen = codegen.add_var(null_object, "NULL_VAR")
+        name_in_codegen = codegen.add_obj(null_object, "NULL_VAR")
         codegen.output(name_in_graph_fn, store_pos, f"{name_in_codegen} # NULL",
                        in_return, idx)
 
@@ -83,7 +83,7 @@ class CodeVar(Variable):
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
                           idx: int) -> None:
-        name = codegen.add_var(self.obj, "CODE_VAR")
+        name = codegen.add_obj(self.obj, "CODE_VAR")
         codegen.output(name_in_graph_fn, store_pos, name, in_return, idx)
 
     @classmethod
@@ -152,7 +152,7 @@ class ModuleVar(Variable):
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
                           idx: int) -> None:
-        name_in_codegen = codegen.add_var(self.obj,
+        name_in_codegen = codegen.add_obj(self.obj,
                                           f"MODULE_{self.obj.__name__}")
         codegen.output(name_in_graph_fn, store_pos, name_in_codegen, in_return,
                        idx)
@@ -179,7 +179,7 @@ class FunctionVar(Variable):
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
                           idx: int) -> None:
-        name_in_codegen = codegen.add_var(self.obj, f"_{self.obj.__name__}")
+        name_in_codegen = codegen.add_obj(self.obj, f"_{self.obj.__name__}")
         codegen.output(name_in_graph_fn, store_pos, name_in_codegen, in_return,
                        idx)
 

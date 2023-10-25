@@ -16,7 +16,7 @@ from .code import ProcessedCode
 from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method, get_from_freevars
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
-from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar
+from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromConstructor
 from . import variables as vs
 from . import dynamic as dyn
 from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs, print_bytecode
@@ -70,6 +70,8 @@ class State:
     object_refs: list[Any]  # hold the reference of objects to avoid GC
     inplace_update_objs: list[Any]
     guarded_pcs: list[int]
+    initial_args: list[Any]
+    calling_func: Optional[Any]
 
     def __init__(self, root: torch.nn.Module) -> None:
         self.objects = ObjectTable()
@@ -96,6 +98,8 @@ class State:
         self.num_new_refs = 0
         self.inplace_update_objs = []
         self.guarded_pcs = []
+        self.initial_args = []
+        self.calling_func = None
 
     def update_subpath(self, module: torch.nn.Module, prefix: str) -> None:
 
@@ -210,6 +214,8 @@ class State:
                                              [StoreInLocal(f"__stack__{i}")])
                 state.objects.add(var, value)
         # state.written may be assigned inside make_var_from_value
+        for var_name in frame.f_code.co_varnames[:frame.f_code.co_argcount]:
+            state.initial_args.append(frame.f_locals[var_name])
         state.written = False
         return state
 
@@ -265,9 +271,21 @@ class State:
         if self.defer_restart is None:  # callee will not perform defer restart
             print("skip merge call due to defer_restart")
             return
+
         # self.written = True
         self.defer_restart = None
         replacement_mapping: dict[torch.fx.Node, torch.fx.Node] = {}
+        calling_func = self.calling_func
+        if self.calling_func is not None:
+            if inspect.isclass(calling_func):
+                new_obj = state.initial_args[0]
+                assert isinstance(new_obj, calling_func)
+                assert not self.objects.contains(new_obj)
+                self.objects.add(
+                    vs.make_var_from_value(
+                        new_obj, False, self.objects.get_or_make_var,
+                        self.fx_graph, [ExtractFromConstructor(calling_func)]),
+                    new_obj)
 
         def merge_call_guard() -> None:
             for idx, var in state.objects.objs.items():
@@ -373,6 +391,15 @@ class State:
         def merge_output() -> None:
             merged_ids: set[int] = set()
 
+            def get_new_store_pos(old: list[StorePos],
+                                  idx: int) -> list[StorePos]:
+                new: list[StorePos] = []
+                for pos in old:
+                    new_pos = self.store_pos_in_callee(pos, idx)
+                    if new_pos is not None:
+                        new.append(new_pos)
+                return new
+
             def get_or_make_var(
                     obj: Any, need_guard_check: bool,
                     fx_graph: Optional[FxGraph],
@@ -406,6 +433,17 @@ class State:
                             fx_graph,
                             extract_code_at_start,
                         )
+                    callee_var = state.objects.get(obj)
+                    for attr_name in callee_var.modified_attrs.keys():
+                        attr_obj = getattr(obj, attr_name)
+                        attr_var = self.objects.get(attr_obj, False)
+                        assert attr_var is not None
+                        new_attr_extract: list[StorePos] = get_new_store_pos(
+                            attr_var.extract_code_at_start, id(attr_obj))
+                        new_attr_var = get_or_make_var(
+                            attr_obj, attr_var.need_guard_check, self.fx_graph,
+                            new_attr_extract)
+                        new_var.add_modified_attr(attr_name, new_attr_var)
                     self.objects.update_by_id(new_var, id(obj))
                 elif self.objects.contains(
                         obj):  # value from caller, unmodified
@@ -435,15 +473,6 @@ class State:
                     self.objects.add(new_var, obj)
                 merged_ids.add(id(obj))
                 return new_var
-
-            def get_new_store_pos(old: list[StorePos],
-                                  idx: int) -> list[StorePos]:
-                new: list[StorePos] = []
-                for pos in old:
-                    new_pos = self.store_pos_in_callee(pos, idx)
-                    if new_pos is not None:
-                        new.append(new_pos)
-                return new
 
             for idx, var in state.objects.get_all_with_id():
                 if var.prev is not None:
@@ -481,6 +510,12 @@ class State:
         assert len(self.partial_var) == 0
         self.written = True
         self.partial_var = partials
+
+    def mark_calling_func(self, func: Any) -> None:
+        self.calling_func = func
+
+    def unmark_calling_func(self) -> None:
+        self.calling_func = None
 
 
 class GuardTracker:
@@ -592,7 +627,7 @@ class GuardTracker:
         guard_code = guard_codegen.get_code()
         out: Dict[str, Any] = dict()
         exec(guard_code, self.frame.f_globals, out)
-        guard_fn = out["___make_guard_fn"](*guard_codegen.vars.values())
+        guard_fn = out["___make_guard_fn"](*guard_codegen.objs.values())
         frame_locals = self.frame.f_locals
         stack_locals = {
             f"__stack__{i}": get_value_stack_from_top(self.frame, i)
@@ -862,7 +897,7 @@ class GuardTracker:
             print("RUNNING PY CODE")
             print(py_code)
             exec(py_code, self.frame.f_globals, out)
-            guard_fn = out["___make_guard_fn"](*guard_codegen.vars.values())
+            guard_fn = out["___make_guard_fn"](*guard_codegen.objs.values())
             graph_fn = out["___make_graph_fn"](compiled_graph,
                                                *graph_codegen.objs.values())
 
@@ -923,13 +958,13 @@ class GuardTracker:
                     node = self.state.fx_graph.create_node(
                         "get_attr", self.state.subparam_paths[value], (), {})
                 if node is None:
-                    if len(partial.extract_code_at_start) > 0:
-                        var: vs.Variable = vs.TensorVar.from_value(
+                    if self.state.objects.contains(value):
+                        var = self.state.objects.get(value)
+                    elif len(partial.extract_code_at_start) > 0:
+                        var = vs.TensorVar.from_value(
                             value, partial.need_guard_check,
                             self.state.objects.get_or_make_var,
                             self.state.fx_graph, partial.extract_code_at_start)
-                    elif self.state.objects.contains(value):
-                        var = self.state.objects.get(value)
                     else:
                         raise ValueError("Unknown node for tensor object")
                 else:
@@ -960,6 +995,7 @@ class GuardTracker:
         self.state.inplace_update_objs.clear()
         self.state.partial_var.clear()
         self.state.written = False
+        self.state.unmark_calling_func()
         # print('process last instruction done')
         if self.state.defer_restart is not None:
             self.restart("defered restart " + self.state.defer_restart.reason)
@@ -1049,6 +1085,7 @@ class GuardTracker:
                     raise NotImplementedError("user defined __new__")
             print("run into user defined function", func)
             stack_objs = get_all_objects_in_stack(self.frame)
+            self.state.mark_calling_func(func)
             self.state.mark_defer_restart(
                 DeferRestartState(stack_objs, self.get_live_objs(),
                                   self.frame.f_lasti, f"call_function"))

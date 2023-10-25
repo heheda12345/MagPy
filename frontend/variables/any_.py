@@ -26,6 +26,7 @@ class AnyVar(Variable):
                           idx: int) -> None:
         extract_pos = self.fetch_extract_code_at_start()
         assert len(extract_pos) > 0
+        extract_pos[0].add_name_to_fn(codegen)
         codegen.output(name_in_graph_fn, store_pos, str(extract_pos[0]),
                        in_return, idx)
 
