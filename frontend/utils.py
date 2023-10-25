@@ -93,6 +93,7 @@ fx_graph_functions: set[Callable[..., Any]] = {
     operator.or_,
     operator.xor,
     operator.eq,
+    operator.lt,
 }
 fx_graph_functions = fx_graph_functions.union(fx_graph_inplace_functions)
 
@@ -116,7 +117,6 @@ torch_inplace_funcs = {
 
 
 def get_root_module(func: Callable[..., Any]) -> str:
-    # print([(x, getattr(func, x)) for x in dir(func)])
     if hasattr(func, '__objclass__'):
         if func.__objclass__ == torch._C._TensorBase:
             return 'torch'
@@ -133,21 +133,41 @@ def get_root_module(func: Callable[..., Any]) -> str:
     return root_module
 
 
+def is_own_method(func: str, parent: Callable[..., Any]) -> bool:
+    for member in parent.__class__.__dict__.keys():
+        if member == func:
+            return True
+    return False
+
+
 def is_user_defined_func(func: Callable[..., Any]) -> bool:
     # print([(x, getattr(func, x)) for x in dir(func)])
     if hasattr(func,
-               '__objclass__') and func.__objclass__ in (torch._C._TensorBase, dict):
+               '__objclass__') and func.__objclass__ in (torch._C._TensorBase,
+                                                         dict):
         return False
 
-    # random should call, not be a builtin
-    if hasattr(func, '__self__') and isinstance(func.__self__, (torch.Tensor, random.Random)):
+    # NOTE: random should be called as a UDF, not handled
+    if hasattr(func, '__self__') and isinstance(func.__self__,
+                                                (torch.Tensor, random.Random)):
+        return False
+
+    if hasattr(func, '__name__') and func.__name__ == '<genexpr>':
+        return False
+
+    if func is super:
         return False
 
     root_module = get_root_module(func)
-    # print(f"root module:{root_module}")
-    if root_module == '':
-        return True
     if root_module in ('math', 'builtins', 'torch', 'numpy', '_operator'):
+        #NOTE:self.function should be recursive-checked to find out where it's defined, but not implemented
+        if hasattr(func, '__self__'
+                  ) and func.__self__ is not None and is_user_defined_func(
+                      func.__self__):
+            if is_own_method(func.__name__, func.__self__):
+                return True
+            else:
+                return False
         return False
     return True
 

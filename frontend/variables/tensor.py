@@ -207,12 +207,16 @@ class TorchDeviceVar(Variable):
                 [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
             _fx_graph: Optional[FxGraph] = None,
             extract_code_at_start: list[StorePos] = []) -> "TorchDeviceVar":
-        print(f'device:{value}, id:{id(value)}')
         return cls(value, need_guard_check, extract_code_at_start)
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_check(f"{pos} == {self.device}")
+        if 'cuda' in str(self.device):
+            codegen.add_check(
+                f"{pos} == torch.device('{self.device}', index={self.device.index})"
+            )
+        else:
+            codegen.add_check(f"{pos} == torch.device('{self.device}')")
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,

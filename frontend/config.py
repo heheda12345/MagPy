@@ -1,7 +1,7 @@
 from typing import Callable, Any, Union
 
 CONFIG = {
-    "backend": "eager",  # Union[str, Callable[..., Any]]
+    "backend": "inductor",  # Union[str, Callable[..., Any]]
 }
 
 
