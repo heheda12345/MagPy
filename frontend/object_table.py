@@ -1,4 +1,5 @@
 from typing import Any, get_args, Optional, Tuple, Generic
+from types import CodeType
 from .variables.base import Variable
 from .variables.any_ import AnyVar
 from .variables import CONST_TYPES, ScalarVar, make_var_from_value
@@ -6,6 +7,7 @@ from .variables.tuple_ import TupleVar
 from .utils import NullObject, ReadOnlyObject
 from .store_pos import StorePos
 from .fx_graph import FxGraph
+import torch
 
 
 class ObjectTable:
@@ -54,7 +56,7 @@ class ObjectTable:
             return self.objs[id(value)]
         elif allow_unexist_const:
             if isinstance(value, get_args(CONST_TYPES)) or isinstance(
-                    value, (list, tuple, set, dict)):
+                    value, (list, tuple, set, dict, CodeType)):
                 return make_var_from_value(value, False, self.get_or_make_var)
         raise RuntimeError(
             f"Object {value}({id(value)}) not found in object table")

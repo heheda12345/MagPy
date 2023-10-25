@@ -36,6 +36,7 @@ class AnyVar(Variable):
                        [Any, bool, Optional[FxGraph], list[StorePos]],
                        Variable], _fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "AnyVar":
+        # print("any value come here", value)
         return cls(need_guard_check, value, extract_code_at_start)
 
     def as_fx_node(self) -> NodeArgs:

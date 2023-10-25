@@ -12,13 +12,13 @@ import copy
 import dataclasses
 import torch.fx.immutable_collections as fx_immutable
 from .code import ProcessedCode
-from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method
+from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method, get_from_freevars
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
-from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue
+from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar
 from . import variables as vs
 from . import dynamic as dyn
-from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs
+from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs, print_bytecode
 from .object_table import ObjectTable
 from .pycode_writer import new_name
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -165,6 +165,19 @@ class State:
                 for k, v in self.submodule_paths.items():
                     print(id(k), v, k)
                 raise NotImplementedError(func)
+        elif hasattr(func, '__self__') and isinstance(func.__self__,
+                                                      torch.Tensor):
+            fx_node = self.fx_graph.create_node("call_method", func.__name__,
+                                                pargs, pkwargs)
+            if add_partial_var:
+                self.partial_var = {
+                    -1: [
+                        PartialVar(node=fx_node,
+                                   need_guard_check=False,
+                                   extract_code_at_start=[],
+                                   inplace_ref=inplace_ref)
+                    ]
+                }
         else:
             fx_node = self.fx_graph.create_node(
                 "call_function",
@@ -261,7 +274,7 @@ class State:
                     new_var = copy.copy(var)
                     new_var.clear_extract_code_at_start()
                     for pos in var.extract_code_at_start:
-                        if isinstance(pos, StoreInLocal):
+                        if isinstance(pos, (StoreInLocal, StoreInFreeVar)):
                             continue
                         elif isinstance(pos, StoreInStack):
                             raise ValueError(
@@ -278,7 +291,7 @@ class State:
                                     var)
                                 new_var.need_guard_check = False
                             else:
-                                new_var.add_extract_code_at_start(self_pos)
+                                new_var.extract_code_at_start.append(self_pos)
                         else:
                             raise NotImplementedError(pos, type(pos))
 
@@ -351,7 +364,7 @@ class State:
                     name_in_caller = self.submodule_paths[module_obj]
                     new_node.target = name_in_caller
                 elif node.op == "call_method":
-                    raise NotImplementedError
+                    pass
                 replacement_mapping[node] = new_node
 
         def merge_output() -> None:
@@ -504,7 +517,6 @@ class GuardTracker:
     def record(
             self, frame: FrameType, frame_id: int
     ) -> None:  # pass frame and frame_id only for assertion
-        # print("frame_id:", frame_id, "self.frame_id:", self.frame_id)
         assert frame_id == self.frame_id
         assert frame == self.frame, (frame, self.frame)
         self.process_last_inst()
@@ -761,7 +773,7 @@ class GuardTracker:
         end_pc = self.code.get_orig_pc(lasti)
         if end_pc == -1:
             end_pc = self.code.get_next_orig_pc(lasti)
-        print("commiting", self.state.start_pc, end_pc,
+        print("commiting", self.frame_id, self.state.start_pc, end_pc,
               self.code.original_insts[end_pc], lasti)
         key = new_random_key()
         guard_codegen = GuardFnCodegen(key=key)
@@ -868,12 +880,24 @@ class GuardTracker:
 
         self.state.is_empty = True
 
+    def fetch_function_parameters(self, obj: Any) -> None:
+        if not self.state.objects.contains(obj):
+            var = vs.make_var_from_value(obj, False,
+                                         self.state.objects.get_or_make_var,
+                                         self.state.fx_graph, [])
+            self.state.objects.add_by_id(var, id(obj))
+
     def process_last_inst(self) -> None:
         if self.state.num_new_refs == -1:
             self.state.num_new_refs = get_value_stack_size(self.frame)
         for i in range(self.state.num_new_refs):
             obj = get_value_stack_from_top(self.frame, i)
             self.state.object_refs.append(obj)
+            if isinstance(obj, super):
+                super_var = vs.make_var_from_value(
+                    obj, False, self.state.objects.get_or_make_var,
+                    self.state.fx_graph, [])
+                self.state.objects.add_by_id(super_var, id(obj))
         self.state.num_new_refs = 0
         for i, obj in enumerate(self.state.inplace_update_objs):
             assert not isinstance(obj, torch.Tensor)
@@ -894,6 +918,9 @@ class GuardTracker:
             value = get_value_stack_from_top(self.frame, i)
             node = partial.node
             if isinstance(value, torch.Tensor):
+                if isinstance(value, torch.nn.Parameter):
+                    node = self.state.fx_graph.create_node(
+                        "get_attr", self.state.subparam_paths[value], (), {})
                 assert node is not None
                 var: vs.Variable = vs.TensorVar.from_tensor_and_node(
                     value, node, partial.need_guard_check,
@@ -921,6 +948,8 @@ class GuardTracker:
                 self.state.objects.update_by_id(var, id(partial.inplace_ref))
         self.state.inplace_update_objs.clear()
         self.state.partial_var.clear()
+        self.state.written = False
+        # print('process last instruction done')
         if self.state.defer_restart is not None:
             self.restart("defered restart " + self.state.defer_restart.reason)
 
@@ -974,6 +1003,12 @@ class GuardTracker:
             isinstance(self.state.objects.get_or_none(i), vs.AnyVar)
             for i in itertools.chain(args, kwargs.values()))
 
+    def is_genexpr_func(self, func: Callable[..., Any]) -> bool:
+        return (hasattr(func, '__name__') and func.__name__ == '<genexpr>')
+
+    def is_builtin_func(self, func: Callable[..., Any]) -> bool:
+        return func in (dict, tuple, set, list)
+
     def get_live_objs(self, pc: int = -1) -> list[tuple[str, Any]]:
         if pc == -1:
             pc = self.frame.f_lasti // 2
@@ -988,8 +1023,6 @@ class GuardTracker:
         args: List[Any],
         kwargs: Dict[str, Any],
     ) -> None:
-        if self.has_unknown_arg(args, kwargs):
-            raise NotImplementedError
         if isinstance(
                 func,
                 torch.nn.Module) and func not in self.state.submodule_paths:
@@ -1048,31 +1081,7 @@ class GuardTracker:
                     ]
                 })
 
-        if self.all_scalar_arg(args, kwargs) and self.all_static_arg(
-                args, kwargs) and get_root_module(func) != 'torch':
-            if func == range:
-                self.state.set_partial_var({
-                    -1: [
-                        PartialVar(node=None,
-                                   need_guard_check=False,
-                                   extract_code_at_start=[])
-                    ]
-                })
-            return
-        elif self.has_tuple_arg(args,
-                                kwargs) and get_root_module(func) != 'torch':
-            return
-        elif self.has_list_arg(args,
-                               kwargs) and get_root_module(func) != 'torch':
-            set_if_inplace_return()
-            return
-        elif self.has_dict_arg(args,
-                               kwargs) and get_root_module(func) != 'torch':
-            return
-        elif self.has_set_arg(args,
-                              kwargs) and get_root_module(func) != 'torch':
-            return
-        elif get_root_module(func) == 'torch' or (self.has_tensor_arg(
+        if get_root_module(func) == 'torch' or (self.has_tensor_arg(
                 args, kwargs) and is_graph_func(func)):
             if hasattr(func, "__name__") and func.__name__ == "size":
                 self.state.set_partial_var({
@@ -1088,8 +1097,39 @@ class GuardTracker:
                                        kwargs,
                                        inplace_ref=inplace_ref)
             return
+        elif self.all_scalar_arg(args, kwargs) and self.all_static_arg(
+                args, kwargs):
+            if func == range:
+                self.state.set_partial_var({
+                    -1: [
+                        PartialVar(node=None,
+                                   need_guard_check=False,
+                                   extract_code_at_start=[])
+                    ]
+                })
+            return
+        elif self.has_tuple_arg(args, kwargs):
+            return
+        elif self.has_list_arg(args, kwargs):
+            set_if_inplace_return()
+            return
+        elif self.has_dict_arg(args, kwargs):
+            return
+        elif self.has_set_arg(args, kwargs):
+            return
+        elif self.is_genexpr_func(func):
+            return
+        elif self.is_builtin_func(func):
+            return
+        elif is_graph_func(func):
+            return
         elif len(args) > 0 and isinstance(args[0], torch.nn.ModuleList):
             return
+        if self.has_unknown_arg(args, kwargs):
+            print(
+                f"func is {func}, {is_user_defined_func(func)}, args: {args}, kwargs:{kwargs}"
+            )
+            raise NotImplementedError
         raise NotImplementedError(func, args, kwargs)
 
     def binary_operation(self, func: Callable[..., Any]) -> None:
@@ -1203,6 +1243,9 @@ class GuardTracker:
                 var = self.state.objects.get(obj)
                 var.add_extract_code_at_start(pos)
 
+    def LOAD_DEREF(self, inst: Instruction) -> None:
+        self.LOAD_FAST(inst)
+
     def LOAD_GLOBAL(self, inst: Instruction) -> None:
         if inst.argval not in self.state.stored_globals:
             if inst.argval in self.frame.f_globals:
@@ -1228,6 +1271,7 @@ class GuardTracker:
 
     def LOAD_METHOD(self, inst: Instruction) -> None:
         self_obj = get_value_stack_from_top(self.frame, 0)
+        self.fetch_function_parameters(self_obj)
         self_var = self.state.objects.get(self_obj)
         is_bound = is_bound_method(self_obj, inst.argval)
         extract_code_at_start: list[StorePos] = [
@@ -1257,12 +1301,25 @@ class GuardTracker:
             StoreInAttr(pos, id(obj), inst.argval)
             for pos in obj_var.extract_code_at_start
         ]
-        attr_var = vs.make_var_from_value(attr,
-                                          obj_var.need_guard_check,
-                                          self.state.objects.get_or_make_var,
-                                          self.state.fx_graph,
-                                          extract_code_at_start=new_extract)
-        self.state.add_object(attr_var, attr)
+        partial: list[Optional[PartialVar]] = [
+            PartialVar(node=None,
+                       need_guard_check=obj_var.need_guard_check,
+                       extract_code_at_start=new_extract)
+        ]
+
+        self.state.set_partial_var({-1: partial})
+
+    def LOAD_CLOSURE(self, inst: Instruction) -> None:
+        obj = get_from_freevars(self.frame, inst.arg)
+        pos = StoreInFreeVar(inst.arg)
+        if not self.state.objects.contains(obj):
+            var = vs.make_var_from_value(obj, True,
+                                         self.state.objects.get_or_make_var,
+                                         self.state.fx_graph, [pos])
+            self.state.add_object(var, obj)
+        else:
+            var = self.state.objects.get(obj)
+            var.add_extract_code_at_start(pos)
 
     def CALL_FUNCTION(self, inst: Instruction) -> None:
         num_args = inst.argval
@@ -1271,7 +1328,10 @@ class GuardTracker:
             for i in range(num_args - 1, -1, -1)
         ]
         kwargs: dict[str, Any] = {}
+        for i, obj in enumerate(itertools.chain(args, kwargs.values())):
+            self.fetch_function_parameters(obj)
         func = get_value_stack_from_top(self.frame, num_args)
+        # print(f"function: {func}, type: {type(func)},args:{args}, kwargs:{kwargs}")
         self.call_function(func, args, kwargs)
 
     def CALL_METHOD(self, inst: Instruction) -> None:
@@ -1281,13 +1341,17 @@ class GuardTracker:
             for i in range(num_args - 1, -1, -1)
         ]
         kwargs: dict[str, Any] = {}
+        for i, obj in enumerate(itertools.chain(args, kwargs.values())):
+            self.fetch_function_parameters(obj)
         self_val = get_value_stack_from_top(self.frame, num_args)
         meth_val = get_value_stack_from_top(self.frame, num_args + 1)
         if isinstance(meth_val, NullObject):
             # Stack layout: ... | NULL | callable | arg1 | ... | argN
+            # print(f"call method: {self_val}, type: {type(self_val)},args:{args}, kwargs:{kwargs}")
             self.call_function(self_val, args, kwargs)
         else:
             # Stack layout: ... | method | self | arg1 | ... | argN
+            # print(f"call method: {meth_val}, type: {type(meth_val)},args:{[self_val] + args}, kwargs:{kwargs}")
             self.call_function(meth_val, [self_val] + args, kwargs)
 
     def CALL_FUNCTION_KW(self, inst: Instruction) -> None:
@@ -1296,12 +1360,14 @@ class GuardTracker:
             get_value_stack_from_top(self.frame, i + 1)
             for i in range(num_args - 1, -1, -1)
         ]
+        # for xx in args: print("kwarg", id(xx), xx)
         kw_names = get_value_stack_from_top(self.frame, 0)
         func = get_value_stack_from_top(self.frame, num_args + 1)
         kwargs: dict[str, Any] = {}
         for arg, kw_name in zip(args[-len(kw_names):], kw_names):
             kwargs[kw_name] = arg
         args = args[:-len(kw_names)]
+        # print(f"function kw: {func}, type: {type(func)},args:{args}, kwargs:{kwargs}")
         self.call_function(func, args, kwargs)
 
     def CALL_FUNCTION_EX(self, inst: Instruction) -> None:
@@ -1312,9 +1378,16 @@ class GuardTracker:
             kwargs = get_value_stack_from_top(self.frame, 0)
         else:
             kwargs = {}
-        self.call_function(func, args, kwargs)
+        # print(f"function ex: {func}, type: {type(func)},args:{(func.__self__,) + args}, kwargs:{kwargs}")
+        if hasattr(func, '__self__'):
+            self.call_function(func, (func.__self__,) + args, kwargs)
+        else:
+            self.call_function(func, args, kwargs)
 
     def STORE_FAST(self, inst: Instruction) -> None:
+        self.state.add_stored_locals(inst.argval)
+
+    def STORE_DEREF(self, inst: Instruction) -> None:
         self.state.add_stored_locals(inst.argval)
 
     def STORE_SUBSCR(self, inst: Instruction) -> None:
@@ -1366,6 +1439,9 @@ class GuardTracker:
     def POP_TOP(self, _inst: Instruction) -> None:
         pass
 
+    def POP_BLOCK(self, _inst: Instruction) -> None:
+        pass
+
     def ROT_TWO(self, _inst: Instruction) -> None:
         pass
 
@@ -1399,8 +1475,12 @@ class GuardTracker:
     def JUMP_ABSOLUTE(self, inst: Instruction) -> None:
         pass
 
+    def EXTENDED_ARG(self, inst: Instruction) -> None:
+        pass
+
     def GET_ITER(self, _inst: Instruction) -> None:
         obj = get_value_stack_from_top(self.frame, 0)
+        self.fetch_function_parameters(obj)
         obj_var = self.state.objects.get(obj)
         extract_code_at_start: list[StorePos] = [
             ExtractFromMethod(pos, id(obj), '__iter__')
@@ -1554,6 +1634,15 @@ class GuardTracker:
                 ],
                 end_loop_pc: []
             })
+
+    def MAKE_FUNCTION(self, _inst: Instruction) -> None:
+        self.state.set_partial_var({
+            -1: [
+                PartialVar(node=None,
+                           need_guard_check=False,
+                           extract_code_at_start=[])
+            ]
+        })
 
 
 trackers: list[GuardTracker] = []

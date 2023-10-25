@@ -70,6 +70,34 @@ class NullVar(Variable):
         raise NotImplementedError()
 
 
+class CodeVar(Variable):
+
+    def __init__(self, need_guard_check: bool, obj: None,
+                 extract_code_at_start: list[StorePos]) -> None:
+        super().__init__(need_guard_check, obj, extract_code_at_start)
+
+    def make_guard_inner(self, codegen: "GuardFnCodegen",
+                         pos: StorePos) -> None:
+        codegen.add_id_check(f"id({pos}) == {id(self.obj)}", self.obj)
+
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: "GraphFnCodegen", in_return: bool,
+                          idx: int) -> None:
+        name = codegen.add_var(self.obj, "CODE_VAR")
+        codegen.output(name_in_graph_fn, store_pos, name, in_return, idx)
+
+    @classmethod
+    def from_value(cls, value: None, need_guard_check: bool,
+                   _get_or_make_var: Callable[
+                       [Any, bool, Optional[FxGraph], list[StorePos]],
+                       Variable], _fx_graph: Optional[FxGraph],
+                   extract_code_at_start: list[StorePos]) -> "CodeVar":
+        return cls(need_guard_check, value, extract_code_at_start)
+
+    def as_fx_node(self) -> NodeArgs:
+        return None
+
+
 class SliceVar(Variable):
     start: Optional[int]
     stop: Optional[int]
@@ -146,7 +174,11 @@ class FunctionVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_id_check(f"id({pos}) == {id(self.obj)}", self.obj)
+        if hasattr(self.obj, '__self__') and isinstance(self.obj.__self__,
+                                                        torch.Tensor):
+            pass
+        else:
+            codegen.add_id_check(f"id({pos}) == {id(self.obj)}", self.obj)
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,

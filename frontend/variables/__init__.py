@@ -1,17 +1,18 @@
 from typing import Any, Union, Optional, Tuple, TYPE_CHECKING, Callable
-from types import ModuleType
+from types import ModuleType, CodeType, CellType
 import torch
 from .base import Variable
 from .scalar import ScalarVar
-from .tensor import TensorVar, TorchParamVar, TorchSizeVar, TorchDtypeVar
+from .tensor import TensorVar, TorchParamVar, TorchSizeVar, TorchDtypeVar, TorchDeviceVar
 from .torch_module import TorchModuleVar, TorchSequentialVar, TorchModuleListVar
 from .any_ import AnyVar
-from .const import NullVar, NoneVar, SliceVar, ModuleVar, FunctionVar, RangeVar
+from .const import NullVar, NoneVar, SliceVar, ModuleVar, FunctionVar, RangeVar, CodeVar
 from .iterator import IteratorVar, RangeIterVar
 from .tuple_ import TupleVar
 from .set_ import SetVar
 from .list_ import ListVar
 from .dict_ import DictVar
+from .builtin_types import CellVar
 from ..fx_graph import FxGraph
 from ..utils import NullObject, UnknownTypeError
 from ..store_pos import StorePos
@@ -31,7 +32,9 @@ ty2var: dict[type[Any], type[Variable]] = {
     set: SetVar,
     torch.Size: TorchSizeVar,
     torch.dtype: TorchDtypeVar,
+    torch.device: TorchDeviceVar,
     dict: DictVar,
+    CodeType: CodeVar,
 }
 
 CONST_TYPES = Union[int, float, bool, str, NullObject, None, slice]
@@ -66,6 +69,9 @@ def make_var_from_value(
     elif isinstance(value, type(range(0).__iter__())):
         return RangeIterVar.from_value(value, need_guard_check, get_or_make_var,
                                        fx_graph, extract_code_at_start)
+    elif isinstance(value, CellType):
+        return CellVar.from_value(value, need_guard_check, get_or_make_var,
+                                  fx_graph, extract_code_at_start)
     else:
         # NOTE: use any instead of iteartor_var to represent iterator with unknown source due to the hardness of getting iterable and num_iters
         print("generate any for", value, type(value), extract_code_at_start)
