@@ -30,7 +30,6 @@ class FrameCache:
                         list[CachedGraph]]  # start_pc -> list of cached graph
     callsite_id: dict[int, int]  # start_pc -> callsite_id
     pre_cache_size: int
-    pre_instructions: list[Instruction]
     new_code: CodeType
     code_map: ProcessedCode
 
@@ -39,7 +38,6 @@ class FrameCache:
         self.cached_graphs = {0: []}
         self.callsite_id = {0: 0}
         self.pre_cache_size = -1
-        self.pre_instructions = []
 
     def add(self, traced_code: CachedGraph) -> None:
         start_pc = traced_code.start_pc
