@@ -122,3 +122,30 @@ def test_with_tensor(caplog):
     result = tensor_3(list_a, list_b)
     run_and_check(compiled_tensor3, [MISS], 7, caplog, result, list_a, list_b)
     run_and_check(compiled_tensor3, [HIT], 7, caplog, result, list_a, list_b)
+
+
+def list_contains(a, b):
+    return b in a
+
+
+def test_list_contains(caplog):
+    reset()
+    a = [1.0, 2.0, 3.0]
+    b = 3.0
+    compiled_list_contains = compile(list_contains)
+    run_and_check(compiled_list_contains, [MISS], 1, caplog, True, a, b)
+    run_and_check(compiled_list_contains, [HIT], 1, caplog, True, a, b)
+
+
+def list_comp(a, b):
+    return [i + b for i in a]
+
+
+def test_list_comp(caplog):
+    reset()
+    a = [1.0, 2.0, 3.0]
+    b = 3.0
+    compiled_list_comp = compile(list_comp)
+    run_and_check(compiled_list_comp, [MISS, MISS], 1, caplog, [4.0, 5.0, 6.0],
+                  a, b)
+    run_and_check(compiled_list_comp, [HIT], 1, caplog, [4.0, 5.0, 6.0], a, b)

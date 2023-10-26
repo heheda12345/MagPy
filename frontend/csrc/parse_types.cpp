@@ -1,3 +1,4 @@
+#include "csrc.h"
 #include <Python.h>
 #include <object.h>
 

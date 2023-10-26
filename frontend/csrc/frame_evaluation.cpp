@@ -42,7 +42,6 @@ static PyObject *(*previous_eval_frame)(PyThreadState *tstate,
                                         int throw_flag) = NULL;
 static size_t cache_entry_extra_index = -1;
 static std::vector<int *> frame_id_list;
-static PyObject *null_object = NULL;
 static void ignored(void *obj) {}
 
 frontend_csrc::ProgramCache program_cache;
@@ -299,7 +298,7 @@ static PyObject *set_null_object(PyObject *self, PyObject *args) {
                         "invalid parameter in set_null_object");
     }
     Py_INCREF(obj);
-    null_object = obj;
+    frontend_csrc::NullObjectSingleton::getInstance().setNullObject(obj);
     Py_RETURN_NONE;
 }
 
@@ -314,7 +313,8 @@ static PyObject *get_value_stack_from_top(PyObject *self, PyObject *args) {
     }
     PyObject *value = frame->f_stacktop[-index - 1];
     if (value == NULL) {
-        value = null_object;
+        value =
+            frontend_csrc::NullObjectSingleton::getInstance().getNullObject();
     }
     Py_INCREF(value);
     return value;
@@ -479,7 +479,8 @@ static PyObject *get_from_freevars(PyObject *self, PyObject *args) {
     PyFrameObject *f = (PyFrameObject *)frame;
     PyObject *value = f->f_localsplus[index + f->f_code->co_nlocals];
     if (value == NULL) {
-        value = null_object;
+        value =
+            frontend_csrc::NullObjectSingleton::getInstance().getNullObject();
     }
     Py_INCREF(value);
     return value;

@@ -10,14 +10,14 @@ if TYPE_CHECKING:
 
 
 class IteratorVar(Variable):
-    parent_var: Variable
+    parent_var: Optional[Variable]
     parent_idx: int
     num_iters: int
 
     def __init__(
         self,
         value: Any,
-        parent_var: Variable,
+        parent_var: Optional[Variable],
         parent_idx: int,
         num_iters: int,
         need_guard_check: bool,
@@ -32,8 +32,8 @@ class IteratorVar(Variable):
         self.num_iters = num_iters
 
     @classmethod
-    def from_parent_var(cls, value: Any, parent_var: Variable, parent_idx: int,
-                        num_iters: int, need_guard_check: bool,
+    def from_parent_var(cls, value: Any, parent_var: Optional[Variable],
+                        parent_idx: int, num_iters: int, need_guard_check: bool,
                         get_or_make_var: Callable[
                             [Any, bool, Optional[FxGraph], list[StorePos]],
                             Variable],
@@ -48,6 +48,8 @@ class IteratorVar(Variable):
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
                           idx: int) -> None:
+        if self.parent_var is None:
+            raise ValueError("cannot gen output for None parent_var")
         self.parent_var.make_output(f"{name_in_graph_fn}_iterable", store_pos,
                                     codegen, False, idx)
         codegen.output(name_in_graph_fn, store_pos,

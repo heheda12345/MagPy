@@ -19,7 +19,7 @@ from .cache import CachedGraph, get_frame_cache
 from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromConstructor
 from . import variables as vs
 from . import dynamic as dyn
-from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs, print_bytecode
+from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs, print_bytecode, get_method_defined_class
 from .object_table import ObjectTable
 from .pycode_writer import new_name
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -72,6 +72,7 @@ class State:
     guarded_pcs: list[int]
     initial_args: list[Any]
     calling_func: Optional[Any]
+    can_guard: bool
 
     def __init__(self, root: torch.nn.Module) -> None:
         self.objects = ObjectTable()
@@ -100,6 +101,7 @@ class State:
         self.guarded_pcs = []
         self.initial_args = []
         self.calling_func = None
+        self.can_guard = True
 
     def update_subpath(self, module: torch.nn.Module, prefix: str) -> None:
 
@@ -116,10 +118,15 @@ class State:
             self.subparam_paths[param] = get_name(prefix, name)
 
     def add_submodule(self, module: torch.nn.Module) -> None:
-        new_module_name = "__external__" + str(len(self.submodule_paths))
-        self.update_subpath(module, new_module_name)
+        new_module_name = "__external_module__" + str(len(self.submodule_paths))
         self.root.add_module(new_module_name, module)
         self.update_subpath(module, new_module_name)
+        # self.written = True # not mark as written as graph break may happen
+
+    def add_subparam(self, param: torch.nn.Parameter) -> None:
+        new_param_name = "__external_param__" + str(len(self.subparam_paths))
+        self.root.register_parameter(new_param_name, param)
+        self.subparam_paths[param] = new_param_name
         # self.written = True # not mark as written as graph break may happen
 
     def as_node_args_kwargs(
@@ -272,6 +279,7 @@ class State:
             print("skip merge call due to defer_restart")
             return
 
+        print("to merge graph", state.fx_graph.result_graph)
         # self.written = True
         self.defer_restart = None
         replacement_mapping: dict[torch.fx.Node, torch.fx.Node] = {}
@@ -316,7 +324,6 @@ class State:
 
         def merge_fx_graph() -> None:
             self.update_subpath(self.root, "")
-            print("to merge", state.fx_graph.result_graph)
 
             def replacement_fn(node: torch.fx.Node) -> torch.fx.Node:
                 return replacement_mapping[node]
@@ -343,21 +350,7 @@ class State:
                     replacement_mapping[node] = get_original_node(node)
                     continue
                 elif node.op == "output":
-                    assert len(node.args) == 1
-                    for arg in node.args[0]:
-                        tensor_idx = get_tensor_idx(arg)
-                        if self.objects.contains_by_id(tensor_idx):
-                            continue
-                        new_tensor_var = copy.copy(
-                            state.objects.get_by_id(tensor_idx))
-                        assert isinstance(new_tensor_var,
-                                          (vs.TensorVar, vs.ScalarVar))
-                        if new_tensor_var.need_guard_check:
-                            raise NotImplementedError
-                        new_tensor_var.clear_extract_code_at_start()
-                        new_tensor_var.fx_node = replacement_fn(arg)
-                        self.objects.add_by_id(new_tensor_var, tensor_idx)
-                    continue
+                    raise ValueError("should not contain output node")
                 new_node = self.fx_graph.result_graph.node_copy(
                     node, replacement_fn)
                 if node.op == "get_attr":
@@ -369,6 +362,8 @@ class State:
                     if param_obj is None:
                         raise ValueError(
                             f"cannot find param {node.target} in {state.root}")
+                    if param_obj not in self.subparam_paths:
+                        self.add_subparam(param_obj)
                     name_in_caller = self.subparam_paths[param_obj]
                     new_node.target = name_in_caller
                 elif node.op == "call_module":
@@ -380,6 +375,8 @@ class State:
                     if module_obj is None:
                         raise ValueError(
                             f"cannot find module {node.target} in {state.root}")
+                    if module_obj not in self.submodule_paths:
+                        self.add_submodule(module_obj)
                     name_in_caller = self.submodule_paths[module_obj]
                     new_node.target = name_in_caller
                 elif node.op == "call_method":
@@ -515,6 +512,9 @@ class State:
     def unmark_calling_func(self) -> None:
         self.calling_func = None
 
+    def mark_cannot_guard(self) -> None:
+        self.can_guard = False
+
 
 class GuardTracker:
     code: ProcessedCode
@@ -606,12 +606,13 @@ class GuardTracker:
                 # because frame evaluation function may be set during processing the opcode
             except Exception as e:
                 print(traceback.format_exc())
-                # raise e
+                raise e
                 self.restart(f"Exception during processing {inst.opname}: {e}")
             if not self.have_error and self.state.defer_restart is None:
                 self.state.is_empty = False
                 self.state.written = False
         else:
+            raise ValueError(f"unknown opcode {inst.opname}")
             self.restart(f"unknown opcode {inst.opname}")
 
     def commit_loop_subgraph(self) -> None:
@@ -796,7 +797,6 @@ class GuardTracker:
             else:
                 if node not in new_nodes:
                     fx_graph.result_graph.erase_node(node)
-        fx_graph.result_graph.eliminate_dead_code()
 
     def commit(self) -> None:
         assert not self.state.written
@@ -812,60 +812,12 @@ class GuardTracker:
             end_pc = self.code.get_next_orig_pc(lasti)
         print("commiting", self.frame_id, self.state.start_pc, end_pc,
               self.code.original_insts[end_pc], lasti)
-        key = new_random_key()
-        guard_codegen = GuardFnCodegen(key=key)
-        for var in self.state.objects.get_all():
-            while var.prev is not None:
-                var = var.prev
-            var.make_guard(guard_codegen)
-        guard_code = guard_codegen.get_code()
-        graph_codegen = GraphFnCodegen(key=key)
-        for node in self.state.fx_graph.result_graph.nodes:
-            if node.op == "placeholder":
-                var = node.meta["var"]
-                if isinstance(var, vs.TensorVar):
-                    graph_codegen.add_graph_input(var.extract_code_at_start[0])
-                elif isinstance(var, vs.ScalarVar):
-                    graph_codegen.add_graph_input(var.extract_code_at_start[0],
-                                                  to_tensor=True)
-                else:
-                    raise ValueError("unknown var type", var)
-        current_inst = self.code.get_inst(lasti)
-        # livevars_analysis should return the same result when passing self.code.guard_insts
-        # and self.code.original_insts, but as current_inst may not be in original_insts,
-        # we pass guard_insts here
-        if self.state.defer_restart is not None:
-            live_vars = self.state.defer_restart.live_vars
-        else:
-            live_vars = self.get_live_objs()
-
-        for i, (live_name, live_obj) in enumerate(live_vars):
-            var = self.state.objects.get(live_obj, allow_unexist_const=True)
-            var.make_output(f"__live_{i}", StoreInLocal(live_name),
-                            graph_codegen, True, id(live_obj))
         # TODO: can be optimized by only reproduce the modified variables
         if self.state.defer_restart is not None:
             stack_objs = self.state.defer_restart.stack_objs
             assert stack_objs is not None
         else:
             stack_objs = get_all_objects_in_stack(self.frame)
-
-        for i, value in enumerate(stack_objs):
-            var = self.state.objects.get(value, allow_unexist_const=True)
-            var.make_output(f"__stack__{i}", StoreInStack(i), graph_codegen,
-                            True, id(value))
-
-        for idx, var in self.state.objects.get_all_with_id():
-            if var.prev is not None and idx not in graph_codegen.id2name:
-                oldest_var = var.get_oldest_var()
-                if len(oldest_var.extract_code_at_start) == 0:
-                    continue
-                var.make_output(f"__tmp_{idx}",
-                                oldest_var.extract_code_at_start[0],
-                                graph_codegen, False, idx)
-
-        self.state.fx_graph.set_output_nodes(graph_codegen.get_graph_outputs())
-        print("graph", self.state.fx_graph.result_graph)
 
         if self.state.start_pc == 0 and self.code.original_insts[
                 end_pc].opname == "RETURN_VALUE" and self.caller is not None:
@@ -883,37 +835,90 @@ class GuardTracker:
             assert nest_caller is not None
             nest_caller.state.merge_call(self.state, stack_objs)
         else:
-            graph_code = graph_codegen.get_code()
-            compiled_graph = self.state.fx_graph.compile()
+            if self.state.can_guard:
+                key = new_random_key()
+                guard_codegen = GuardFnCodegen(key=key)
+                for var in self.state.objects.get_all():
+                    while var.prev is not None:
+                        var = var.prev
+                    var.make_guard(guard_codegen)
+                guard_code = guard_codegen.get_code()
+                graph_codegen = GraphFnCodegen(key=key)
+                for node in self.state.fx_graph.result_graph.nodes:
+                    if node.op == "placeholder":
+                        var = node.meta["var"]
+                        if isinstance(var, vs.TensorVar):
+                            graph_codegen.add_graph_input(
+                                var.extract_code_at_start[0])
+                        elif isinstance(var, vs.ScalarVar):
+                            graph_codegen.add_graph_input(
+                                var.extract_code_at_start[0], to_tensor=True)
+                        else:
+                            raise ValueError("unknown var type", var)
+                current_inst = self.code.get_inst(lasti)
+                # livevars_analysis should return the same result when passing self.code.guard_insts
+                # and self.code.original_insts, but as current_inst may not be in original_insts,
+                # we pass guard_insts here
+                if self.state.defer_restart is not None:
+                    live_vars = self.state.defer_restart.live_vars
+                else:
+                    live_vars = self.get_live_objs()
 
-            py_code = f"""\
+                for i, (live_name, live_obj) in enumerate(live_vars):
+                    var = self.state.objects.get(live_obj,
+                                                 allow_unexist_const=True)
+                    var.make_output(f"__live_{i}", StoreInLocal(live_name),
+                                    graph_codegen, True, id(live_obj))
+
+                for i, value in enumerate(stack_objs):
+                    var = self.state.objects.get(value,
+                                                 allow_unexist_const=True)
+                    var.make_output(f"__stack__{i}", StoreInStack(i),
+                                    graph_codegen, True, id(value))
+
+                for idx, var in self.state.objects.get_all_with_id():
+                    if var.prev is not None and idx not in graph_codegen.id2name:
+                        oldest_var = var.get_oldest_var()
+                        if len(oldest_var.extract_code_at_start) == 0:
+                            continue
+                        var.make_output(f"__tmp_{idx}",
+                                        oldest_var.extract_code_at_start[0],
+                                        graph_codegen, False, idx)
+
+                self.state.fx_graph.set_output_nodes(
+                    graph_codegen.get_graph_outputs())
+                print("graph", self.state.fx_graph.result_graph)
+                graph_code = graph_codegen.get_code()
+                compiled_graph = self.state.fx_graph.compile()
+
+                py_code = f"""\
 {graph_code}
 {guard_code}
-            """
-            out: Dict[str, Any] = dict()
-            print("RUNNING PY CODE")
-            print(py_code)
-            exec(py_code, self.frame.f_globals, out)
-            guard_fn = out["___make_guard_fn"](*guard_codegen.objs.values())
-            graph_fn = out["___make_graph_fn"](compiled_graph,
-                                               *graph_codegen.objs.values())
+                """
+                out: Dict[str, Any] = dict()
+                print("RUNNING PY CODE")
+                print(py_code)
+                exec(py_code, self.frame.f_globals, out)
+                guard_fn = out["___make_guard_fn"](*guard_codegen.objs.values())
+                graph_fn = out["___make_graph_fn"](compiled_graph,
+                                                   *graph_codegen.objs.values())
 
-            print("guard_fn:", guard_fn)
-            print("pc:", self.state.start_pc, end_pc)
-            print("stack:", self.state.start_stack_size, len(stack_objs))
+                print("guard_fn:", guard_fn)
+                print("pc:", self.state.start_pc, end_pc)
+                print("stack:", self.state.start_stack_size, len(stack_objs))
 
-            get_frame_cache(self.frame_id).add(
-                CachedGraph(
-                    guard_fn,
-                    graph_fn,
-                    self.state.start_pc,
-                    end_pc,
-                    start_stack_size=self.state.start_stack_size,
-                    end_stack_size=len(stack_objs),
-                    return_values=graph_codegen.get_return_values(),
-                    key=key,
-                    object_refs=guard_codegen.get_object_refs(),
-                ))
+                get_frame_cache(self.frame_id).add(
+                    CachedGraph(
+                        guard_fn,
+                        graph_fn,
+                        self.state.start_pc,
+                        end_pc,
+                        start_stack_size=self.state.start_stack_size,
+                        end_stack_size=len(stack_objs),
+                        return_values=graph_codegen.get_return_values(),
+                        key=key,
+                        object_refs=guard_codegen.get_object_refs(),
+                    ))
 
         self.state.is_empty = True
 
@@ -1123,7 +1128,9 @@ class GuardTracker:
 
         if get_root_module(func) == 'torch' or (self.has_tensor_arg(
                 args, kwargs) and is_graph_func(func)):
-            if hasattr(func, "__name__") and func.__name__ == "size":
+            if hasattr(
+                    func,
+                    "__name__") and func.__name__ in ("size", "named_children"):
                 self.state.set_partial_var({
                     -1: [
                         PartialVar(node=None,
@@ -1165,11 +1172,32 @@ class GuardTracker:
             return
         elif len(args) > 0 and isinstance(args[0], torch.nn.ModuleList):
             return
-        if self.has_unknown_arg(args, kwargs):
+        elif self.has_unknown_arg(args, kwargs):
             print(
                 f"func is {func}, {is_user_defined_func(func)}, args: {args}, kwargs:{kwargs}"
             )
             raise NotImplementedError
+        elif func == getattr:
+            if get_method_defined_class(args[0], '__getattr__') in (
+                    torch.nn.Module, object) and get_method_defined_class(
+                        args[0],
+                        '__getattribute__') in (torch.nn.Module, object):
+                arg_obj = self.state.objects.get(args[0])
+
+                self.state.set_partial_var({
+                    -1: [
+                        PartialVar(node=None,
+                                   need_guard_check=arg_obj.need_guard_check,
+                                   extract_code_at_start=[
+                                       StoreInAttr(p, id(args[0]), args[1])
+                                       for p in arg_obj.extract_code_at_start
+                                   ])
+                    ]
+                })
+                return
+        elif func == isinstance:
+            return
+
         raise NotImplementedError(func, args, kwargs)
 
     def binary_operation(self, func: Callable[..., Any]) -> None:
@@ -1224,6 +1252,9 @@ class GuardTracker:
         cmp_op = ('lt', 'le', 'eq', 'ne', 'gt', 'ge')
         self.call_function(getattr(operator, cmp_op[inst.arg]), [obj1, obj2],
                            {})
+
+    def CONTAINS_OP(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.contains)
 
     def INPLACE_POWER(self, _inst: Instruction) -> None:
         self.binary_operation(operator.ipow)
@@ -1479,6 +1510,9 @@ class GuardTracker:
     def LIST_EXTEND(self, inst: Instruction) -> None:
         pass
 
+    def LIST_APPEND(self, inst: Instruction) -> None:
+        pass
+
     def DICT_MERGE(self, inst: Instruction) -> None:
         pass
 
@@ -1610,6 +1644,25 @@ class GuardTracker:
         else:
             obj = get_value_stack_from_top(self.frame, 0)
             obj_var = self.state.objects.get(obj)
+            if isinstance(obj_var, vs.AnyVar):
+                gen_by_caller = False
+                caller = self.caller
+                while caller is not None:
+                    obj_in_caller = caller.state.objects.get_or_none(obj)
+                    if obj_in_caller is not None and isinstance(
+                            obj_in_caller, vs.IteratorVar):
+                        gen_by_caller = True
+                        break
+                    caller = caller.caller
+                if gen_by_caller:
+                    obj_var = vs.IteratorVar.from_parent_var(
+                        obj, None, id(obj), 0, False,
+                        self.state.objects.get_or_make_var, [])
+                    self.state.add_object(obj_var, obj)
+                    obj_var.need_guard_check = False
+                    self.state.mark_cannot_guard()
+            assert isinstance(obj_var, vs.IteratorVar) or isinstance(
+                obj, type(range(0).__iter__()))
             normal_pc = guard_pc + 1
             guard_target = guard_inst.target
             assert guard_target is not None
