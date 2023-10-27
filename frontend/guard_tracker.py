@@ -16,7 +16,7 @@ from .code import ProcessedCode
 from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method, get_from_freevars
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
-from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromConstructor
+from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromConstructor, UnknownPosInCaller
 from . import variables as vs
 from . import dynamic as dyn
 from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs, print_bytecode, get_method_defined_class
@@ -30,8 +30,7 @@ from .variables.base import Variable
 from .control_flow import ControlFlowInfo, LoopModule, ForLoopInfo, LoopPosMap
 
 MAKE_VAR_FN_TYPE = Callable[[
-    Any, bool, Callable[[Any, bool, Optional[FxGraph], list[StorePos]],
-                        Variable], Optional[FxGraph], Optional[list[StorePos]]
+    Any, bool, vs.HelperFunctions, Optional[FxGraph], Optional[list[StorePos]]
 ], Variable]
 
 
@@ -73,9 +72,12 @@ class State:
     initial_args: list[Any]
     calling_func: Optional[Any]
     can_guard: bool
+    gen_by_caller: Callable[[Any], bool]
 
-    def __init__(self, root: torch.nn.Module) -> None:
-        self.objects = ObjectTable()
+    def __init__(self, root: torch.nn.Module,
+                 gen_by_caller: Callable[[Any], bool]) -> None:
+        self.gen_by_caller = gen_by_caller
+        self.objects = ObjectTable(self.gen_by_caller, self.mark_cannot_guard)
         self.start_pc = -1
         self.start_stack_size = -1
         self.is_empty = True
@@ -209,14 +211,15 @@ class State:
 
     @classmethod
     def from_frame(cls, frame: FrameType, read_stack: bool,
-                   frame_root: torch.nn.Module) -> 'State':
-        state = cls(frame_root)
+                   frame_root: torch.nn.Module,
+                   gen_by_caller: Callable[[Any], bool]) -> 'State':
+        state = cls(frame_root, gen_by_caller)
         if read_stack:
             state.start_stack_size = get_value_stack_size(frame)
             for i in range(state.start_stack_size):
                 value = get_value_stack_from_top(frame, i)
                 var = vs.make_var_from_value(value, True,
-                                             state.objects.get_or_make_var,
+                                             state.objects.helper_functions,
                                              state.fx_graph,
                                              [StoreInLocal(f"__stack__{i}")])
                 state.objects.add(var, value)
@@ -291,7 +294,7 @@ class State:
                 assert not self.objects.contains(new_obj)
                 self.objects.add(
                     vs.make_var_from_value(
-                        new_obj, False, self.objects.get_or_make_var,
+                        new_obj, False, self.objects.helper_functions,
                         self.fx_graph, [ExtractFromConstructor(calling_func)]),
                     new_obj)
 
@@ -341,9 +344,9 @@ class State:
 
             def get_original_node(node: torch.fx.Node) -> torch.fx.Node:
                 idx = get_tensor_idx(node)
-                var_in_caller = self.objects.get_by_id(idx)
-                assert isinstance(var_in_caller, (vs.TensorVar, vs.ScalarVar))
-                return var_in_caller.fx_node
+                gen_by_caller = self.objects.get_by_id(idx)
+                assert isinstance(gen_by_caller, (vs.TensorVar, vs.ScalarVar))
+                return gen_by_caller.fx_node
 
             for node in state.fx_graph.result_graph.nodes:
                 if node.op == "placeholder":
@@ -424,7 +427,9 @@ class State:
                         new_var = vs.make_var_from_value(
                             obj,
                             need_guard_check,
-                            get_or_make_var,
+                            vs.HelperFunctions(get_or_make_var,
+                                               self.gen_by_caller,
+                                               self.mark_cannot_guard),
                             fx_graph,
                             extract_code_at_start,
                         )
@@ -463,8 +468,11 @@ class State:
                             extract_code_at_start)
                     else:
                         new_var = vs.make_var_from_value(
-                            obj, need_guard_check, get_or_make_var, fx_graph,
-                            extract_code_at_start)
+                            obj, need_guard_check,
+                            vs.HelperFunctions(get_or_make_var,
+                                               self.gen_by_caller,
+                                               self.mark_cannot_guard),
+                            fx_graph, extract_code_at_start)
                     self.objects.add(new_var, obj)
                 merged_ids.add(id(obj))
                 return new_var
@@ -547,7 +555,8 @@ class GuardTracker:
     def init_state(self, read_stack: bool = True) -> None:
         if hasattr(self, "state"):
             self.state.written = False
-        self.state = State.from_frame(self.frame, read_stack, self.frame_root)
+        self.state = State.from_frame(self.frame, read_stack, self.frame_root,
+                                      self.gen_by_caller)
         self.have_error = False
 
     def record(
@@ -925,7 +934,7 @@ class GuardTracker:
     def fetch_function_parameters(self, obj: Any) -> None:
         if not self.state.objects.contains(obj):
             var = vs.make_var_from_value(obj, False,
-                                         self.state.objects.get_or_make_var,
+                                         self.state.objects.helper_functions,
                                          self.state.fx_graph, [])
             self.state.objects.add_by_id(var, id(obj))
 
@@ -937,15 +946,15 @@ class GuardTracker:
             self.state.object_refs.append(obj)
             if isinstance(obj, super):
                 super_var = vs.make_var_from_value(
-                    obj, False, self.state.objects.get_or_make_var,
+                    obj, False, self.state.objects.helper_functions,
                     self.state.fx_graph, [])
                 self.state.objects.add_by_id(super_var, id(obj))
         self.state.num_new_refs = 0
         for i, obj in enumerate(self.state.inplace_update_objs):
             assert not isinstance(obj, torch.Tensor)
-            new_var = vs.make_var_from_value(obj, False,
-                                             self.state.objects.get_or_make_var,
-                                             self.state.fx_graph, [])
+            new_var = vs.make_var_from_value(
+                obj, False, self.state.objects.helper_functions,
+                self.state.fx_graph, [])
             self.state.objects.update_by_id(new_var, id(obj))
 
         if -1 in self.state.partial_var:
@@ -966,13 +975,13 @@ class GuardTracker:
                 if node is None:
                     if self.state.objects.contains(value):
                         var = self.state.objects.get(value)
-                    elif len(partial.extract_code_at_start) > 0:
+                    else:
+
                         var = vs.TensorVar.from_value(
                             value, partial.need_guard_check,
-                            self.state.objects.get_or_make_var,
+                            self.state.objects.helper_functions,
                             self.state.fx_graph, partial.extract_code_at_start)
-                    else:
-                        raise ValueError("Unknown node for tensor object")
+                        # raise ValueError("Unknown node for tensor object")
                 else:
                     var = vs.TensorVar.from_tensor_and_node(
                         value, node, partial.need_guard_check,
@@ -991,7 +1000,7 @@ class GuardTracker:
                     MAKE_VAR_FN_TYPE] = partial.make_var_fn
                 make_var_fn: MAKE_VAR_FN_TYPE = partial_make_var_fn if partial_make_var_fn is not None else default_make_var_fn
                 var = make_var_fn(value, partial.need_guard_check,
-                                  self.state.objects.get_or_make_var,
+                                  self.state.objects.helper_functions,
                                   self.state.fx_graph,
                                   partial.extract_code_at_start)
             if partial.inplace_ref is None:
@@ -1109,7 +1118,7 @@ class GuardTracker:
             if not self.state.objects.contains(args[0]):
                 self.state.add_object(
                     vs.make_var_from_value(args[0], False,
-                                           self.state.objects.get_or_make_var,
+                                           self.state.objects.helper_functions,
                                            self.state.fx_graph, []), args[0])
             inplace_ref = args[0]
         else:
@@ -1199,6 +1208,18 @@ class GuardTracker:
             return
 
         raise NotImplementedError(func, args, kwargs)
+
+    def gen_by_caller(self,
+                      obj: Any,
+                      var_type: Optional[type[Variable]] = None) -> bool:
+        caller = self.caller
+        while caller is not None:
+            obj_in_caller = caller.state.objects.get_or_none(obj)
+            if obj_in_caller is not None and (var_type is None or isinstance(
+                    obj_in_caller, var_type)):
+                return True
+            caller = caller.caller
+        return False
 
     def binary_operation(self, func: Callable[..., Any]) -> None:
         obj1 = get_value_stack_from_top(self.frame, 1)
@@ -1306,9 +1327,9 @@ class GuardTracker:
             obj = self.frame.f_locals[inst.argval]
             pos = StoreInLocal(inst.argval)
             if not self.state.objects.contains(obj):
-                var = vs.make_var_from_value(obj, True,
-                                             self.state.objects.get_or_make_var,
-                                             self.state.fx_graph, [pos])
+                var = vs.make_var_from_value(
+                    obj, True, self.state.objects.helper_functions,
+                    self.state.fx_graph, [pos])
                 self.state.add_object(var, obj)
             else:
                 var = self.state.objects.get(obj)
@@ -1337,7 +1358,7 @@ class GuardTracker:
                 raise UnknownTypeError(inst.argval)
 
             var = vs.make_var_from_value(obj, True,
-                                         self.state.objects.get_or_make_var,
+                                         self.state.objects.helper_functions,
                                          self.state.fx_graph, [store_pos])
             self.state.add_object(var, obj)
 
@@ -1386,7 +1407,7 @@ class GuardTracker:
         pos = StoreInFreeVar(inst.arg)
         if not self.state.objects.contains(obj):
             var = vs.make_var_from_value(obj, True,
-                                         self.state.objects.get_or_make_var,
+                                         self.state.objects.helper_functions,
                                          self.state.fx_graph, [pos])
             self.state.add_object(var, obj)
         else:
@@ -1481,7 +1502,7 @@ class GuardTracker:
         self.fetch_function_parameters(value)
         value_var = self.state.objects.get(value)
         new_self_var = vs.make_var_from_value(
-            self_obj, False, self.state.objects.get_or_make_var,
+            self_obj, False, self.state.objects.helper_functions,
             self.state.fx_graph, [])
         new_self_var.add_modified_attr(inst.argval, value_var)
         self.state.objects.update_by_id(new_self_var, id(self_obj))
@@ -1575,15 +1596,14 @@ class GuardTracker:
         ]
 
         def make_iterable_fn(
-                value: Any, need_guard_check: bool, get_or_make_var: Callable[
-                    [Any, bool, Optional[FxGraph], list[StorePos]],
-                    Variable], fx_graph: Optional[FxGraph],
+                value: Any, need_guard_check: bool,
+                _helper_functions: vs.HelperFunctions,
+                fx_graph: Optional[FxGraph],
                 extract_code_at_start: Optional[list[StorePos]]) -> vs.Variable:
             if extract_code_at_start is None:
                 extract_code_at_start = []
             return vs.IteratorVar.from_parent_var(value, obj_var, id(obj), 0,
                                                   need_guard_check,
-                                                  get_or_make_var,
                                                   extract_code_at_start)
 
         make_var_fn: Optional[
@@ -1645,19 +1665,9 @@ class GuardTracker:
             obj = get_value_stack_from_top(self.frame, 0)
             obj_var = self.state.objects.get(obj)
             if isinstance(obj_var, vs.AnyVar):
-                gen_by_caller = False
-                caller = self.caller
-                while caller is not None:
-                    obj_in_caller = caller.state.objects.get_or_none(obj)
-                    if obj_in_caller is not None and isinstance(
-                            obj_in_caller, vs.IteratorVar):
-                        gen_by_caller = True
-                        break
-                    caller = caller.caller
-                if gen_by_caller:
+                if self.gen_by_caller(obj, vs.IteratorVar):
                     obj_var = vs.IteratorVar.from_parent_var(
-                        obj, None, id(obj), 0, False,
-                        self.state.objects.get_or_make_var, [])
+                        obj, None, id(obj), 0, False, [])
                     self.state.add_object(obj_var, obj)
                     obj_var.need_guard_check = False
                     self.state.mark_cannot_guard()
@@ -1670,9 +1680,8 @@ class GuardTracker:
 
             def make_iterable_fn(
                     value: Any, need_guard_check: bool,
-                    get_or_make_var: Callable[
-                        [Any, bool, Optional[FxGraph], list[StorePos]],
-                        Variable], fx_graph: Optional[FxGraph],
+                    _helper_functions: vs.HelperFunctions,
+                    _fx_graph: Optional[FxGraph],
                     extract_code_at_start: Optional[list[StorePos]]
             ) -> vs.Variable:
                 assert isinstance(obj_var, vs.IteratorVar)
@@ -1682,22 +1691,21 @@ class GuardTracker:
                                                       obj_var.parent_idx,
                                                       obj_var.num_iters + 1,
                                                       need_guard_check,
-                                                      get_or_make_var,
                                                       extract_code_at_start)
 
             def make_dynamic_input_fn(
                     value: Any, need_guard_check: bool,
-                    get_or_make_var: Callable[
-                        [Any, bool, Optional[FxGraph], list[StorePos]],
-                        Variable], fx_graph: Optional[FxGraph],
+                    helper_functions: vs.HelperFunctions,
+                    fx_graph: Optional[FxGraph],
                     extract_code_at_start: Optional[list[StorePos]]
             ) -> vs.Variable:
                 assert is_scalar(value)
                 dyn.mark_dynamic(value, dyn.ScalarWithUnknownValue())
                 if extract_code_at_start is None:
                     extract_code_at_start = []
-                var = get_or_make_var(value, need_guard_check, fx_graph,
-                                      extract_code_at_start)
+                var = helper_functions.get_or_make_var(value, need_guard_check,
+                                                       fx_graph,
+                                                       extract_code_at_start)
                 return var
 
             make_iter_fn = make_iterable_fn if not isinstance(

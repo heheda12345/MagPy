@@ -4,7 +4,7 @@ from frontend.pycode_generator import GraphFnCodegen
 import torch.fx
 from types import ModuleType
 from enum import Enum
-from .base import Variable
+from .base import Variable, HelperFunctions
 from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos
 if TYPE_CHECKING:
@@ -32,9 +32,8 @@ class AnyVar(Variable):
 
     @classmethod
     def from_value(cls, value: None, need_guard_check: bool,
-                   _get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable], _fx_graph: Optional[FxGraph],
+                   _helper_functions: 'HelperFunctions',
+                   _fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "AnyVar":
         # print("any value come here", value)
         return cls(need_guard_check, value, extract_code_at_start)

@@ -149,3 +149,31 @@ def test_list_comp(caplog):
     run_and_check(compiled_list_comp, [MISS, MISS], 1, caplog, [4.0, 5.0, 6.0],
                   a, b)
     run_and_check(compiled_list_comp, [HIT], 1, caplog, [4.0, 5.0, 6.0], a, b)
+
+
+def test_list_comp_tensor(caplog):
+    reset()
+    a = [torch.tensor(1.0), torch.tensor(2.0), torch.tensor(3.0)]
+    b = 3.0
+    expect = list_comp(a, b)
+    compiled_list_comp = compile(list_comp)
+    run_and_check(compiled_list_comp, [MISS, MISS], 1, caplog, expect, a, b)
+    run_and_check(compiled_list_comp, [HIT], 1, caplog, expect, a, b)
+
+
+def list_comp_with_wrapper(a, b):
+    c = [torch.tensor(x + y) for x, y in zip(a, b)]
+    d = [torch.tensor(x + y) for x, y in zip(a, c)]
+    return d
+
+
+def test_list_comp_with_wrapper(caplog):
+    reset()
+    a = [1.0, 2.0, 3.0]
+    b = [1.0, 2.0, 3.0]
+    expect = list_comp_with_wrapper(a, b)
+    compiled_list_comp_with_wrapper = compile(list_comp_with_wrapper)
+    run_and_check(compiled_list_comp_with_wrapper, [MISS, MISS, MISS], 1,
+                  caplog, expect, a, b)
+    run_and_check(compiled_list_comp_with_wrapper, [HIT], 1, caplog, expect, a,
+                  b)

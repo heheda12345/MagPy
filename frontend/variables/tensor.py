@@ -1,13 +1,13 @@
-from typing import Optional, Any, Callable
+from typing import Optional, Any, Callable, TYPE_CHECKING
 import torch
 import torch.fx
 
 from frontend.pycode_generator import GuardFnCodegen, GraphFnCodegen
-from .base import Variable
+from .base import Variable, HelperFunctions
 from .tuple_ import TupleVar
 from ..pycode_writer import new_name
 from ..fx_graph import FxGraph, NodeArgs
-from ..store_pos import StorePos
+from ..store_pos import StorePos, UnknownPosInCaller
 
 
 class TensorVar(Variable):
@@ -75,12 +75,16 @@ class TensorVar(Variable):
 
     @classmethod
     def from_value(cls, value: torch.Tensor, need_guard_check: bool,
-                   _get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable], fx_graph: Optional[FxGraph],
+                   helper_functions: HelperFunctions,
+                   fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> 'TensorVar':
         assert fx_graph is not None
         name = new_name('tensor')
+        if len(extract_code_at_start) == 0:
+            if helper_functions.gen_by_caller(value):
+                extract_code_at_start = [UnknownPosInCaller()]
+                helper_functions.mark_cannot_guard()
+
         assert len(extract_code_at_start) > 0
         fx_node = fx_graph.create_input(value, name, (), {}, name)
         var = cls.from_tensor_and_node(value, fx_node, need_guard_check,
@@ -126,8 +130,7 @@ class TorchParamVar(Variable):
         cls,
         value: torch.nn.Parameter,
         need_guard_check: bool,
-        _get_or_make_var: Callable[
-            [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
+        _helper_functions: HelperFunctions,
         _fx_graph: Optional[FxGraph],
         extract_code_at_start: list[StorePos],
     ) -> "TorchParamVar":
@@ -168,9 +171,8 @@ class TorchDtypeVar(Variable):
 
     @classmethod
     def from_value(cls, value: torch.dtype, need_guard_check: bool,
-                   _get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable], _fx_graph: Optional[FxGraph],
+                   _helper_functions: HelperFunctions,
+                   _fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "TorchDtypeVar":
         return cls(value, need_guard_check, extract_code_at_start)
 
@@ -203,8 +205,7 @@ class TorchDeviceVar(Variable):
             cls,
             value: torch.device,
             need_guard_check: bool,
-            _get_or_make_var: Callable[
-                [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
+            _helper_functions: HelperFunctions,
             _fx_graph: Optional[FxGraph] = None,
             extract_code_at_start: list[StorePos] = []) -> "TorchDeviceVar":
         return cls(value, need_guard_check, extract_code_at_start)

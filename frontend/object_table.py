@@ -1,6 +1,6 @@
-from typing import Any, get_args, Optional, Tuple, Generic
+from typing import Any, get_args, Optional, Tuple, Generic, Callable
 from types import CodeType
-from .variables.base import Variable
+from .variables.base import Variable, HelperFunctions
 from .variables.any_ import AnyVar
 from .variables import CONST_TYPES, ScalarVar, make_var_from_value
 from .variables.tuple_ import TupleVar
@@ -14,10 +14,15 @@ class ObjectTable:
     objs: dict[int, Variable]  # id -> object
     # Python caches small integers, so int variables don't have unique ids
     objs_no_id: list[Variable]
+    helper_functions: HelperFunctions
 
-    def __init__(self) -> None:
+    def __init__(self, gen_by_caller: Callable[[Any], bool],
+                 mark_cannot_guard: Callable[[], None]) -> None:
         self.objs = {}
         self.objs_no_id = []
+        self.helper_functions = HelperFunctions(self.get_or_make_var,
+                                                gen_by_caller,
+                                                mark_cannot_guard)
 
     def add(self, var: Variable, value: Any) -> None:
         if id(value) in self.objs:
@@ -61,7 +66,7 @@ class ObjectTable:
         elif allow_unexist_const:
             if isinstance(value, get_args(CONST_TYPES)) or isinstance(
                     value, (list, tuple, set, dict, CodeType)):
-                return make_var_from_value(value, False, self.get_or_make_var)
+                return make_var_from_value(value, False, self.helper_functions)
         raise RuntimeError(
             f"Object {value}({id(value)}) not found in object table")
 
@@ -86,7 +91,7 @@ class ObjectTable:
             return self.objs[id(value)]
         else:
             return make_var_from_value(value, need_guard_check,
-                                       self.get_or_make_var, fx_graph,
+                                       self.helper_functions, fx_graph,
                                        extract_code_at_start)
 
     def get_by_id(self, idx: int) -> Variable:

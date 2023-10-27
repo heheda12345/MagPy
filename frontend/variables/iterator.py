@@ -1,5 +1,5 @@
 from typing import TYPE_CHECKING, Optional, Tuple, Any, Callable, Iterable
-from .base import Variable
+from .base import Variable, HelperFunctions
 from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos, StoreInIndex
 import torch
@@ -21,8 +21,6 @@ class IteratorVar(Variable):
         parent_idx: int,
         num_iters: int,
         need_guard_check: bool,
-        get_or_make_var: Callable[
-            [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
         extract_code_at_start: list[StorePos],
     ) -> None:
         super().__init__(need_guard_check, value, extract_code_at_start)
@@ -34,12 +32,9 @@ class IteratorVar(Variable):
     @classmethod
     def from_parent_var(cls, value: Any, parent_var: Optional[Variable],
                         parent_idx: int, num_iters: int, need_guard_check: bool,
-                        get_or_make_var: Callable[
-                            [Any, bool, Optional[FxGraph], list[StorePos]],
-                            Variable],
                         extract_code_at_start: list[StorePos]) -> "IteratorVar":
         return cls(value, parent_var, parent_idx, num_iters, need_guard_check,
-                   get_or_make_var, extract_code_at_start)
+                   extract_code_at_start)
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          store_pos: StorePos) -> None:
@@ -88,8 +83,7 @@ class RangeIterVar(Variable):
 
     @classmethod
     def from_value(cls, value: Any, need_guard_check: bool,
-                   _get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable], _fx_graph: Optional[FxGraph],
+                   _helper_functions: HelperFunctions,
+                   _fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "RangeIterVar":
         return cls(value, need_guard_check, extract_code_at_start)
