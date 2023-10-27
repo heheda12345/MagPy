@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING, Union, Optional, Callable, Any
 import torch
 import torch.fx
 from frontend.pycode_generator import GraphFnCodegen, GuardFnCodegen
-from .base import Variable
+from .base import Variable, HelperFunctions
 from ..fx_graph import FxGraph, NodeArgs
 from ..store_pos import StorePos, StoreInIndex
 if TYPE_CHECKING:
@@ -23,16 +23,15 @@ class TorchModuleVar(Variable):
         cls,
         value: torch.nn.Module,
         need_guard_check: bool,
-        get_or_make_var: Callable[
-            [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
+        helper_functions: HelperFunctions,
         _fx_graph: Optional[FxGraph],
         extract_code_at_start: list[StorePos],
     ) -> "TorchModuleVar":
         if isinstance(value, torch.nn.Sequential):
-            return TorchSequentialVar(value, need_guard_check, get_or_make_var,
+            return TorchSequentialVar(value, need_guard_check, helper_functions,
                                       extract_code_at_start)
         elif isinstance(value, torch.nn.ModuleList):
-            return TorchModuleListVar(value, need_guard_check, get_or_make_var,
+            return TorchModuleListVar(value, need_guard_check, helper_functions,
                                       extract_code_at_start)
         else:
             return cls(value, need_guard_check, extract_code_at_start)
@@ -58,8 +57,7 @@ class TorchSequentialVar(TorchModuleVar):
     submodule_ids: list[int]
 
     def __init__(self, value: torch.nn.Sequential, need_guard_check: bool,
-                 get_or_make_var: Callable[
-                     [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
+                 helper_functions: HelperFunctions,
                  extract_code_at_start: list[StorePos]) -> None:
         super().__init__(value, need_guard_check, extract_code_at_start)
         self.submodules = []
@@ -69,7 +67,8 @@ class TorchSequentialVar(TorchModuleVar):
                 StoreInIndex(pos, id(m), i)
                 for pos in self.extract_code_at_start
             ]
-            var = get_or_make_var(m, need_guard_check, None, new_extract)
+            var = helper_functions.get_or_make_var(m, need_guard_check, None,
+                                                   new_extract)
             assert isinstance(var, TorchModuleVar)
             self.submodules.append(var)
             self.submodule_ids.append(id(m))
@@ -95,8 +94,7 @@ class TorchModuleListVar(TorchModuleVar):
     submodule_ids: list[int]
 
     def __init__(self, value: torch.nn.ModuleList, need_guard_check: bool,
-                 get_or_make_var: Callable[
-                     [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
+                 helper_functions: HelperFunctions,
                  extract_code_at_start: list[StorePos]) -> None:
         super().__init__(value, need_guard_check, extract_code_at_start)
         self.submodules = []
@@ -106,7 +104,8 @@ class TorchModuleListVar(TorchModuleVar):
                 StoreInIndex(pos, id(m), i)
                 for pos in self.extract_code_at_start
             ]
-            var = get_or_make_var(m, need_guard_check, None, new_extract)
+            var = helper_functions.get_or_make_var(m, need_guard_check, None,
+                                                   new_extract)
             assert isinstance(var, TorchModuleVar)
             self.submodules.append(var)
             self.submodule_ids.append(id(m))

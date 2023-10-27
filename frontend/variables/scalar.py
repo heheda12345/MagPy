@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING, Union, Optional, Callable, Any
 
 import torch.fx
 import numpy as np
-from .base import Variable
+from .base import Variable, HelperFunctions
 from ..pycode_writer import get_float_string
 from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos
@@ -61,9 +61,8 @@ class ScalarVar(Variable):
 
     @classmethod
     def from_value(cls, value: ScalarType, need_guard_check: bool,
-                   _get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable], fx_graph: Optional[FxGraph],
+                   _helper_functions: HelperFunctions,
+                   fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "ScalarVar":
         if id(value) not in dyn.dynamic_vars:
             return cls(value, True, need_guard_check, None,
@@ -149,9 +148,8 @@ class NumpyScalarVar(Variable):
 
     @classmethod
     def from_value(cls, value: np.generic, need_guard_check: bool,
-                   _get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable], fx_graph: Optional[FxGraph],
+                   _helper_functions: HelperFunctions,
+                   fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "NumpyScalarVar":
         if id(value) not in dyn.dynamic_vars:
             return cls(value, True, need_guard_check, None,

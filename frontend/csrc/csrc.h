@@ -6,6 +6,24 @@ typedef _object PyObject;
 
 namespace frontend_csrc {
 
+class NullObjectSingleton {
+  public:
+    static NullObjectSingleton &getInstance() {
+        static NullObjectSingleton instance;
+        return instance;
+    }
+
+    PyObject *getNullObject() { return this->null_object; }
+    void setNullObject(PyObject *obj) { this->null_object = obj; }
+
+  private:
+    NullObjectSingleton() {}
+
+    NullObjectSingleton(const NullObjectSingleton &) = delete;
+    NullObjectSingleton &operator=(const NullObjectSingleton &) = delete;
+    PyObject *null_object = nullptr;
+};
+
 struct Cache {
     PyObject *check_fn;
     PyObject *graph_fn;

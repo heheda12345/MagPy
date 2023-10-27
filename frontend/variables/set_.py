@@ -1,5 +1,5 @@
 from typing import TYPE_CHECKING, Optional, Callable, Any
-from .base import Variable
+from .base import Variable, HelperFunctions
 from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos, StoreInIndex
 import torch
@@ -14,9 +14,7 @@ class SetVar(Variable):
     length: int
 
     def __init__(self, value: set[Any], need_guard_check: bool,
-                 get_or_make_var: Callable[
-                     [Any, bool, Optional[FxGraph], list[StorePos]],
-                     Variable], fx_graph: Optional[FxGraph],
+                 helper_functions: HelperFunctions, fx_graph: Optional[FxGraph],
                  extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, value, extract_code_at_start)
         self.value = value
@@ -28,7 +26,8 @@ class SetVar(Variable):
                 StoreInIndex(pos, id(obj), i, False)
                 for pos in self.extract_code_at_start
             ]
-            var = get_or_make_var(obj, need_guard_check, fx_graph, new_extract)
+            var = helper_functions.get_or_make_var(obj, need_guard_check,
+                                                   fx_graph, new_extract)
             self.vars.append(var)
             self.obj_ids.append(id(obj))
 
@@ -53,11 +52,10 @@ class SetVar(Variable):
 
     @classmethod
     def from_value(cls, value: set[Any], need_guard_check: bool,
-                   get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable], fx_graph: Optional[FxGraph],
+                   helper_functions: HelperFunctions,
+                   fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "SetVar":
-        return cls(value, need_guard_check, get_or_make_var, fx_graph,
+        return cls(value, need_guard_check, helper_functions, fx_graph,
                    extract_code_at_start)
 
     def as_fx_node(self) -> NodeArgs:

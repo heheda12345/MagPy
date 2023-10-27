@@ -12,6 +12,14 @@ if TYPE_CHECKING:
 
 
 @dataclass
+class HelperFunctions:
+    get_or_make_var: Callable[[Any, bool, Optional[FxGraph], list[StorePos]],
+                              'Variable']
+    gen_by_caller: Callable[[Any], bool]
+    mark_cannot_guard: Callable[[], None]
+
+
+@dataclass
 class Variable:
     need_guard_check: bool
     extract_code_at_start: list[StorePos]
@@ -38,8 +46,7 @@ class Variable:
         self,
         value: Any,
         need_guard_check: bool,
-        get_or_make_var: Callable[
-            [Any, bool, Optional[FxGraph], list[StorePos]], 'Variable'],
+        _helper_functions: 'HelperFunctions',
         fx_graph: Optional[FxGraph],
         extract_code_at_start: list[StorePos],
     ) -> 'Variable':

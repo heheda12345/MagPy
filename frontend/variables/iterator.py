@@ -1,5 +1,5 @@
 from typing import TYPE_CHECKING, Optional, Tuple, Any, Callable, Iterable
-from .base import Variable
+from .base import Variable, HelperFunctions
 from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos, StoreInIndex
 import torch
@@ -10,19 +10,17 @@ if TYPE_CHECKING:
 
 
 class IteratorVar(Variable):
-    parent_var: Variable
+    parent_var: Optional[Variable]
     parent_idx: int
     num_iters: int
 
     def __init__(
         self,
         value: Any,
-        parent_var: Variable,
+        parent_var: Optional[Variable],
         parent_idx: int,
         num_iters: int,
         need_guard_check: bool,
-        get_or_make_var: Callable[
-            [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
         extract_code_at_start: list[StorePos],
     ) -> None:
         super().__init__(need_guard_check, value, extract_code_at_start)
@@ -32,14 +30,11 @@ class IteratorVar(Variable):
         self.num_iters = num_iters
 
     @classmethod
-    def from_parent_var(cls, value: Any, parent_var: Variable, parent_idx: int,
-                        num_iters: int, need_guard_check: bool,
-                        get_or_make_var: Callable[
-                            [Any, bool, Optional[FxGraph], list[StorePos]],
-                            Variable],
+    def from_parent_var(cls, value: Any, parent_var: Optional[Variable],
+                        parent_idx: int, num_iters: int, need_guard_check: bool,
                         extract_code_at_start: list[StorePos]) -> "IteratorVar":
         return cls(value, parent_var, parent_idx, num_iters, need_guard_check,
-                   get_or_make_var, extract_code_at_start)
+                   extract_code_at_start)
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          store_pos: StorePos) -> None:
@@ -48,6 +43,8 @@ class IteratorVar(Variable):
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
                           idx: int) -> None:
+        if self.parent_var is None:
+            raise ValueError("cannot gen output for None parent_var")
         self.parent_var.make_output(f"{name_in_graph_fn}_iterable", store_pos,
                                     codegen, False, idx)
         codegen.output(name_in_graph_fn, store_pos,
@@ -86,8 +83,7 @@ class RangeIterVar(Variable):
 
     @classmethod
     def from_value(cls, value: Any, need_guard_check: bool,
-                   _get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable], _fx_graph: Optional[FxGraph],
+                   _helper_functions: HelperFunctions,
+                   _fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "RangeIterVar":
         return cls(value, need_guard_check, extract_code_at_start)
