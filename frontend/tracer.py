@@ -85,13 +85,15 @@ def get_process_frame(
                 get_frame_cache(frame_id).new_code = new_code
                 get_frame_cache(frame_id).code_map = code_map
                 trace_func = get_trace_func(frame_id)
+                
             else:
                 print("old bytecode: \n")
                 print(format_insts(get_frame_cache(frame_id).code_map.guard_insts))
                 new_code = get_frame_cache(frame_id).new_code
                 code_map = get_frame_cache(frame_id).code_map
                 trace_func = get_trace_func(frame_id)
-                mark_need_postprocess()                
+            mark_need_postprocess()
+            
         except Exception as e:
             print("exception in preprocess:", e, type(e))
             print(traceback.format_exc())
@@ -106,12 +108,13 @@ def get_process_frame(
                 set_frame_root(frame_id, f)
                 new_code, code_map = rewrite_bytecode(frame.f_code, frame_id,
                                                     is_callee)
-                trace_func = get_trace_func(frame_id)
+                get_frame_cache(frame_id).new_code = new_code
+                get_frame_cache(frame_id).code_map = code_map
 
         except Exception as e:
             print("exception in postprocess:", e, type(e))
             print(traceback.format_exc())
             raise e
-        return (new_code, trace_func, code_map)
+        return 
 
     return (preprocess_frame, postprocess_frame)
