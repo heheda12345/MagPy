@@ -156,8 +156,13 @@ class State:
                         kwargs: Dict[str, Any],
                         add_partial_var: bool = True,
                         inplace_ref: Any = None) -> None:
+        print("record function", func, args, kwargs)
         pargs, pkwargs = self.as_node_args_kwargs(args, kwargs)
         self.written = True
+        scalar2tensor: dict[Callable[..., Any], Callable[..., Any]] = {
+            float: torch.Tensor.float,
+            int: torch.Tensor.long,
+        }
         if isinstance(func, torch.nn.Module):
             if is_leaf_module(func):
                 fx_node = self.fx_graph.create_node(
@@ -179,8 +184,10 @@ class State:
                 for k, v in self.submodule_paths.items():
                     print(id(k), v, k)
                 raise NotImplementedError(func)
-        elif hasattr(func, '__self__') and isinstance(func.__self__,
-                                                      torch.Tensor):
+        elif (hasattr(func, '__self__') and
+              isinstance(func.__self__, torch.Tensor)) or func in scalar2tensor:
+            if func in scalar2tensor:
+                func = scalar2tensor[func]
             fx_node = self.fx_graph.create_node("call_method", func.__name__,
                                                 pargs, pkwargs)
             if add_partial_var:
@@ -1005,13 +1012,13 @@ class GuardTracker:
                         value, node, partial.need_guard_check,
                         partial.extract_code_at_start)
             elif is_scalar(value) and node is not None:
+                dyn.mark_dynamic(value, dyn.ScalarWithUnknownValue())
                 var = vs.ScalarVar.from_value_and_node(
                     value,
                     partial.node,
                     partial.need_guard_check,
                     partial.extract_code_at_start,
                 )
-                dyn.mark_dynamic(value, dyn.ScalarWithUnknownValue())
             else:
                 default_make_var_fn: MAKE_VAR_FN_TYPE = vs.make_var_from_value
                 partial_make_var_fn: Optional[
@@ -1171,11 +1178,12 @@ class GuardTracker:
                     ]
                 })
 
-        if get_root_module(func) == 'torch' or (self.has_tensor_arg(
-                args, kwargs) and is_graph_func(func)):
-            if hasattr(
-                    func,
-                    "__name__") and func.__name__ in ("size", "named_children"):
+        if get_root_module(func) == 'torch' or (
+                self.has_tensor_arg(args, kwargs) and
+            (is_graph_func(func) or func in (float, int))):
+            if hasattr(func, "__name__") and func.__name__ in (
+                    "size", "named_children",
+                    "_are_functorch_transforms_active"):
                 self.state.set_partial_var({
                     -1: [
                         PartialVar(node=None,
