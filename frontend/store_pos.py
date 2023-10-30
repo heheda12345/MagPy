@@ -212,3 +212,12 @@ class IterValue(StorePos):
 
     def __repr__(self) -> str:
         return "__iter_value__"
+
+
+class UnknownPosInCaller(StorePos):
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def __repr__(self) -> str:
+        return "@__unknown_pos_in_caller__"

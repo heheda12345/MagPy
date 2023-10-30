@@ -4,7 +4,7 @@ from frontend.pycode_generator import GraphFnCodegen
 import torch.fx
 from types import ModuleType
 from enum import Enum
-from .base import Variable
+from .base import Variable, HelperFunctions
 from ..pycode_writer import get_float_string
 from ..fx_graph import NodeArgs, FxGraph
 from ..utils import NullObject, null_object
@@ -31,9 +31,8 @@ class NoneVar(Variable):
 
     @classmethod
     def from_value(cls, value: None, need_guard_check: bool,
-                   _get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable], _fx_graph: Optional[FxGraph],
+                   _helper_functions: HelperFunctions,
+                   _fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "NoneVar":
         return cls(need_guard_check, value, extract_code_at_start)
 
@@ -60,9 +59,8 @@ class NullVar(Variable):
 
     @classmethod
     def from_value(cls, value: NullObject, need_guard_check: bool,
-                   _get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable], _fx_graph: Optional[FxGraph],
+                   _helper_functions: HelperFunctions,
+                   _fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "NullVar":
         return cls(need_guard_check, value, extract_code_at_start)
 
@@ -88,9 +86,8 @@ class CodeVar(Variable):
 
     @classmethod
     def from_value(cls, value: None, need_guard_check: bool,
-                   _get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable], _fx_graph: Optional[FxGraph],
+                   _helper_functions: HelperFunctions,
+                   _fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "CodeVar":
         return cls(need_guard_check, value, extract_code_at_start)
 
@@ -125,9 +122,8 @@ class SliceVar(Variable):
 
     @classmethod
     def from_value(cls, value: slice, need_guard_check: bool,
-                   _get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable], _fx_graph: Optional[FxGraph],
+                   _helper_functions: HelperFunctions,
+                   _fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "SliceVar":
         return cls(value.start, value.stop, value.step, need_guard_check, value,
                    extract_code_at_start)
@@ -159,9 +155,8 @@ class ModuleVar(Variable):
 
     @classmethod
     def from_value(cls, value: ModuleType, need_guard_check: bool,
-                   _get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable], _fx_graph: Optional[FxGraph],
+                   _helper_functions: HelperFunctions,
+                   _fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "ModuleVar":
         return cls(value, need_guard_check, extract_code_at_start)
 
@@ -189,9 +184,8 @@ class FunctionVar(Variable):
 
     @classmethod
     def from_value(cls, value: Callable[..., Any], need_guard_check: bool,
-                   _get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable], _fx_graph: Optional[FxGraph],
+                   _helper_functions: HelperFunctions,
+                   _fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "FunctionVar":
         return cls(value, need_guard_check, extract_code_at_start)
 
@@ -223,9 +217,8 @@ class RangeVar(Variable):
 
     @classmethod
     def from_value(cls, value: range, need_guard_check: bool,
-                   _get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable], _fx_graph: Optional[FxGraph],
+                   _helper_functions: HelperFunctions,
+                   _fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "RangeVar":
         return cls(value.start, value.stop, value.step, need_guard_check, value,
                    extract_code_at_start)

@@ -1,6 +1,6 @@
 import inspect
 import dis
-from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic
+from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic, Optional
 from types import FrameType
 import random
 import operator
@@ -142,6 +142,19 @@ def is_own_method(func: str, parent: Callable[..., Any]) -> bool:
         if member == func:
             return True
     return False
+
+
+def get_method_defined_class(func: Callable[..., Any],
+                             func_name: str) -> Optional[type[Any]]:
+    cls = func.__class__
+    assert cls is not None
+    while True:
+        if func_name in cls.__dict__:
+            return cls
+        if cls.__base__ is None:
+            break
+        cls = cls.__base__
+    return None
 
 
 def is_user_defined_func(func: Callable[..., Any]) -> bool:

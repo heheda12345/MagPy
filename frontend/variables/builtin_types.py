@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Optional, Tuple, Any, Callable
 from types import CellType
-from .base import Variable
+from .base import Variable, HelperFunctions
 from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos, StoreInAttr, StoreInFreeVar
 import torch
@@ -14,9 +14,7 @@ class CellVar(Variable):
     sub_id: int
 
     def __init__(self, value: CellType, need_guard_check: bool,
-                 get_or_make_var: Callable[
-                     [Any, bool, Optional[FxGraph], list[StorePos]],
-                     Variable], fx_graph: Optional[FxGraph],
+                 helper_functions: HelperFunctions, fx_graph: Optional[FxGraph],
                  extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, value, extract_code_at_start)
         assert len(extract_code_at_start) > 0
@@ -25,8 +23,9 @@ class CellVar(Variable):
             StoreInAttr(pos, id(value), "cell_contents")
             for pos in self.extract_code_at_start
         ]
-        self.sub_var = get_or_make_var(sub_obj, need_guard_check, fx_graph,
-                                       new_extract)
+        self.sub_var = helper_functions.get_or_make_var(sub_obj,
+                                                        need_guard_check,
+                                                        fx_graph, new_extract)
         self.sub_id = id(sub_obj)
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
@@ -57,11 +56,10 @@ class CellVar(Variable):
 
     @classmethod
     def from_value(cls, value: CellType, need_guard_check: bool,
-                   get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable], fx_graph: Optional[FxGraph],
+                   helper_functions: HelperFunctions,
+                   fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "CellVar":
-        return cls(value, need_guard_check, get_or_make_var, fx_graph,
+        return cls(value, need_guard_check, helper_functions, fx_graph,
                    extract_code_at_start)
 
     def add_subvars_to_table(self, table: 'ObjectTable') -> None:

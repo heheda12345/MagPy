@@ -1,5 +1,5 @@
 from typing import TYPE_CHECKING, Optional, Any, Callable
-from .base import Variable
+from .base import Variable, HelperFunctions
 from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos, StoreInIndex
 from .tensor import TensorVar
@@ -17,8 +17,7 @@ class DictVar(Variable):
     def __init__(self,
                  value: dict[Any, Any],
                  need_guard_check: bool,
-                 get_or_make_var: Callable[
-                     [Any, bool, Optional[FxGraph], list[StorePos]], Variable],
+                 helper_functions: HelperFunctions,
                  fx_graph: Optional[FxGraph] = None,
                  extract_code_at_start: list[StorePos] = []) -> None:
         super().__init__(need_guard_check, value, extract_code_at_start)
@@ -38,7 +37,8 @@ class DictVar(Variable):
                     StoreInIndex(pos, id(obj), str(key))
                     for pos in self.extract_code_at_start
                 ]
-            var = get_or_make_var(obj, need_guard_check, fx_graph, new_extract)
+            var = helper_functions.get_or_make_var(obj, need_guard_check,
+                                                   fx_graph, new_extract)
             self.vars.append(var)
             self.obj_ids.append(id(obj))
 
@@ -82,12 +82,10 @@ class DictVar(Variable):
     def from_value(cls,
                    value: dict[Any, Any],
                    need_guard_check: bool,
-                   get_or_make_var: Callable[
-                       [Any, bool, Optional[FxGraph], list[StorePos]],
-                       Variable],
+                   helper_functions: HelperFunctions,
                    fx_graph: Optional[FxGraph] = None,
                    extract_code_at_start: list[StorePos] = []) -> "DictVar":
-        return cls(value, need_guard_check, get_or_make_var, fx_graph,
+        return cls(value, need_guard_check, helper_functions, fx_graph,
                    extract_code_at_start)
 
     def as_fx_node(self) -> NodeArgs:

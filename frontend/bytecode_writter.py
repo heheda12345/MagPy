@@ -473,6 +473,9 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int,
             instructions[i].is_end = True
             next_original_pc.append((original, instructions[i]))
             in_trace_insts.append(instructions[i])
+            for jump_inst in instructions:
+                if jump_inst.target is not None and jump_inst.target == inst:
+                    jump_inst.target = instructions[i]
     run_traced_insts.sort(key=lambda x: x[0], reverse=True)
     for start_pc, traced_code in run_traced_insts:
         jump_inst = ci("JUMP_ABSOLUTE", target=traced_code[0])
