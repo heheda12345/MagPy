@@ -231,7 +231,7 @@ class State:
         self.written = True
         self.stored_globals.add(name)
 
-    def store_pos_in_callee(self, pos: StorePos,
+    def store_pos_in_caller(self, pos: StorePos,
                             idx: int) -> Optional[StorePos]:
         if idx in self.objects.objs:
             var = self.objects.objs[idx]
@@ -245,22 +245,22 @@ class State:
         elif isinstance(pos, (StoreInGlobal, StoreInBuiltin)):
             return pos
         elif isinstance(pos, StoreInAttr):
-            parent_pos = self.store_pos_in_callee(pos.self_pos, pos.self_id)
+            parent_pos = self.store_pos_in_caller(pos.self_pos, pos.self_id)
             if parent_pos is None:
                 return None
             return StoreInAttr(parent_pos, pos.self_id, pos.attr_name)
         elif isinstance(pos, StoreInIndex):
-            parent_pos = self.store_pos_in_callee(pos.self_pos, pos.self_id)
+            parent_pos = self.store_pos_in_caller(pos.self_pos, pos.self_id)
             if parent_pos is None:
                 return None
             return StoreInIndex(parent_pos, pos.self_id, pos.self_index)
         elif isinstance(pos, ExtractFromMethod):
-            parent_pos = self.store_pos_in_callee(pos.self_pos, pos.self_id)
+            parent_pos = self.store_pos_in_caller(pos.self_pos, pos.self_id)
             if parent_pos is None:
                 return None
             return ExtractFromMethod(parent_pos, pos.self_id, pos.method_name)
         elif isinstance(pos, ExtractFromFunction):
-            parent_pos = self.store_pos_in_callee(pos.var_pos, pos.var_id)
+            parent_pos = self.store_pos_in_caller(pos.var_pos, pos.var_id)
             if parent_pos is None:
                 return None
             return ExtractFromFunction(parent_pos, pos.var_id, pos.func_name)
@@ -303,7 +303,7 @@ class State:
                         elif isinstance(
                                 pos, (StoreInAttr, StoreInIndex,
                                       ExtractFromMethod, ExtractFromFunction)):
-                            self_pos = self.store_pos_in_callee(pos, idx)
+                            self_pos = self.store_pos_in_caller(pos, idx)
                             if self_pos is None:
                                 print(
                                     "\033[34m[warning] cannot find store pos in callee, skip guard check\033[0m",
@@ -393,7 +393,7 @@ class State:
                                   idx: int) -> list[StorePos]:
                 new: list[StorePos] = []
                 for pos in old:
-                    new_pos = self.store_pos_in_callee(pos, idx)
+                    new_pos = self.store_pos_in_caller(pos, idx)
                     if new_pos is not None:
                         new.append(new_pos)
                 return new
@@ -1409,7 +1409,12 @@ class GuardTracker:
             kwargs[kw_name] = arg
         args = args[:-len(kw_names)]
         # print(f"function kw: {func}, type: {type(func)},args:{args}, kwargs:{kwargs}")
-        self.call_function(func, args, kwargs)
+        if hasattr(func, '__self__'):
+            self.call_function(func, (func.__self__,) + tuple(args), kwargs)
+            print("func self id:", id(func.__self__))
+            # print(f"function kw: {func}, type: {type(func)},args:{(func.__self__,) + tuple(args)}, kwargs:{kwargs}")
+        else:
+            self.call_function(func, args, kwargs)
 
     def CALL_FUNCTION_EX(self, inst: Instruction) -> None:
         offset = inst.argval & 1
