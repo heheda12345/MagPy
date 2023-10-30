@@ -16,7 +16,7 @@ from .code import ProcessedCode
 from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method, get_from_freevars
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
-from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromConstructor, UnknownPosInCaller
+from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromNew, UnknownPosInCaller
 from . import variables as vs
 from . import dynamic as dyn
 from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs, print_bytecode, get_method_defined_class
@@ -270,10 +270,14 @@ class State:
                 return None
             return ExtractFromMethod(parent_pos, pos.self_id, pos.method_name)
         elif isinstance(pos, ExtractFromFunction):
-            parent_pos = self.store_pos_in_callee(pos.var_pos, pos.var_id)
-            if parent_pos is None:
-                return None
-            return ExtractFromFunction(parent_pos, pos.var_id, pos.func_name)
+            parent_poses: list[StorePos] = []
+            for p, i in zip(pos.var_pos, pos.var_id):
+                new_pos = self.store_pos_in_callee(p, i)
+                if new_pos is None:
+                    return None
+                parent_poses.append(new_pos)
+            return ExtractFromFunction(parent_poses, pos.var_id, pos.func_name,
+                                       pos.func_obj, pos.need_add_to_fn)
         else:
             raise NotImplementedError
 
@@ -287,16 +291,30 @@ class State:
         self.defer_restart = None
         replacement_mapping: dict[torch.fx.Node, torch.fx.Node] = {}
         calling_func = self.calling_func
-        if self.calling_func is not None:
+        ignore_objs: list[Any] = []
+        if calling_func is not None:
             if inspect.isclass(calling_func):
                 new_obj = state.initial_args[0]
                 assert isinstance(new_obj, calling_func)
                 assert not self.objects.contains(new_obj)
                 self.objects.add(
-                    vs.make_var_from_value(
-                        new_obj, False, self.objects.helper_functions,
-                        self.fx_graph, [ExtractFromConstructor(calling_func)]),
+                    vs.make_var_from_value(new_obj, False,
+                                           self.objects.helper_functions,
+                                           self.fx_graph,
+                                           [ExtractFromNew(calling_func)]),
                     new_obj)
+            if hasattr(calling_func, '__name__') and \
+                calling_func.__name__ == 'apply' and \
+                hasattr(calling_func,'__self__') and \
+                get_method_defined_class(calling_func.__self__, calling_func.__name__) == torch.autograd.function.Function:
+                # autograd_function's apply method
+                for arg_id in [0, 1]:
+                    if len(state.initial_args) > arg_id and isinstance(
+                            state.initial_args[arg_id],
+                            torch.autograd.function.BackwardCFunction):
+                        ignore_objs.append(state.initial_args[arg_id])
+                        break
+        ignore_ids = [id(x) for x in ignore_objs]
 
         def merge_call_guard() -> None:
             for idx, var in state.objects.objs.items():
@@ -478,7 +496,7 @@ class State:
                 return new_var
 
             for idx, var in state.objects.get_all_with_id():
-                if var.prev is not None:
+                if var.prev is not None and idx not in ignore_ids:
                     oldest = var.get_oldest_var()
                     if len(oldest.extract_code_at_start) == 0:
                         continue
@@ -1085,7 +1103,7 @@ class GuardTracker:
             var = self.state.objects.get_or_none(args[0])
             assert var is not None
             new_store_pos: list[StorePos] = [
-                ExtractFromFunction(pos, id(args[0]), func.__name__)
+                ExtractFromFunction([pos], [id(args[0])], func.__name__, func)
                 for pos in var.extract_code_at_start
             ]
             self.state.set_partial_var({
@@ -1097,8 +1115,26 @@ class GuardTracker:
             })
         if is_user_defined_func(func) or isinstance(func, torch.nn.Sequential):
             if inspect.isclass(func):
-                if func.__new__ != object.__new__:  # type: ignore[comparison-overlap]
-                    raise NotImplementedError("user defined __new__")
+                class_define_new = get_method_defined_class(func, '__new__')
+                if class_define_new not in (object, torch._C._FunctionBase):
+                    raise NotImplementedError("user defined __new__",
+                                              class_define_new)
+                class_define_init = get_method_defined_class(func, '__init__')
+                if class_define_init in (
+                        torch.autograd.function.InplaceFunction,
+                        torch.autograd.function.Function, object):
+                    self.state.set_partial_var({
+                        -1: [
+                            PartialVar(node=None,
+                                       need_guard_check=False,
+                                       extract_code_at_start=[
+                                           ExtractFromFunction([], [],
+                                                               func.__name__,
+                                                               func, True)
+                                       ])
+                        ]
+                    })
+                    return
             print("run into user defined function", func)
             stack_objs = get_all_objects_in_stack(self.frame)
             self.state.mark_calling_func(func)
@@ -1187,9 +1223,9 @@ class GuardTracker:
             )
             raise NotImplementedError
         elif func == getattr:
-            if get_method_defined_class(args[0], '__getattr__') in (
+            if get_method_defined_class(type(args[0]), '__getattr__') in (
                     torch.nn.Module, object) and get_method_defined_class(
-                        args[0],
+                        type(args[0]),
                         '__getattribute__') in (torch.nn.Module, object):
                 arg_obj = self.state.objects.get(args[0])
 
@@ -1266,6 +1302,22 @@ class GuardTracker:
         obj1 = get_value_stack_from_top(self.frame, 1)
         obj2 = get_value_stack_from_top(self.frame, 0)
         self.call_function(operator.getitem, [obj1, obj2], {})
+
+    def unary_operation(self, func: Callable[..., Any]) -> None:
+        obj = get_value_stack_from_top(self.frame, 0)
+        self.call_function(func, [obj], {})
+
+    def UNARY_POSITIVE(self, _inst: Instruction) -> None:
+        self.unary_operation(operator.pos)
+
+    def UNARY_NEGATIVE(self, _inst: Instruction) -> None:
+        self.unary_operation(operator.neg)
+
+    def UNARY_NOT(self, _inst: Instruction) -> None:
+        self.unary_operation(operator.not_)
+
+    def UNARY_INVERT(self, _inst: Instruction) -> None:
+        self.unary_operation(operator.invert)
 
     def COMPARE_OP(self, inst: Instruction) -> None:
         obj1 = get_value_stack_from_top(self.frame, 1)
@@ -1394,6 +1446,8 @@ class GuardTracker:
             StoreInAttr(pos, id(obj), inst.argval)
             for pos in obj_var.extract_code_at_start
         ]
+        if inst.argval in obj_var.modified_attrs:
+            return
         partial: list[Optional[PartialVar]] = [
             PartialVar(node=None,
                        need_guard_check=obj_var.need_guard_check,

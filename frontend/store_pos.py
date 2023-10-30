@@ -1,4 +1,4 @@
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING, Callable
 from types import FrameType
 
 from .c_api import get_value_stack_from_top
@@ -164,24 +164,45 @@ class ExtractFromMethod(StorePos):
 
 
 class ExtractFromFunction(StorePos):
-    var_pos: StorePos
-    var_id: int
+    var_pos: list[StorePos]
+    var_id: list[int]
     func_name: str
+    func_obj: Any
+    need_add_to_fn: bool
+    preserved_name: str
 
-    def __init__(self, var_pos: StorePos, var_id: int, func_name: str) -> None:
+    def __init__(self,
+                 var_pos: list[StorePos],
+                 var_id: list[int],
+                 func_name: str,
+                 func_obj: Callable[..., Any],
+                 need_add_to_fn: bool = False) -> None:
         self.var_pos = var_pos
         self.var_id = var_id
         self.func_name = func_name
+        self.func_obj = func_obj
+        self.need_add_to_fn = need_add_to_fn
+        from .pycode_writer import new_name
+        self.preserved_name = new_name(f"function_{self.func_name}")
 
     def __repr__(self) -> str:
-        return f"{self.func_name}({self.var_pos})"
+        if self.need_add_to_fn:
+            return f"{self.preserved_name}({','.join([str(pos) for pos in self.var_pos])})"
+        else:
+            return f"{self.func_name}({','.join([str(pos) for pos in self.var_pos])})"
 
     def get_value_from_frame(self, frame: FrameType) -> Any:
-        return getattr(self.var_pos.get_value_from_frame(frame),
-                       self.func_name)()
+        args = [pos.get_value_from_frame(frame) for pos in self.var_pos]
+        return self.func_obj(*args)
+
+    def add_name_to_fn(self, codegen: 'FnCodegen') -> None:
+        if self.need_add_to_fn:
+            codegen.add_obj(self.func_obj, self.preserved_name, force=True)
+            for pos in self.var_pos:
+                pos.add_name_to_fn(codegen)
 
 
-class ExtractFromConstructor(StorePos):
+class ExtractFromNew(StorePos):
     type_obj: Any
     preserved_name: Optional[str]
 

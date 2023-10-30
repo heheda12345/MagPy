@@ -237,3 +237,49 @@ def test_call_with_list_layers(caplog):
     compiled_model = compile(model)
     run_and_check(compiled_model, [MISS], 1, caplog, result, a)
     run_and_check(compiled_model, [HIT], 1, caplog, result, a)
+
+
+class AutogradUDFStatic(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, x, y):
+        ctx.x = x
+        return ctx.x + y
+
+
+class AutogradUDFClass(torch.autograd.Function):
+
+    @classmethod
+    def forward(cls, ctx, x, y):
+        ctx.x = x
+        return ctx.x + y
+
+
+def run_udf_static(x, y):
+    return AutogradUDFStatic().apply(x, y)
+
+
+def run_udf_class(x, y):
+    return AutogradUDFClass().apply(x, y)
+
+
+def test_udf_static(caplog):
+    reset()
+    x = 1.0
+    y = torch.full((1, 1), 1.0)
+    result = run_udf_static(x, y)
+    compiled_model = compile(run_udf_static)
+    run_and_check(compiled_model, [MISS, MISS, MISS], 1, caplog, result, x, y)
+    run_and_check(compiled_model, [HIT], 1, caplog, result, x, y)
+
+
+def test_udf_class(caplog):
+    reset()
+    with torch.no_grad():
+        x = 1.0
+        y = torch.full((1, 1), 1.0)
+        result = run_udf_class(x, y)
+        compiled_model = compile(run_udf_class)
+        run_and_check(compiled_model, [MISS, MISS, MISS], 1, caplog, result, x,
+                      y)
+        run_and_check(compiled_model, [HIT], 1, caplog, result, x, y)

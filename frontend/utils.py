@@ -142,10 +142,8 @@ def is_own_method(func: str, parent: Callable[..., Any]) -> bool:
     return False
 
 
-def get_method_defined_class(func: Callable[..., Any],
+def get_method_defined_class(cls: type[Any],
                              func_name: str) -> Optional[type[Any]]:
-    cls = func.__class__
-    assert cls is not None
     while True:
         if func_name in cls.__dict__:
             return cls
@@ -169,6 +167,10 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
 
     if hasattr(func, '__name__') and func.__name__ == '<genexpr>':
         return False
+
+    if hasattr(func, '__name__') and func.__name__ == 'apply':
+        assert hasattr(func, '__self__')
+        return is_user_defined_func(func.__self__)
 
     if func is super:
         return False
@@ -209,7 +211,7 @@ def new_random_key() -> int:
     global random_state
     cur_state = random.getstate()
     if random_state is None:
-        random.seed(23333)
+        random.seed(66666)
         random_state = random.getstate()
     random.setstate(random_state)
     new_key = random.randint(0, 10000)
