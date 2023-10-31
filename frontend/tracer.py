@@ -85,6 +85,8 @@ def get_process_frame(
                 trace_func = get_trace_func(frame_id)
 
             else:
+                assert get_frame_cache(frame_id).new_code is not None
+                assert get_frame_cache(frame_id).code_map is not None
                 print("old bytecode: \n")
                 print(
                     format_insts(
