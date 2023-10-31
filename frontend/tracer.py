@@ -76,8 +76,7 @@ def get_process_frame(
             print(f"preprocess frame {frame.f_code.co_filename}", frame_id,
                   hex(id(frame)), frame.f_code.co_name)
             enable_cache(frame_id)
-
-            if get_frame_cache(frame_id).new_code is None:
+            if not get_frame_cache(frame_id).updated:
                 print("new bytecode: \n")
                 set_frame_root(frame_id, f)
                 new_code, code_map = rewrite_bytecode(frame.f_code, frame_id,

@@ -40,6 +40,7 @@ class FrameCache:
         self.callsite_id = {0: 0}
         self.new_code = None
         self.code_map = None
+        self.updated = False
 
     def add(self, traced_code: CachedGraph) -> None:
         start_pc = traced_code.start_pc
