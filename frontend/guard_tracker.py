@@ -13,7 +13,7 @@ import dataclasses
 import torch.fx.immutable_collections as fx_immutable
 import numpy as np
 from .code import ProcessedCode
-from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method, get_from_freevars
+from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method, get_from_freevars, set_value_stack_from_top
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
 from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromNew, UnknownPosInCaller
@@ -41,6 +41,7 @@ class PartialVar:
     extract_code_at_start: list[StorePos]
     inplace_ref: Any = None  # None if not inplace
     make_var_fn: Optional[MAKE_VAR_FN_TYPE] = None
+    force_new_value: bool = False
 
 
 @dataclasses.dataclass
@@ -71,8 +72,10 @@ class State:
     guarded_pcs: list[int]
     initial_args: list[Any]
     calling_func: Optional[Any]
+    callee_returns: Any
     can_guard: bool
     gen_by_caller: Callable[[Any], bool]
+    frame_id: int
 
     def __init__(self, root: torch.nn.Module,
                  gen_by_caller: Callable[[Any], bool]) -> None:
@@ -104,6 +107,8 @@ class State:
         self.initial_args = []
         self.calling_func = None
         self.can_guard = True
+        self.frame_id = -1
+        self.callee_returns = None
 
     def update_subpath(self, module: torch.nn.Module, prefix: str) -> None:
 
@@ -140,6 +145,8 @@ class State:
                 return fx_immutable.immutable_list([as_fx_node(x) for x in arg])
             var = self.objects.get(arg, allow_unexist_const=True)
             if isinstance(var, vs.TorchParamVar):
+                if var.obj not in self.subparam_paths:
+                    self.add_subparam(var.obj)
                 return self.fx_graph.create_node("get_attr",
                                                  self.subparam_paths[var.obj],
                                                  (), {})
@@ -155,8 +162,9 @@ class State:
                         args: List[Any],
                         kwargs: Dict[str, Any],
                         add_partial_var: bool = True,
-                        inplace_ref: Any = None) -> None:
-        print("record function", func, args, kwargs)
+                        inplace_ref: Any = None,
+                        force_new_value: bool = False) -> None:
+        print("record function", func)
         pargs, pkwargs = self.as_node_args_kwargs(args, kwargs)
         self.written = True
         scalar2tensor: dict[Callable[..., Any], Callable[..., Any]] = {
@@ -177,7 +185,8 @@ class State:
                             PartialVar(node=fx_node,
                                        need_guard_check=False,
                                        extract_code_at_start=[],
-                                       inplace_ref=inplace_ref)
+                                       inplace_ref=inplace_ref,
+                                       force_new_value=force_new_value)
                         ]
                     }
             else:
@@ -196,7 +205,8 @@ class State:
                         PartialVar(node=fx_node,
                                    need_guard_check=False,
                                    extract_code_at_start=[],
-                                   inplace_ref=inplace_ref)
+                                   inplace_ref=inplace_ref,
+                                   force_new_value=force_new_value)
                     ]
                 }
         else:
@@ -212,12 +222,13 @@ class State:
                         PartialVar(node=fx_node,
                                    need_guard_check=False,
                                    extract_code_at_start=[],
-                                   inplace_ref=inplace_ref)
+                                   inplace_ref=inplace_ref,
+                                   force_new_value=force_new_value)
                     ]
                 }
 
     @classmethod
-    def from_frame(cls, frame: FrameType, read_stack: bool,
+    def from_frame(cls, frame: FrameType, frame_id: int, read_stack: bool,
                    frame_root: torch.nn.Module,
                    gen_by_caller: Callable[[Any], bool]) -> 'State':
         state = cls(frame_root, gen_by_caller)
@@ -234,6 +245,7 @@ class State:
         for var_name in frame.f_code.co_varnames[:frame.f_code.co_argcount]:
             state.initial_args.append(frame.f_locals[var_name])
         state.written = False
+        state.frame_id = frame_id
         return state
 
     def add_object(self, var: vs.Variable, value: Any) -> None:
@@ -294,6 +306,7 @@ class State:
             return
 
         print("to merge graph", state.fx_graph.result_graph)
+        print("to merge frameid", state.frame_id, self.frame_id)
         # self.written = True
         self.defer_restart = None
         replacement_mapping: dict[torch.fx.Node, torch.fx.Node] = {}
@@ -524,6 +537,9 @@ class State:
         merge_fx_graph()
         merge_output()
         self.object_refs.extend(state.object_refs)
+        if self.calling_func is not None:
+            assert len(stack_objs) == 1
+            self.callee_returns = stack_objs[0]
 
     def mark_defer_restart(self,
                            defer_restart_state: DeferRestartState) -> None:
@@ -544,6 +560,7 @@ class State:
 
     def unmark_calling_func(self) -> None:
         self.calling_func = None
+        self.callee_returns = None
 
     def mark_cannot_guard(self) -> None:
         self.can_guard = False
@@ -580,8 +597,8 @@ class GuardTracker:
     def init_state(self, read_stack: bool = True) -> None:
         if hasattr(self, "state"):
             self.state.written = False
-        self.state = State.from_frame(self.frame, read_stack, self.frame_root,
-                                      self.gen_by_caller)
+        self.state = State.from_frame(self.frame, self.frame_id, read_stack,
+                                      self.frame_root, self.gen_by_caller)
         self.have_error = False
 
     def record(
@@ -993,6 +1010,16 @@ class GuardTracker:
                 continue
             value = get_value_stack_from_top(self.frame, i)
             node = partial.node
+            if partial.force_new_value and self.state.objects.contains(value):
+                if isinstance(value, float):
+                    new_value = -(-value)
+                    assert id(value) != id(new_value)
+                    set_value_stack_from_top(self.frame, i, new_value)
+                    value = new_value
+                elif isinstance(value, (bool, int)):
+                    raise NotImplementedError
+                else:
+                    raise ValueError("duplicate id")
             if isinstance(value, torch.Tensor):
                 if isinstance(value, torch.nn.Parameter):
                     node = self.state.fx_graph.create_node(
@@ -1032,6 +1059,29 @@ class GuardTracker:
                 self.state.objects.add(var, value)
             else:
                 self.state.objects.update_by_id(var, id(partial.inplace_ref))
+
+        if self.state.calling_func is not None:
+            stack_top = get_value_stack_from_top(self.frame, 0)
+            if self.state.callee_returns is not None and id(
+                    self.state.callee_returns) != id(
+                        stack_top
+                    ):  # a typical case is test_call_udf/test_call_run_udf
+                if isinstance(self.state.callee_returns,
+                              torch.Tensor) and isinstance(
+                                  stack_top, torch.Tensor):
+                    if self.state.objects.contains(stack_top):
+                        raise NotImplementedError
+                    returns_var = self.state.objects.get(
+                        self.state.callee_returns)
+                    new_node = self.state.fx_graph.create_node(
+                        "call_function", torch.clone,
+                        (returns_var.as_fx_node(),), {})
+                    stack_top_var = vs.TensorVar.from_tensor_and_node(
+                        stack_top, new_node, False, [])
+                    self.state.add_object(stack_top_var, stack_top)
+                else:
+                    raise NotImplementedError
+
         self.state.inplace_update_objs.clear()
         self.state.partial_var.clear()
         self.state.written = False
@@ -1180,7 +1230,7 @@ class GuardTracker:
 
         if get_root_module(func) == 'torch' or (
                 self.has_tensor_arg(args, kwargs) and
-            (is_graph_func(func) or func in (float, int))):
+            (is_graph_func(func) or func in (float, int, min, max))):
             if hasattr(func, "__name__") and func.__name__ in (
                     "size", "named_children",
                     "_are_functorch_transforms_active"):
@@ -1195,7 +1245,9 @@ class GuardTracker:
             self.state.record_function(func,
                                        args,
                                        kwargs,
-                                       inplace_ref=inplace_ref)
+                                       inplace_ref=inplace_ref,
+                                       force_new_value=(func in (float, int,
+                                                                 min, max)))
             return
         elif self.all_scalar_arg(args, kwargs) and self.all_static_arg(
                 args, kwargs):
@@ -1483,10 +1535,10 @@ class GuardTracker:
             for i in range(num_args - 1, -1, -1)
         ]
         kwargs: dict[str, Any] = {}
-        for i, obj in enumerate(itertools.chain(args, kwargs.values())):
-            self.fetch_function_parameters(obj)
         func = get_value_stack_from_top(self.frame, num_args)
         # print(f"function: {func}, type: {type(func)},args:{args}, kwargs:{kwargs}")
+        for i, obj in enumerate(itertools.chain(args, kwargs.values())):
+            self.fetch_function_parameters(obj)
         self.call_function(func, args, kwargs)
 
     def CALL_METHOD(self, inst: Instruction) -> None:

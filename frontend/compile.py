@@ -47,7 +47,11 @@ def compile(f: Callable[..., Any]) -> Callable[..., Any]:
         assert nn_module is not None
         set_skip_files(
             set({
-                cast(str, nn_module.__file__), tracer.__file__, utils.__file__
+                cast(str, nn_module.__file__),
+                tracer.__file__,
+                utils.__file__,
+                torch.autograd.function.__file__,
+                torch._functorch.utils.__file__,
             }))
         set_null_object(null_object)
         init = True

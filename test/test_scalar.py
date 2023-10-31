@@ -213,6 +213,7 @@ def dynamic_scalar_from_tensor(a, b, c):
 
 
 def test_dynamic_scalar_from_tensor(caplog):
+    reset()
     a = torch.tensor(1.0)
     b = torch.tensor(2.0)
     c = 3.0

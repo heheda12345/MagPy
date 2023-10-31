@@ -19,6 +19,10 @@ def get_value_stack_from_top(frame: FrameType, index: int) -> Any:
     pass
 
 
+def set_value_stack_from_top(frame: FrameType, index: int, value: Any) -> None:
+    pass
+
+
 def get_value_stack_size(frame: FrameType) -> int:
     pass
 
