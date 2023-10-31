@@ -159,3 +159,81 @@ def test_call_function_kw(caplog):
     run_and_check(compiled_call_func, [MISS, MISS, MISS, MISS], 1, caplog,
                   result, a, b, c)
     run_and_check(compiled_call_func, [HIT], 1, caplog, result, a, b, c)
+
+
+class WithInner(torch.nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(1, 1)
+
+    def forward_inner(self, x):
+        return self.linear(x)
+
+    def forward(self, x):
+
+        def inner_forward(x):
+            return self.forward_inner(x)
+
+        return inner_forward(x)
+
+
+def test_call_with_inner(caplog):
+    reset()
+    model = WithInner()
+    a = torch.full((1, 1), 1.0)
+    result = model(a)
+    compiled_model = compile(model)
+    run_and_check(compiled_model, [MISS, MISS, MISS], 1, caplog, result, a)
+    run_and_check(compiled_model, [HIT], 1, caplog, result, a)
+
+
+class WithNamedChildren(torch.nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(1, 1)
+        self.linear2 = torch.nn.Linear(1, 1)
+
+    def forward(self, x):
+        for name, layer in self.named_children():
+            x = layer(x)
+        return x
+
+
+def test_call_with_named_children(caplog):
+    reset()
+    model = WithNamedChildren()
+    a = torch.full((1, 1), 1.0)
+    result = model(a)
+    compiled_model = compile(model)
+    run_and_check(compiled_model, [MISS], 1, caplog, result, a)
+    run_and_check(compiled_model, [HIT], 1, caplog, result, a)
+
+
+class WithListLayers(torch.nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.layers = []
+        for i in range(3):
+            layer = torch.nn.Linear(1, 1)
+            layer_name = f'layer{i+1}'
+            self.add_module(layer_name, layer)
+            self.layers.append(layer_name)
+
+    def forward(self, x):
+        for i, layer_name in enumerate(self.layers):
+            layer = getattr(self, layer_name)
+            x = layer(x)
+        return x
+
+
+def test_call_with_list_layers(caplog):
+    reset()
+    model = WithListLayers()
+    a = torch.full((1, 1), 1.0)
+    result = model(a)
+    compiled_model = compile(model)
+    run_and_check(compiled_model, [MISS], 1, caplog, result, a)
+    run_and_check(compiled_model, [HIT], 1, caplog, result, a)

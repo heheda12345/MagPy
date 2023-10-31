@@ -20,14 +20,15 @@ NodeArgs = Union[BaseArgumentTypes, torch.fx.Node]
 
 def backend_compile(gm: torch.fx.GraphModule,
                     example_inputs: list[torch.Tensor]) -> Any:
-    if callable(config.backend):
-        return config.backend(gm, example_inputs)
-    elif config.backend == 'eager':
+    backend = config.get_config('backend')
+    if callable(backend):
+        return backend(gm, example_inputs)
+    elif backend == 'eager':
         return gm
-    elif config.backend == 'inductor':
+    elif backend == 'inductor':
         return torch._inductor.compile_fx.compile_fx(gm, example_inputs)
     else:
-        raise RuntimeError(f"Unknown backend: {config.backend}")
+        raise RuntimeError(f"Unknown backend: {backend}")
 
 
 class FxGraph:
@@ -115,7 +116,7 @@ def get_frame_root(frame_id: int) -> Any:
 
 def is_leaf_module(m: torch.nn.Module) -> bool:
     return ((m.__module__.startswith("torch.nn") or
-             m.__module__.startswith("torch.ao.nn")) and
+             m.__module__.startswith("torch.autograd.nn")) and
             not isinstance(m, torch.nn.Sequential))
 
 

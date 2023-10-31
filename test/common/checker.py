@@ -6,6 +6,7 @@ from frontend import cache
 
 HIT = 1
 MISS = 2
+ALL_MISS = 3
 
 
 def assert_equal(ref, out):
@@ -28,19 +29,16 @@ def assert_equal(ref, out):
             assert (False)
     elif isinstance(ref, Iterable):
         assert (isinstance(out, Iterable))
-        for r, o in zip(ref, out):
-            assert_equal(r, o)
+        if isinstance(ref, set):
+            assert (len(ref) == len(out))
+        else:
+            for r, o in zip(ref, out):
+                assert_equal(r, o)
     else:
         assert ref == out, f"wrong answer: expect {ref}, got {out}"
 
 
-def run_and_check(compiled, expect_cache_logs, expect_cache_size: int, caplog,
-                  expected_result, *args, **kwargs):
-    caplog.set_level(logging.INFO)
-    caplog.clear()
-    with torch.no_grad():
-        out = compiled(*args, **kwargs)
-    assert_equal(expected_result, out)
+def check_cache_log(caplog, expect_cache_logs, expect_cache_size: int):
     recorded_cache_logs = []
     for record in caplog.records:
         if record.message.startswith("\033[31mguard cache"):
@@ -50,9 +48,30 @@ def run_and_check(compiled, expect_cache_logs, expect_cache_size: int, caplog,
                 recorded_cache_logs.append(MISS)
             else:
                 assert (False), "unknown cache log"
+    if len(expect_cache_logs) == 1 and expect_cache_logs[0] == ALL_MISS:
+        expect_cache_logs = [MISS for _ in range(len(recorded_cache_logs))]
     assert len(recorded_cache_logs) == len(
         expect_cache_logs
     ), f"wrong cache log: expect {expect_cache_logs}, got {recorded_cache_logs}"
     for recorded, expected in zip(recorded_cache_logs, expect_cache_logs):
         assert recorded == expected, f"wrong cache log: expect {expect_cache_logs}, got {recorded_cache_logs}"
     assert cache.TOTAL_SIZE == expect_cache_size, f"wrong cache size: expect {expect_cache_size}, got {cache.TOTAL_SIZE}"
+
+
+def run_and_check(compiled, expect_cache_logs, expect_cache_size: int, caplog,
+                  expected_result, *args, **kwargs):
+    caplog.set_level(logging.INFO)
+    caplog.clear()
+    with torch.no_grad():
+        out = compiled(*args, **kwargs)
+    assert_equal(expected_result, out)
+    check_cache_log(caplog, expect_cache_logs, expect_cache_size)
+
+
+def run_and_check_cache(compiled, expect_cache_logs, expect_cache_size: int,
+                        caplog, *args, **kwargs):  # do not perform result check
+    caplog.set_level(logging.INFO)
+    caplog.clear()
+    with torch.no_grad():
+        _ = compiled(*args, **kwargs)
+    check_cache_log(caplog, expect_cache_logs, expect_cache_size)

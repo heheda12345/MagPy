@@ -1,15 +1,13 @@
 import inspect
 import dis
-from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic
+from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic, Optional
 from types import FrameType
 import random
 import operator
-from .bytecode_writter import get_code_keys
-from .c_api import get_value_stack_from_top, get_value_stack_size
 import os
 import torch
 import torch._C
-from torch._C import _TensorBase
+from .config import get_config, set_config
 
 if TYPE_CHECKING:
     from .instruction import Instruction
@@ -41,6 +39,7 @@ def print_bytecode() -> None:
     insts = dis.Bytecode(code)
     for inst in insts:
         print(inst)
+    from .bytecode_writter import get_code_keys
     keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
     for k, v in code_options.items():
@@ -91,30 +90,99 @@ fx_graph_functions: set[Callable[..., Any]] = {
     operator.and_,
     operator.or_,
     operator.xor,
+    operator.eq,
+    operator.lt,
 }
 fx_graph_functions = fx_graph_functions.union(fx_graph_inplace_functions)
 
+torch_inplace_funcs = {
+    "abs_", "acos_", "acosh_", "add_", "addcmul_", "addcdiv_", "asin_",
+    "asinh_", "atan_", "atanh_", "atan2_", "bitwise_and_",
+    "bitwise_left_shift_", "bitwise_not_", "bitwise_or_",
+    "bitwise_right_shift_", "bitwise_xor_", "ceil_", "clamp_", "clamp_min_",
+    "clamp_max_", "conj_physical_", "copy_", "copysign_", "cos_", "cosh_",
+    "cumsum_", "digamma_", "div_", "eq_", "erf_", "erfc_", "erfinv_", "exp_",
+    "exp2_", "expm1_", "float_power_", "floor_", "floor_divide_", "fmod_",
+    "frac_", "gcd_", "ge_", "gt_", "heaviside_", "hypot_", "igamma_",
+    "igammac_", "i0_", "lcm_", "le_", "lerp_", "lgamma_", "log10_", "log1p_",
+    "log2_", "log_", "logical_and_", "logical_not_", "logical_or_",
+    "logical_xor_", "lt_", "mul_", "mvlgamma_", "nan_to_num_", "ne_", "neg_",
+    "nextafter_", "pow_", "reciprocal_", "remainder_", "rsqrt_", "sgn_",
+    "sigmoid_", "sign_", "sin_", "sinc_", "sinh_", "sqrt_", "square_", "sub_",
+    "tan_", "tanh_", "tril_", "triu_", "true_divide_", "trunc_", "xlogy_",
+    "cauchy_", "exponential_", "geometric_", "log_normal_", "zero_"
+}
+
 
 def get_root_module(func: Callable[..., Any]) -> str:
+    if hasattr(func, '__objclass__'):
+        if func.__objclass__ == torch._C._TensorBase:
+            return 'torch'
+        elif func.__objclass__ in (list, tuple, set, dict):
+            return 'builtins'
+
+    if hasattr(func, '__self__') and isinstance(func.__self__, torch.Tensor):
+        return 'torch'
+
+    import numpy as np
+    if hasattr(func, '__class__') and func.__class__ == np.ufunc:
+        return 'numpy'
+
     module = inspect.getmodule(func)
     if module is None:
-        return ""
-    module_pack = module.__package__
-    if module_pack is None:
         return ""
     root_module = str(module).split('\'')[1].split('.')[0]
     return root_module
 
 
+def is_own_method(func: str, parent: Callable[..., Any]) -> bool:
+    for member in parent.__class__.__dict__.keys():
+        if member == func:
+            return True
+    return False
+
+
+def get_method_defined_class(func: Callable[..., Any],
+                             func_name: str) -> Optional[type[Any]]:
+    cls = func.__class__
+    assert cls is not None
+    while True:
+        if func_name in cls.__dict__:
+            return cls
+        if cls.__base__ is None:
+            break
+        cls = cls.__base__
+    return None
+
+
 def is_user_defined_func(func: Callable[..., Any]) -> bool:
+    # print([(x, getattr(func, x)) for x in dir(func)])
     if hasattr(func,
-               '__objclass__') and func.__objclass__ == torch._C._TensorBase:
+               '__objclass__') and func.__objclass__ in (torch._C._TensorBase,
+                                                         dict):
+        return False
+
+    # NOTE: random should be called as a UDF, not handled
+    if hasattr(func, '__self__') and isinstance(func.__self__,
+                                                (torch.Tensor, random.Random)):
+        return False
+
+    if hasattr(func, '__name__') and func.__name__ == '<genexpr>':
+        return False
+
+    if func is super:
         return False
 
     root_module = get_root_module(func)
-    if root_module == '':
-        return True
     if root_module in ('math', 'builtins', 'torch', 'numpy', '_operator'):
+        #NOTE:self.function should be recursive-checked to find out where it's defined, but not implemented
+        if hasattr(func, '__self__'
+                  ) and func.__self__ is not None and is_user_defined_func(
+                      func.__self__):
+            if is_own_method(func.__name__, func.__self__):
+                return True
+            else:
+                return False
         return False
     return True
 
@@ -197,6 +265,7 @@ class UnknownTypeError(Exception):
 
 
 def get_all_objects_in_stack(frame: FrameType) -> list[Any]:
+    from .c_api import get_value_stack_from_top, get_value_stack_size
     stack_size = get_value_stack_size(frame)
     return [get_value_stack_from_top(frame, i) for i in range(stack_size)]
 
@@ -239,3 +308,21 @@ class ReadOnlyObject(Generic[T]):
             raise AttributeError(
                 f"Attribute {attr} should not be called in reader of {self.obj}"
             )
+
+
+class SetConfig:
+    config_old: dict[str, Any]
+    config_new: dict[str, Any]
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        self.config_new = config
+        self.config_old = {}
+
+    def __enter__(self) -> None:
+        for k, v in self.config_new.items():
+            self.config_old[k] = get_config(k)
+            set_config(k, v)
+
+    def __exit__(self, *args: Any) -> None:
+        for k, v in self.config_old.items():
+            set_config(k, v)

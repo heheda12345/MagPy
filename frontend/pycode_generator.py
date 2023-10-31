@@ -8,43 +8,71 @@ from .variables import Variable
 
 
 def gen_imports(writer: PyCodeWriter, imports: set[str]) -> None:
-    for module_name in imports:
-        writer.wl(f"import {module_name}")
+    for module_import in imports:
+        writer.wl(module_import)
 
 
-class GraphFnCodegen:
-    postprossess: PyCodeWriter
-    returns: list[Tuple[str, StorePos]]
+class FnCodegen:
+    writer: PyCodeWriter
     imports: set[str]
+    key: int
+    objs: dict[str, Any]  # name -> obj
+
+    def __init__(self, key: int) -> None:
+        self.key = key
+        self.writer = PyCodeWriter()
+        self.imports = set()
+        self.objs = {}
+
+    def add_obj(self, var: Any, name: str = "", force: bool = False) -> str:
+        if force:
+            assert name != ""
+            assert is_valid_name(name)
+            if name in self.objs:
+                assert self.objs[name] == var
+            else:
+                self.objs[name] = var
+            return name
+        else:
+            if name == "" or not is_valid_name(name):
+                name = new_name("var")
+            elif name in self.objs:
+                name = new_name(name)
+
+            self.objs[name] = var
+            return name
+
+    def add_import(self, module_name: str) -> None:
+        self.imports.add(f"import {module_name}")
+
+    def add_import_from(self, module_name: str, name: str) -> None:
+        self.imports.add(f"from {module_name} import {name}")
+
+    def add_stmt(self, stmt: str) -> None:
+        self.writer.wl(stmt)
+
+
+class GraphFnCodegen(FnCodegen):
+    returns: list[Tuple[str, StorePos]]
     graph_inputs: list[tuple[StorePos, bool]]  # (extract_code, to_tensor)
     graph_outputs: list[torch.fx.Node]
-    objs: dict[str, Any]  # name -> var
-    key: int
     id2name: dict[int, str]  # idx -> name_in_graph_fn
 
     def __init__(self, key: int) -> None:
+        super().__init__(key)
         self.postprossess = PyCodeWriter()
         self.returns = []
-        self.imports = set()
         self.graph_inputs = []
         self.graph_outputs = []
-        self.objs = {}
-        self.key = key
         self.id2name = {}
 
     def output(self, name_in_graph_fn: str, store_pos: StorePos, code: str,
                in_return: bool, idx: int) -> None:
-        self.postprossess.wl(f"{name_in_graph_fn} = {code}")
+        self.writer.wl(f"{name_in_graph_fn} = {code}")
         if idx != 0:
             self.id2name[idx] = name_in_graph_fn
         if in_return:
             self.returns.append((name_in_graph_fn, store_pos))
-
-    def add_import(self, module_name: str) -> None:
-        self.imports.add(module_name)
-
-    def add_stmt(self, stmt: str) -> None:
-        self.postprossess.wl(stmt)
 
     def get_code(self) -> str:
         writer = PyCodeWriter()
@@ -66,7 +94,7 @@ class GraphFnCodegen:
                 graph_inputs.append(f"{x}.contiguous()")
         writer.wl(f"graph_out = compiled_graph({', '.join(graph_inputs)})"
                  )  # writer.wl(f"print('graph_out', graph_out)")
-        writer.write(self.postprossess.get_code())
+        writer.write(self.writer.get_code())
         # writer.wl(f"print('graph_fn done', locals)")
         graph_retures = ", ".join(
             f"{target_name}" for target_name, _ in self.returns)
@@ -93,28 +121,16 @@ class GraphFnCodegen:
         if to_tensor:
             self.add_import("torch")
 
-    def add_var(self, var: Any, name: str = "") -> str:
-        if name == "" or not is_valid_name(name):
-            name = new_name("var")
-        elif name in self.objs:
-            name = new_name(name)
 
-        self.objs[name] = var
-        return name
-
-
-class GuardFnCodegen:
+class GuardFnCodegen(FnCodegen):
     checks: set[str]
     imports: set[str]
-    vars: dict[str, Variable]  # name -> var
-    key: int
     object_refs: list[Any]  # the reference to objects for id check
 
     def __init__(self, key: int) -> None:
+        super().__init__(key)
         self.checks = set()
         self.imports = set()
-        self.vars = {}
-        self.key = key
         self.object_refs = []
 
     def add_check(self, check: str) -> None:
@@ -124,12 +140,9 @@ class GuardFnCodegen:
         self.add_check(check)
         self.object_refs.append(obj)
 
-    def add_import(self, module_name: str) -> None:
-        self.imports.add(module_name)
-
     def get_code(self) -> str:
         writer = PyCodeWriter()
-        writer.wl(f"def ___make_guard_fn({', '.join(self.vars.keys())}):")
+        writer.wl(f"def ___make_guard_fn({', '.join(self.objs.keys())}):")
         writer.block_start()
         gen_imports(writer, self.imports)
         writer.wl(f"def fn(locals):")
@@ -138,6 +151,7 @@ class GuardFnCodegen:
         writer.block_start()
         writer.wl(
             f"print('running guard_fn (key = {self.key})', locals.keys())")
+        writer.write(self.writer.get_code())
         if len(self.checks) == 0:
             writer.wl(f"ok = True")
         else:
@@ -157,15 +171,6 @@ class GuardFnCodegen:
         writer.wl(f"return fn")
         writer.block_end()
         return writer.get_code()
-
-    def add_var(self, var: Variable, name: str = "") -> str:
-        if name == "" or not is_valid_name(name):
-            name = new_name("var")
-        elif name in self.vars:
-            name = new_name(name)
-
-        self.vars[name] = var
-        return name
 
     def get_object_refs(self) -> list[Any]:
         return self.object_refs

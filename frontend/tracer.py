@@ -24,6 +24,10 @@ def get_trace_func(frame_id: int) -> Callable[[FrameType, str, Any], None]:
                     f"tracing {event} {opname} {arg} pc={frame.f_lasti} frame={frame_id}({hex(id(frame))})"
                 )
                 record(frame, frame_id)
+            elif event == "line":
+                print(
+                    f"tracing {event} {frame.f_code.co_filename}:{frame.f_lineno}"
+                )
             else:
                 print(f"tracing {event} in {frame.f_code.co_filename}")
         except Exception as e:
