@@ -85,14 +85,15 @@ def get_process_frame(
                 trace_func = get_trace_func(frame_id)
 
             else:
-                assert get_frame_cache(frame_id).new_code is not None
-                assert get_frame_cache(frame_id).code_map is not None
                 print("old bytecode: \n")
-                print(
-                    format_insts(
-                        get_frame_cache(frame_id).code_map.guard_insts))
-                new_code = get_frame_cache(frame_id).new_code
-                code_map = get_frame_cache(frame_id).code_map
+                old_frame = get_frame_cache(frame_id)
+                assert old_frame.code_map is not None, "Code map doesn't exist for frame id {}".format(
+                    frame_id)
+                assert old_frame.new_code is not None, "New code doesn't exist for frame id {}".format(
+                    frame_id)
+                print(format_insts(old_frame.code_map.guard_insts))
+                new_code = old_frame.new_code
+                code_map = old_frame.code_map
                 trace_func = get_trace_func(frame_id)
             mark_need_postprocess()
 

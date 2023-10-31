@@ -187,9 +187,9 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     _frame->f_trace = NULL;
     */
     if (need_postprocess) {
-        PyObject *result_postprocess =
-            PyObject_CallFunction(postprocess, "Oi", (PyObject *)_frame, frame_id);
-        //need_postprocess = false;
+        PyObject *result_postprocess = PyObject_CallFunction(
+            postprocess, "Oi", (PyObject *)_frame, frame_id);
+        // need_postprocess = false;
     }
     Py_DECREF(_frame);
     Py_DECREF(preprocess);
