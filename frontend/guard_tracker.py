@@ -139,6 +139,17 @@ class State:
     def as_node_args_kwargs(
         self, args: list[Any], kwargs: dict[str, Any]
     ) -> tuple[tuple[torch.fx.Node, ...], dict[str, torch.fx.Node]]:
+        common_device: torch.device = None
+
+        def get_common_device(arg: Any) -> None:
+            if isinstance(arg, (tuple, list)):
+                for a in arg:
+                    get_common_device(a)
+            if isinstance(arg, torch.Tensor):
+                var = self.objects.get(arg, allow_unexist_const=True)
+                nonlocal common_device
+                assert common_device is None or common_device == var.obj.device
+                common_device = var.obj.device
 
         def as_fx_node(arg: Any) -> NodeArgs:
             if isinstance(arg, (tuple, list)):
@@ -150,7 +161,18 @@ class State:
                 return self.fx_graph.create_node("get_attr",
                                                  self.subparam_paths[var.obj],
                                                  (), {})
+            if isinstance(var, vs.ScalarVar) and not var.value_fix:
+                if common_device is not None and common_device != torch.device(
+                        'cpu'):
+                    cpu_node = var.as_fx_node()
+                    return self.fx_graph.create_node("call_method", "to",
+                                                     (cpu_node,),
+                                                     {"device": common_device})
+
             return var.as_fx_node()
+
+        for arg in itertools.chain(args, kwargs.values()):
+            get_common_device(arg)
 
         node_args = tuple(as_fx_node(arg) for arg in args)
         node_kwargs = {key: as_fx_node(arg) for key, arg in kwargs.items()}
@@ -164,7 +186,6 @@ class State:
                         add_partial_var: bool = True,
                         inplace_ref: Any = None,
                         force_new_value: bool = False) -> None:
-        print("record function", func)
         pargs, pkwargs = self.as_node_args_kwargs(args, kwargs)
         self.written = True
         scalar2tensor: dict[Callable[..., Any], Callable[..., Any]] = {
@@ -194,9 +215,14 @@ class State:
                     print(id(k), v, k)
                 raise NotImplementedError(func)
         elif (hasattr(func, '__self__') and
-              isinstance(func.__self__, torch.Tensor)) or func in scalar2tensor:
+              isinstance(func.__self__, torch.Tensor)) or (
+                  hasattr(func, '__objclass__') and func.__objclass__
+                  == torch._C._TensorBase) or func in scalar2tensor:
             if func in scalar2tensor:
                 func = scalar2tensor[func]
+            elif func == torch.Tensor.new and isinstance(args[1], torch.Size):
+                func = torch.Tensor.new_empty
+
             fx_node = self.fx_graph.create_node("call_method", func.__name__,
                                                 pargs, pkwargs)
             if add_partial_var:
@@ -1019,7 +1045,11 @@ class GuardTracker:
                 elif isinstance(value, (bool, int)):
                     raise NotImplementedError
                 else:
-                    raise ValueError("duplicate id")
+                    raise ValueError("duplicate id", value)
+            default_make_var_fn: MAKE_VAR_FN_TYPE = vs.make_var_from_value
+            partial_make_var_fn: Optional[
+                MAKE_VAR_FN_TYPE] = partial.make_var_fn
+            make_var_fn: MAKE_VAR_FN_TYPE = partial_make_var_fn if partial_make_var_fn is not None else default_make_var_fn
             if isinstance(value, torch.Tensor):
                 if isinstance(value, torch.nn.Parameter):
                     node = self.state.fx_graph.create_node(
@@ -1028,7 +1058,6 @@ class GuardTracker:
                     if self.state.objects.contains(value):
                         var = self.state.objects.get(value)
                     else:
-
                         var = vs.TensorVar.from_value(
                             value, partial.need_guard_check,
                             self.state.objects.helper_functions,
@@ -1046,11 +1075,30 @@ class GuardTracker:
                     partial.need_guard_check,
                     partial.extract_code_at_start,
                 )
+            elif node is not None:
+                if isinstance(value, tuple):
+                    for i, sub_value in enumerate(value):
+                        # print("sub_value", id(sub_value), sub_value)
+                        if isinstance(sub_value, torch.Tensor):
+                            if self.state.objects.contains(sub_value):
+                                raise NotImplementedError
+                            fx_node = self.state.fx_graph.create_node(
+                                "call_function", operator.getitem, (node, i),
+                                {})
+                            sub_var = vs.TensorVar.from_tensor_and_node(
+                                sub_value, fx_node, partial.need_guard_check,
+                                partial.extract_code_at_start)
+                            self.state.objects.add(sub_var, sub_value)
+                        else:
+                            raise NotImplementedError
+                else:
+                    raise NotImplementedError
+                var = make_var_fn(value, partial.need_guard_check,
+                                  self.state.objects.helper_functions,
+                                  self.state.fx_graph,
+                                  partial.extract_code_at_start)
             else:
-                default_make_var_fn: MAKE_VAR_FN_TYPE = vs.make_var_from_value
-                partial_make_var_fn: Optional[
-                    MAKE_VAR_FN_TYPE] = partial.make_var_fn
-                make_var_fn: MAKE_VAR_FN_TYPE = partial_make_var_fn if partial_make_var_fn is not None else default_make_var_fn
+
                 var = make_var_fn(value, partial.need_guard_check,
                                   self.state.objects.helper_functions,
                                   self.state.fx_graph,
@@ -1233,7 +1281,7 @@ class GuardTracker:
             (is_graph_func(func) or func in (float, int, min, max))):
             if hasattr(func, "__name__") and func.__name__ in (
                     "size", "named_children",
-                    "_are_functorch_transforms_active"):
+                    "_are_functorch_transforms_active", "finfo"):
                 self.state.set_partial_var({
                     -1: [
                         PartialVar(node=None,
@@ -1574,6 +1622,8 @@ class GuardTracker:
         for arg, kw_name in zip(args[-len(kw_names):], kw_names):
             kwargs[kw_name] = arg
         args = args[:-len(kw_names)]
+        if hasattr(func, '__self__') and func.__self__ is not None:
+            args = [func.__self__] + args
         # print(f"function kw: {func}, type: {type(func)},args:{args}, kwargs:{kwargs}")
         self.call_function(func, args, kwargs)
 

@@ -1,6 +1,6 @@
 import inspect
 import dis
-from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic, Optional
+from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic, Optional, no_type_check
 from types import FrameType
 import random
 import operator
@@ -328,3 +328,32 @@ class SetConfig:
     def __exit__(self, *args: Any) -> None:
         for k, v in self.config_old.items():
             set_config(k, v)
+
+
+@no_type_check
+def is_namedtuple(obj: Any) -> bool:
+    cls: type[Any] = obj if inspect.isclass(cls) else type(obj)
+    return (issubclass(cls, tuple) and
+            isinstance(getattr(cls, '_fields', None), tuple) and
+            all(isinstance(field, str) for field in cls._fields))
+
+
+@no_type_check
+def is_structseq(obj: Any) -> bool:
+    cls: type[Any] = obj if inspect.isclass(obj) else type(obj)
+    if (cls.__base__ is tuple and
+            isinstance(getattr(cls, 'n_sequence_fields', None), int) and
+            isinstance(getattr(cls, 'n_fields', None), int) and
+            isinstance(getattr(cls, 'n_unnamed_fields', None), int)):
+        try:
+
+            class subcls(cls):  # type: ignore[misc]
+                pass
+
+        except (
+                TypeError,  # CPython
+                AssertionError,  # PyPy
+        ):
+            return True
+
+    return False

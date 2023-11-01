@@ -60,6 +60,10 @@ def call_function_kw(a, b, c):
     return x + y + z
 
 
+def func_kw_with_self(a):
+    return a.clamp(min=1e-8)
+
+
 def test_call_ud_func_break(caplog):
     reset()
     compiled_call_func = compile(call_func)
@@ -159,6 +163,15 @@ def test_call_function_kw(caplog):
     run_and_check(compiled_call_func, [MISS, MISS, MISS, MISS], 1, caplog,
                   result, a, b, c)
     run_and_check(compiled_call_func, [HIT], 1, caplog, result, a, b, c)
+
+
+def test_call_kw_with_self(caplog):
+    reset()
+    compiled_call_func = compile(func_kw_with_self)
+    a = torch.tensor(1.0)
+    result = func_kw_with_self(a)
+    run_and_check(compiled_call_func, [MISS], 1, caplog, result, a)
+    run_and_check(compiled_call_func, [HIT], 1, caplog, result, a)
 
 
 class WithInner(torch.nn.Module):

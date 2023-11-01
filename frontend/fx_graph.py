@@ -56,8 +56,9 @@ class FxGraph:
         type_expr: Optional[Any] = None,
     ) -> torch.fx.Node:
         self.mark_written_fn()
-        return self.result_graph.create_node(kind, target, args, kwargs, name,
-                                             type_expr)
+        result_node = self.result_graph.create_node(kind, target, args, kwargs,
+                                                    name, type_expr)
+        return result_node
 
     def create_input(
         self,

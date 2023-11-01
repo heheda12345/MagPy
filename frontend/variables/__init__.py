@@ -15,7 +15,7 @@ from .list_ import ListVar
 from .dict_ import DictVar
 from .builtin_types import CellVar
 from ..fx_graph import FxGraph
-from ..utils import NullObject, UnknownTypeError
+from ..utils import NullObject, UnknownTypeError, is_structseq
 from ..store_pos import StorePos
 
 ty2var: dict[type[Any], type[Variable]] = {
@@ -77,6 +77,9 @@ def make_var_from_value(
         return NumpyScalarVar.from_value(value, need_guard_check,
                                          helper_functions, fx_graph,
                                          extract_code_at_start)
+    elif is_structseq(value):
+        return TupleVar.from_value(value, need_guard_check, helper_functions,
+                                   fx_graph, extract_code_at_start)
     else:
         # NOTE: use any instead of iteartor_var to represent iterator with unknown source due to the hardness of getting iterable and num_iters
         print("generate any for", value, type(value), extract_code_at_start)
