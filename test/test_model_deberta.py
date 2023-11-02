@@ -529,17 +529,17 @@ def build_relative_position(query_size, key_size, device):
     return rel_pos_ids
 
 
-@torch.jit.script
+# @torch.jit.script
 def c2p_dynamic_expand(c2p_pos, query_layer, relative_pos):
     return c2p_pos.expand([query_layer.size(0), query_layer.size(1), query_layer.size(2), relative_pos.size(-1)])
 
 
-@torch.jit.script
+# @torch.jit.script
 def p2c_dynamic_expand(c2p_pos, query_layer, key_layer):
     return c2p_pos.expand([query_layer.size(0), query_layer.size(1), key_layer.size(-2), key_layer.size(-2)])
 
 
-@torch.jit.script
+# @torch.jit.script
 def pos_dynamic_expand(pos_index, p2c_att, key_layer):
     return pos_index.expand(p2c_att.size()[:2] + (pos_index.size(-2), key_layer.size(-2)))
 
@@ -1025,7 +1025,7 @@ device = "cpu"
 
 def get_model():
     config = AutoConfig.from_pretrained(model_name)
-    config.return_dict = True
+    config.return_dict = False
     model = DebertaModel(config).to(device)
     print("model type", type(model))
     return model
@@ -1045,11 +1045,13 @@ def get_input(batch_size):
 
 
 if __name__ == "__main__":
-    model = get_model()
-    input_args, input_kwargs = get_input(batch_size=1)
-    # print([x.shape for x in input_args])
-    # outputs = model(*input_args, **input_kwargs)
-    # print(outputs)
-    compiled = compile(model)
-    print(compiled(*input_args, **input_kwargs))
-
+    # torch.jit._state.disable()
+    with torch.no_grad():
+        model = get_model().eval()
+        input_args, input_kwargs = get_input(batch_size=1)
+        # print([x.shape for x in input_args])
+        # outputs = model(*input_args, **input_kwargs)
+        # print(outputs)
+        compiled = compile(model)
+        print(compiled(*input_args, **input_kwargs))
+        print(compiled(*input_args, **input_kwargs))

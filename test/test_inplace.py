@@ -41,6 +41,13 @@ def test_inplace_add(caplog):
     result6 = compiled(*input6)
     assert_equal(id(input6[0]), id(result6))
 
+    result7 = inplace_add(3, torch.tensor(5))
+    run_and_check(compiled, [MISS], 5, caplog, result7, 3, torch.tensor(5))
+    run_and_check(compiled, [HIT], 5, caplog, result7, 3, torch.tensor(5))
+    result8 = inplace_add(3, torch.tensor(9))
+    run_and_check(compiled, [HIT], 5, caplog, result8, 3, torch.tensor(9))
+
+
 
 # TODO:
 # def inplace_add2(a, b):

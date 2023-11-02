@@ -45,6 +45,7 @@ class TensorVar(Variable):
         idx: int = 0,
     ) -> None:
         super().__init__(need_guard_check, tensor, extract_code_at_start)
+        assert not isinstance(tensor, torch.nn.Parameter)
         self.fx_node = fx_node
         self.dtype = dtype
         self.device = device
@@ -81,6 +82,8 @@ class TensorVar(Variable):
         assert fx_graph is not None
         name = new_name('tensor')
         if len(extract_code_at_start) == 0:
+            print("temp generate result", value)
+            print(helper_functions.gen_by_caller(value))
             if helper_functions.gen_by_caller(value):
                 extract_code_at_start = [UnknownPosInCaller()]
                 helper_functions.mark_cannot_guard()
@@ -134,6 +137,7 @@ class TorchParamVar(Variable):
         _fx_graph: Optional[FxGraph],
         extract_code_at_start: list[StorePos],
     ) -> "TorchParamVar":
+        # print("try yo load parameter:", value, id(value))
         return cls(value, need_guard_check, extract_code_at_start)
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
