@@ -49,6 +49,7 @@ static int frame_count = 0;
 
 bool need_postprocess = false;
 static std::map<size_t, PyObject *> frame_id_to_code_map;
+static std::map<size_t, bool> frame_id_to_need_postprocess_map;
 
 static void pylog(std::string message, const char *level = "info") {
     static PyObject *pModule;
@@ -165,6 +166,7 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
         frontend_csrc::FrameCache empty;
         empty.push_back(nullptr);
         program_cache.push_back(empty);
+        frame_id_to_need_postprocess_map[frame_id] = false;
     }
     Py_INCREF(_frame);
     PyObject *preprocess = PyTuple_GetItem(callback, 0);
@@ -178,18 +180,13 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     PyObject *code_map = PyTuple_GetItem(result_preprocess, 2);
     Py_INCREF(new_code);
     Py_INCREF(trace_func);
-    need_postprocess = false;
     PyObject *result =
         eval_custom_code(tstate, _frame, (PyCodeObject *)new_code, code_map,
                          false, true, trace_func);
-    // _frame->
-    // PyObject *result = _PyEval_EvalFrameDefault(tstate, _frame, throw_flag);
-    /*
-    _frame->f_trace = NULL;
-    */
-    if (need_postprocess) {
-        PyObject *result_postprocess =
-            PyObject_CallFunction(postprocess, "O", (PyObject *)_frame);
+    if (frame_id_to_need_postprocess_map[frame_id]) {
+        PyObject *result_postprocess = PyObject_CallFunction(
+            postprocess, "Oi", (PyObject *)_frame, frame_id);
+        frame_id_to_need_postprocess_map[frame_id] = false;
     }
     Py_DECREF(_frame);
     Py_DECREF(preprocess);
@@ -331,6 +328,21 @@ static PyObject *get_value_stack_size(PyObject *self, PyObject *args) {
     return PyLong_FromLong((int)(frame->f_stacktop - frame->f_valuestack));
 }
 
+static PyObject *set_value_stack_from_top(PyObject *self, PyObject *args) {
+    PyFrameObject *frame = NULL;
+    int index = 0;
+    PyObject *obj;
+    if (!PyArg_ParseTuple(args, "OiO", &frame, &index, &obj)) {
+        PRINT_PYERR;
+        PyErr_SetString(PyExc_TypeError,
+                        "invalid parameter in set_value_stack_from_top");
+        return NULL;
+    }
+    frame->f_stacktop[-index - 1] = obj;
+    Py_INCREF(obj);
+    Py_RETURN_NONE;
+}
+
 static PyObject *add_to_cache(PyObject *self, PyObject *args) {
     int frame_id, callsite_id, id_in_callsite;
     PyObject *check_fn, *graph_fn;
@@ -350,6 +362,7 @@ static PyObject *add_to_cache(PyObject *self, PyObject *args) {
         check_fn, PyTuple_Pack(2, PyLong_FromLong(id_in_callsite), graph_fn),
         program_cache[frame_id][callsite_id]};
     program_cache[frame_id][callsite_id] = entry;
+    frame_id_to_need_postprocess_map[frame_id] = true;
     Py_RETURN_NONE;
 }
 
@@ -400,6 +413,9 @@ static PyObject *reset(PyObject *self, PyObject *args) {
         }
         frame_cache.clear();
         frame_cache.push_back(nullptr);
+    }
+    for (auto frame_id : frame_id_to_need_postprocess_map) {
+        frame_id_to_need_postprocess_map[frame_id.first] = false;
     }
     Py_RETURN_NONE;
 }
@@ -486,11 +502,24 @@ static PyObject *get_from_freevars(PyObject *self, PyObject *args) {
     return value;
 }
 
+static PyObject *mark_need_postprocess(PyObject *self, PyObject *args) {
+    int frame_id;
+    if (!PyArg_ParseTuple(args, "i", &frame_id)) {
+        PRINT_PYERR;
+        PyErr_SetString(PyExc_TypeError,
+                        "invalid parameter in mark_need_postprocess");
+        return NULL;
+    }
+    frame_id_to_need_postprocess_map[frame_id] = true;
+    Py_RETURN_NONE;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame, METH_VARARGS, NULL},
     {"set_skip_files", set_skip_files, METH_VARARGS, NULL},
     {"set_null_object", set_null_object, METH_VARARGS, NULL},
     {"get_value_stack_from_top", get_value_stack_from_top, METH_VARARGS, NULL},
+    {"set_value_stack_from_top", set_value_stack_from_top, METH_VARARGS, NULL},
     {"get_value_stack_size", get_value_stack_size, METH_VARARGS, NULL},
     {"guard_match", guard_match, METH_VARARGS, NULL},
     {"add_to_cache", add_to_cache, METH_VARARGS, NULL},

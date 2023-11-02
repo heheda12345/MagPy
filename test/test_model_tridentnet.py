@@ -2054,6 +2054,7 @@ from common.checker import assert_equal
 
 def test_model_tridentnet(caplog):
     reset()
+    torch.random.manual_seed(66666)
     with torch.no_grad():
         model = get_model()
         model.eval()

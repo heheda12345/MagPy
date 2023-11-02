@@ -32,7 +32,8 @@ class LoopModule(torch.nn.Module):  #type: ignore
         loop_carry = values[self.num_read_only_param:]
         while iter_num < self.num_iter:
             # and cond.item():
-            loop_carry = self.body(iter_num, *read_only, *loop_carry)
+            loop_carry = self.body(torch.tensor(iter_num), *read_only,
+                                   *loop_carry)
             # cond, *loop_carry = self.body(iter_num, cond, *read_only,
             #                               *loop_carry)
             iter_num += 1
