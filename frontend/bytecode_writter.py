@@ -428,8 +428,13 @@ def add_name(code_options: Dict[str, Any], varnames: List[str],
     code_options["co_nlocals"] = len(code_options["co_varnames"])
 
 
+SHOULD_NOT_CALL_REWRITE: bool = False  # for testing
+
+
 def rewrite_bytecode(code: types.CodeType, frame_id: int,
                      is_callee: bool) -> tuple[types.CodeType, ProcessedCode]:
+    if SHOULD_NOT_CALL_REWRITE:
+        raise RuntimeError("should not call rewrite_bytecode")
     original_instructions = get_instructions(code)
     instructions = copy.deepcopy(original_instructions)
     virtualize_jumps(instructions)
