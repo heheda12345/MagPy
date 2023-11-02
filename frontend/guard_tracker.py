@@ -345,7 +345,7 @@ class State:
         elif isinstance(pos, ExtractFromFunction):
             parent_poses: list[StorePos] = []
             for p, i in zip(pos.var_pos, pos.var_id):
-                new_pos = self.store_pos_in_callee(p, i)
+                new_pos = self.store_pos_in_caller(p, i)
                 if new_pos is None:
                     return None
                 parent_poses.append(new_pos)
@@ -1350,7 +1350,7 @@ class GuardTracker:
             (is_graph_func(func) or func in (float, int, min, max))):
             if hasattr(func, "__name__") and func.__name__ in (
                     "size", "named_children",
-                    "_are_functorch_transforms_active", "finfo", "dim"):
+                    "_are_functorch_transforms_active", "finfo", "dim", "save_for_backward"):
                 self.state.set_partial_var({
                     -1: [
                         PartialVar(node=None,
