@@ -22,6 +22,8 @@ class ScalarVar(Variable):
                  need_guard_check: bool, fx_node: Optional[torch.fx.Node],
                  extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, value, extract_code_at_start)
+        if isinstance(value, bool) and not value_fix:
+            raise NotImplementedError
         if not value_fix:
             assert fx_node is not None
         self.value_fix = value_fix

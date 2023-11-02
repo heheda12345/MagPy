@@ -80,9 +80,9 @@ def get_process_frame(
             print(f"preprocess frame {frame.f_code.co_filename}", frame_id,
                   hex(id(frame)), frame.f_code.co_name)
             enable_cache(frame_id)
-            if not get_frame_cache(frame_id).updated:
+            set_frame_root(frame_id, f)
+            if check_cache_updated(frame_id):
                 print("new bytecode: \n")
-                set_frame_root(frame_id, f)
                 new_code, code_map = rewrite_bytecode(frame.f_code, frame_id,
                                                       is_callee)
                 get_frame_cache(frame_id).set_new_code(new_code, code_map)
@@ -99,7 +99,6 @@ def get_process_frame(
                 new_code = old_frame.new_code
                 code_map = old_frame.code_map
                 trace_func = get_trace_func(frame_id)
-            mark_need_postprocess()
 
         except Exception as e:
             print("exception in preprocess:", e, type(e))
@@ -109,6 +108,9 @@ def get_process_frame(
 
     def postprocess_frame(frame: FrameType, frame_id: int) -> None:
         try:
+            from .bytecode_writter import SHOULD_NOT_CALL_REWRITE
+            if SHOULD_NOT_CALL_REWRITE:
+                raise ValueError("should not call postprocess")
             print(f"postprocess frame {frame.f_code.co_filename}")
             if check_cache_updated(frame_id):
                 print("new bytecode: \n")

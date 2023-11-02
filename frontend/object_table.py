@@ -68,7 +68,7 @@ class ObjectTable:
                     value, (list, tuple, set, dict, CodeType)):
                 return make_var_from_value(value, False, self.helper_functions)
         raise RuntimeError(
-            f"Object {value}({id(value)}) not found in object table")
+            f"Object({id(value)}) {value} not found in object table")
 
     def get_or_none(self, value: Any) -> Optional[Variable]:
         if id(value) in self.objs:

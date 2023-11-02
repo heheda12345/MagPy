@@ -4,6 +4,7 @@ from frontend.utils import add_force_graph_break
 from frontend.c_api import get_next_frame_id
 import logging
 from common.checker import run_and_check, HIT, MISS
+import torch
 
 
 def perfect0(a):
@@ -204,3 +205,23 @@ def test_dyn_int_with_call(caplog):
     run_and_check(compiled_fn, [HIT], 1, caplog, 6, a, b, c)
     run_and_check(compiled_fn, [HIT], 1, caplog, 12, 4, 5, 3)
     run_and_check(compiled_fn, [MISS, MISS], 2, caplog, 8, a, b, 5)
+
+
+def dynamic_scalar_from_tensor(a, b, c):
+    d = float(a + b)
+    return c + d
+
+
+def test_dynamic_scalar_from_tensor(caplog):
+    reset()
+    a = torch.tensor(1.0)
+    b = torch.tensor(2.0)
+    c = 3.0
+    expect = dynamic_scalar_from_tensor(a, b, c)
+    compiled = compile(dynamic_scalar_from_tensor)
+    run_and_check(compiled, [MISS], 1, caplog, expect, a, b, c)
+    run_and_check(compiled, [HIT], 1, caplog, expect, a, b, c)
+    aa = torch.tensor(4.0)
+    bb = torch.tensor(5.0)
+    expect = dynamic_scalar_from_tensor(aa, bb, c)
+    run_and_check(compiled, [HIT], 1, caplog, expect, aa, bb, c)

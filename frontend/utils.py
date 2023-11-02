@@ -1,6 +1,6 @@
 import inspect
 import dis
-from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic, Optional
+from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic, Optional, no_type_check
 from types import FrameType
 import random
 import operator
@@ -142,10 +142,8 @@ def is_own_method(func: str, parent: Callable[..., Any]) -> bool:
     return False
 
 
-def get_method_defined_class(func: Callable[..., Any],
+def get_method_defined_class(cls: type[Any],
                              func_name: str) -> Optional[type[Any]]:
-    cls = func.__class__
-    assert cls is not None
     while True:
         if func_name in cls.__dict__:
             return cls
@@ -169,6 +167,10 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
 
     if hasattr(func, '__name__') and func.__name__ == '<genexpr>':
         return False
+
+    if hasattr(func, '__name__') and func.__name__ == 'apply':
+        assert hasattr(func, '__self__')
+        return is_user_defined_func(func.__self__)
 
     if func is super:
         return False
@@ -209,7 +211,7 @@ def new_random_key() -> int:
     global random_state
     cur_state = random.getstate()
     if random_state is None:
-        random.seed(23333)
+        random.seed(66666)
         random_state = random.getstate()
     random.setstate(random_state)
     new_key = random.randint(0, 10000)
@@ -326,3 +328,32 @@ class SetConfig:
     def __exit__(self, *args: Any) -> None:
         for k, v in self.config_old.items():
             set_config(k, v)
+
+
+@no_type_check
+def is_namedtuple(obj: Any) -> bool:
+    cls: type[Any] = obj if inspect.isclass(cls) else type(obj)
+    return (issubclass(cls, tuple) and
+            isinstance(getattr(cls, '_fields', None), tuple) and
+            all(isinstance(field, str) for field in cls._fields))
+
+
+@no_type_check
+def is_structseq(obj: Any) -> bool:
+    cls: type[Any] = obj if inspect.isclass(obj) else type(obj)
+    if (cls.__base__ is tuple and
+            isinstance(getattr(cls, 'n_sequence_fields', None), int) and
+            isinstance(getattr(cls, 'n_fields', None), int) and
+            isinstance(getattr(cls, 'n_unnamed_fields', None), int)):
+        try:
+
+            class subcls(cls):  # type: ignore[misc]
+                pass
+
+        except (
+                TypeError,  # CPython
+                AssertionError,  # PyPy
+        ):
+            return True
+
+    return False

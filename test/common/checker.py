@@ -58,12 +58,33 @@ def check_cache_log(caplog, expect_cache_logs, expect_cache_size: int):
     assert cache.TOTAL_SIZE == expect_cache_size, f"wrong cache size: expect {expect_cache_size}, got {cache.TOTAL_SIZE}"
 
 
+def should_not_call(*args, **kwargs):
+    raise ValueError("should not rewrite bytecode")
+
+
+class DisableRewriteByteCode:
+    old_should_call: bool
+
+    def __enter__(self):
+        from frontend import bytecode_writter
+        self.old_should_call = bytecode_writter.SHOULD_NOT_CALL_REWRITE
+        bytecode_writter.SHOULD_NOT_CALL_REWRITE = True
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        from frontend import bytecode_writter
+        bytecode_writter.SHOULD_NOT_CALL_REWRITE = self.old_should_call
+
+
 def run_and_check(compiled, expect_cache_logs, expect_cache_size: int, caplog,
                   expected_result, *args, **kwargs):
     caplog.set_level(logging.INFO)
     caplog.clear()
     with torch.no_grad():
-        out = compiled(*args, **kwargs)
+        if all([x == HIT for x in expect_cache_logs]):
+            with DisableRewriteByteCode():
+                out = compiled(*args, **kwargs)
+        else:
+            out = compiled(*args, **kwargs)
     assert_equal(expected_result, out)
     check_cache_log(caplog, expect_cache_logs, expect_cache_size)
 
@@ -73,5 +94,9 @@ def run_and_check_cache(compiled, expect_cache_logs, expect_cache_size: int,
     caplog.set_level(logging.INFO)
     caplog.clear()
     with torch.no_grad():
-        _ = compiled(*args, **kwargs)
+        if all([x == HIT for x in expect_cache_logs]):
+            with DisableRewriteByteCode():
+                _ = compiled(*args, **kwargs)
+        else:
+            _ = compiled(*args, **kwargs)
     check_cache_log(caplog, expect_cache_logs, expect_cache_size)
