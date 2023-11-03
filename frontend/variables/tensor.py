@@ -45,6 +45,7 @@ class TensorVar(Variable):
         idx: int = 0,
     ) -> None:
         super().__init__(need_guard_check, tensor, extract_code_at_start)
+        assert not isinstance(tensor, torch.nn.Parameter)
         self.fx_node = fx_node
         self.dtype = dtype
         self.device = device
@@ -212,12 +213,12 @@ class TorchDeviceVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        if 'cuda' in str(self.device):
-            codegen.add_check(
-                f"{pos} == torch.device('{self.device}', index={self.device.index})"
-            )
-        else:
-            codegen.add_check(f"{pos} == torch.device('{self.device}')")
+        # if 'cuda' in str(self.device):
+        #     codegen.add_check(
+        #         f"{pos} == torch.device('{self.device}')"
+        #     )
+        # else:
+        codegen.add_check(f"{pos} == torch.device('{self.device}')")
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,

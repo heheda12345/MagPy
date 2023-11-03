@@ -52,6 +52,9 @@ class DeferRestartState:
     reason: str
 
 
+deberta_model = None
+
+
 class State:
     objects: ObjectTable
     start_pc: int
@@ -110,6 +113,10 @@ class State:
         self.frame_id = -1
         self.callee_returns = None
 
+        # if hasattr(root, '__class__') and root.__class__.__name__ == 'DebertaEncoder':
+        #     global deberta_model
+        #     deberta_model = root
+
     def update_subpath(self, module: torch.nn.Module, prefix: str) -> None:
 
         def get_name(prefix: str, name: str) -> str:
@@ -148,13 +155,16 @@ class State:
             if isinstance(arg, torch.Tensor):
                 var = self.objects.get(arg, allow_unexist_const=True)
                 nonlocal common_device
-                assert common_device is None or common_device == var.obj.device
+                assert common_device is None or common_device == var.obj.device or var.obj.numel(
+                ) == 1
                 common_device = var.obj.device
 
         def as_fx_node(arg: Any) -> NodeArgs:
             if isinstance(arg, (tuple, list)):
                 return fx_immutable.immutable_list([as_fx_node(x) for x in arg])
-            var = self.objects.get(arg, allow_unexist_const=True)
+            var = self.objects.get(arg,
+                                   allow_unexist_const=True,
+                                   fx_graph=self.fx_graph)
             if isinstance(var, vs.TorchParamVar):
                 if var.obj not in self.subparam_paths:
                     self.add_subparam(var.obj)
@@ -168,6 +178,12 @@ class State:
                     return self.fx_graph.create_node("call_method", "to",
                                                      (cpu_node,),
                                                      {"device": common_device})
+            # if common_device is not None and common_device != torch.device(
+            #             'cpu') and var.obj.device == torch.device('cpu'):
+            #         cpu_node = var.as_fx_node()
+            #         return self.fx_graph.create_node("call_method", "to",
+            #                                          (cpu_node,),
+            #                                          {"device": common_device})
 
             return var.as_fx_node()
 
@@ -187,6 +203,24 @@ class State:
                         inplace_ref: Any = None,
                         force_new_value: bool = False) -> None:
         pargs, pkwargs = self.as_node_args_kwargs(args, kwargs)
+        if func in fx_graph_inplace_functions:
+            scalar = None
+            node = None
+            for i, obj in enumerate(pargs):
+                if isinstance(obj, (int, float)):
+                    scalar = obj
+                    position = i
+                else:
+                    node = obj
+            if scalar is not None and node is not None and position == 0:
+                fx_node = self.fx_graph.create_node(
+                    "call_function",
+                    torch.full_like,
+                    (node, scalar),
+                    {},
+                )
+                pargs = (fx_node, node)
+
         self.written = True
         scalar2tensor: dict[Callable[..., Any], Callable[..., Any]] = {
             float: torch.Tensor.float,
@@ -286,7 +320,7 @@ class State:
         self.written = True
         self.stored_globals.add(name)
 
-    def store_pos_in_callee(self, pos: StorePos,
+    def store_pos_in_caller(self, pos: StorePos,
                             idx: int) -> Optional[StorePos]:
         if idx in self.objects.objs:
             var = self.objects.objs[idx]
@@ -300,24 +334,24 @@ class State:
         elif isinstance(pos, (StoreInGlobal, StoreInBuiltin)):
             return pos
         elif isinstance(pos, StoreInAttr):
-            parent_pos = self.store_pos_in_callee(pos.self_pos, pos.self_id)
+            parent_pos = self.store_pos_in_caller(pos.self_pos, pos.self_id)
             if parent_pos is None:
                 return None
             return StoreInAttr(parent_pos, pos.self_id, pos.attr_name)
         elif isinstance(pos, StoreInIndex):
-            parent_pos = self.store_pos_in_callee(pos.self_pos, pos.self_id)
+            parent_pos = self.store_pos_in_caller(pos.self_pos, pos.self_id)
             if parent_pos is None:
                 return None
             return StoreInIndex(parent_pos, pos.self_id, pos.self_index)
         elif isinstance(pos, ExtractFromMethod):
-            parent_pos = self.store_pos_in_callee(pos.self_pos, pos.self_id)
+            parent_pos = self.store_pos_in_caller(pos.self_pos, pos.self_id)
             if parent_pos is None:
                 return None
             return ExtractFromMethod(parent_pos, pos.self_id, pos.method_name)
         elif isinstance(pos, ExtractFromFunction):
             parent_poses: list[StorePos] = []
             for p, i in zip(pos.var_pos, pos.var_id):
-                new_pos = self.store_pos_in_callee(p, i)
+                new_pos = self.store_pos_in_caller(p, i)
                 if new_pos is None:
                     return None
                 parent_poses.append(new_pos)
@@ -378,7 +412,7 @@ class State:
                         elif isinstance(
                                 pos, (StoreInAttr, StoreInIndex,
                                       ExtractFromMethod, ExtractFromFunction)):
-                            self_pos = self.store_pos_in_callee(pos, idx)
+                            self_pos = self.store_pos_in_caller(pos, idx)
                             if self_pos is None:
                                 print(
                                     "\033[34m[warning] cannot find store pos in callee, skip guard check\033[0m",
@@ -408,7 +442,20 @@ class State:
 
             def get_original_node(node: torch.fx.Node) -> torch.fx.Node:
                 idx = get_tensor_idx(node)
-                gen_by_caller = self.objects.get_by_id(idx)
+                if self.objects.contains_by_id(idx):
+                    gen_by_caller = self.objects.get_by_id(idx)
+                else:
+                    var = node.meta["var"]
+                    new: list[StorePos] = []
+                    for pos in var.extract_code_at_start:
+                        new_pos = self.store_pos_in_caller(pos, idx)
+                        if new_pos is not None:
+                            new.append(new_pos)
+                    new_var = vs.make_var_from_value(
+                        var.obj, var.need_guard_check,
+                        self.objects.helper_functions, self.fx_graph, new)
+                    self.objects.add(new_var, var.obj)
+                    gen_by_caller = new_var
                 assert isinstance(gen_by_caller, (vs.TensorVar, vs.ScalarVar))
                 return gen_by_caller.fx_node
 
@@ -457,7 +504,7 @@ class State:
                                   idx: int) -> list[StorePos]:
                 new: list[StorePos] = []
                 for pos in old:
-                    new_pos = self.store_pos_in_callee(pos, idx)
+                    new_pos = self.store_pos_in_caller(pos, idx)
                     if new_pos is not None:
                         new.append(new_pos)
                 return new
@@ -470,7 +517,8 @@ class State:
                     new_var = self.objects.get(obj)
                 elif self.objects.contains(obj) and self.objects.get(
                         obj, False) is not None:  # value from caller, modified
-                    if isinstance(obj, torch.Tensor):
+                    caller_var = self.objects.get(obj, False)
+                    if isinstance(caller_var, vs.TensorVar):
                         old_obj = state.objects.get(obj, False)
                         assert isinstance(old_obj, vs.TensorVar)
                         old_node = old_obj.fx_node
@@ -513,7 +561,8 @@ class State:
                         obj):  # value from caller, unmodified
                     new_var = self.objects.get(obj)
                 else:  # value not in caller
-                    if isinstance(obj, torch.Tensor):
+                    if isinstance(obj, torch.Tensor) and not isinstance(
+                            obj, torch.nn.Parameter):
                         old_obj = state.objects.get(obj, False)
                         assert isinstance(old_obj, vs.TensorVar)
                         old_node = old_obj.fx_node
@@ -1052,9 +1101,11 @@ class GuardTracker:
             make_var_fn: MAKE_VAR_FN_TYPE = partial_make_var_fn if partial_make_var_fn is not None else default_make_var_fn
             if isinstance(value, torch.Tensor):
                 if isinstance(value, torch.nn.Parameter):
-                    node = self.state.fx_graph.create_node(
-                        "get_attr", self.state.subparam_paths[value], (), {})
-                if node is None:
+                    var = make_var_fn(value, partial.need_guard_check,
+                                      self.state.objects.helper_functions,
+                                      self.state.fx_graph,
+                                      partial.extract_code_at_start)
+                elif node is None:
                     if self.state.objects.contains(value):
                         var = self.state.objects.get(value)
                     else:
@@ -1078,7 +1129,6 @@ class GuardTracker:
             elif node is not None:
                 if isinstance(value, tuple):
                     for i, sub_value in enumerate(value):
-                        # print("sub_value", id(sub_value), sub_value)
                         if isinstance(sub_value, torch.Tensor):
                             if self.state.objects.contains(sub_value):
                                 raise NotImplementedError
@@ -1106,7 +1156,7 @@ class GuardTracker:
             if partial.inplace_ref is None:
                 self.state.objects.add(var, value)
             else:
-                self.state.objects.update_by_id(var, id(partial.inplace_ref))
+                self.state.objects.update_by_id(var, id(value))
 
         if self.state.calling_func is not None:
             stack_top = get_value_stack_from_top(self.frame, 0)
@@ -1281,7 +1331,8 @@ class GuardTracker:
             (is_graph_func(func) or func in (float, int, min, max))):
             if hasattr(func, "__name__") and func.__name__ in (
                     "size", "named_children",
-                    "_are_functorch_transforms_active", "finfo"):
+                    "_are_functorch_transforms_active", "finfo", "dim",
+                    "save_for_backward"):
                 self.state.set_partial_var({
                     -1: [
                         PartialVar(node=None,
@@ -1290,6 +1341,7 @@ class GuardTracker:
                     ]
                 })
                 return
+            # print("record function in graph", func)
             self.state.record_function(func,
                                        args,
                                        kwargs,
@@ -1636,10 +1688,9 @@ class GuardTracker:
         else:
             kwargs = {}
         # print(f"function ex: {func}, type: {type(func)},args:{(func.__self__,) + args}, kwargs:{kwargs}")
-        if hasattr(func, '__self__'):
-            self.call_function(func, (func.__self__,) + args, kwargs)
-        else:
-            self.call_function(func, args, kwargs)
+        if hasattr(func, '__self__') and func.__self__ is not None:
+            args = (func.__self__,) + args
+        self.call_function(func, args, kwargs)
 
     def STORE_FAST(self, inst: Instruction) -> None:
         self.state.add_stored_locals(inst.argval)
