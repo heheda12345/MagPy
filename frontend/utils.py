@@ -92,6 +92,8 @@ fx_graph_functions: set[Callable[..., Any]] = {
     operator.xor,
     operator.eq,
     operator.lt,
+    operator.ne,
+    operator.le,
 }
 fx_graph_functions = fx_graph_functions.union(fx_graph_inplace_functions)
 

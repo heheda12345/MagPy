@@ -71,7 +71,8 @@ class ScalarVar(Variable):
                        extract_code_at_start)
         else:
             assert fx_graph is not None
-            assert len(extract_code_at_start) > 0
+            if need_guard_check:
+                assert len(extract_code_at_start) > 0
             name = new_name('scalar')
             fx_node = fx_graph.create_input(torch.tensor(value), name, (), {},
                                             name)
