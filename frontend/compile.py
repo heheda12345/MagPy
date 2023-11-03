@@ -70,7 +70,6 @@ def compile(f: Callable[..., Any]) -> Callable[..., Any]:
             print("exception in _fn:", e, type(e))
             raise e
         finally:
-            print("restoring frame, prior =", prior)
             set_eval_frame(prior)
 
     return _fn
