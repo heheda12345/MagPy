@@ -82,8 +82,6 @@ class TensorVar(Variable):
         assert fx_graph is not None
         name = new_name('tensor')
         if len(extract_code_at_start) == 0:
-            print("temp generate result", value)
-            print(helper_functions.gen_by_caller(value))
             if helper_functions.gen_by_caller(value):
                 extract_code_at_start = [UnknownPosInCaller()]
                 helper_functions.mark_cannot_guard()
@@ -137,7 +135,6 @@ class TorchParamVar(Variable):
         _fx_graph: Optional[FxGraph],
         extract_code_at_start: list[StorePos],
     ) -> "TorchParamVar":
-        # print("try yo load parameter:", value, id(value))
         return cls(value, need_guard_check, extract_code_at_start)
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
@@ -216,12 +213,12 @@ class TorchDeviceVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        if 'cuda' in str(self.device):
-            codegen.add_check(
-                f"{pos} == torch.device('{self.device}', index={self.device.index})"
-            )
-        else:
-            codegen.add_check(f"{pos} == torch.device('{self.device}')")
+        # if 'cuda' in str(self.device):
+        #     codegen.add_check(
+        #         f"{pos} == torch.device('{self.device}')"
+        #     )
+        # else:
+        codegen.add_check(f"{pos} == torch.device('{self.device}')")
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,

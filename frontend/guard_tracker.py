@@ -144,7 +144,7 @@ class State:
         # self.written = True # not mark as written as graph break may happen
 
     def as_node_args_kwargs(
-        self, args: list[Any], kwargs: dict[str, Any], func: Callable[..., Any]
+        self, args: list[Any], kwargs: dict[str, Any]
     ) -> tuple[tuple[torch.fx.Node, ...], dict[str, torch.fx.Node]]:
         common_device: torch.device = None
 
@@ -155,7 +155,8 @@ class State:
             if isinstance(arg, torch.Tensor):
                 var = self.objects.get(arg, allow_unexist_const=True)
                 nonlocal common_device
-                assert common_device is None or common_device == var.obj.device
+                assert common_device is None or common_device == var.obj.device or var.obj.numel(
+                ) == 1
                 common_device = var.obj.device
 
         def as_fx_node(arg: Any) -> NodeArgs:
@@ -165,8 +166,6 @@ class State:
                                    allow_unexist_const=True,
                                    fx_graph=self.fx_graph)
             if isinstance(var, vs.TorchParamVar):
-                if var.obj not in self.subparam_paths:
-                    self.add_subparam(var.obj)
                 if var.obj not in self.subparam_paths:
                     self.add_subparam(var.obj)
                 return self.fx_graph.create_node("get_attr",
@@ -179,6 +178,12 @@ class State:
                     return self.fx_graph.create_node("call_method", "to",
                                                      (cpu_node,),
                                                      {"device": common_device})
+            # if common_device is not None and common_device != torch.device(
+            #             'cpu') and var.obj.device == torch.device('cpu'):
+            #         cpu_node = var.as_fx_node()
+            #         return self.fx_graph.create_node("call_method", "to",
+            #                                          (cpu_node,),
+            #                                          {"device": common_device})
 
             return var.as_fx_node()
 
@@ -197,7 +202,7 @@ class State:
                         add_partial_var: bool = True,
                         inplace_ref: Any = None,
                         force_new_value: bool = False) -> None:
-        pargs, pkwargs = self.as_node_args_kwargs(args, kwargs, func)
+        pargs, pkwargs = self.as_node_args_kwargs(args, kwargs)
         if func in fx_graph_inplace_functions:
             scalar = None
             node = None
@@ -205,16 +210,17 @@ class State:
                 if isinstance(obj, (int, float)):
                     scalar = obj
                     position = i
-                else: node = obj
+                else:
+                    node = obj
             if scalar is not None and node is not None and position == 0:
                 fx_node = self.fx_graph.create_node(
-                        "call_function",
-                        torch.full_like,
-                        (node, scalar),
-                        {},
-                    ) 
+                    "call_function",
+                    torch.full_like,
+                    (node, scalar),
+                    {},
+                )
                 pargs = (fx_node, node)
-            
+
         self.written = True
         scalar2tensor: dict[Callable[..., Any], Callable[..., Any]] = {
             float: torch.Tensor.float,
@@ -441,11 +447,10 @@ class State:
                 else:
                     var = node.meta["var"]
                     new: list[StorePos] = []
-                    if len(var.extract_code_at_start) == 0:
-                        print("original code:", var, node)
                     for pos in var.extract_code_at_start:
                         new_pos = self.store_pos_in_caller(pos, idx)
-                        new.append(new_pos)
+                        if new_pos is not None:
+                            new.append(new_pos)
                     new_var = vs.make_var_from_value(
                         var.obj, var.need_guard_check,
                         self.objects.helper_functions, self.fx_graph, new)
@@ -464,13 +469,8 @@ class State:
                     node, replacement_fn)
                 if node.op == "get_attr":
                     param_obj = None
-                    # for name, obj in self.root.named_parameters():
-                    #     print("parent attr name:", name)
-                    # print(id(state.root))
                     for name, obj in state.root.named_parameters():
-                        # print("attr name:", name)
                         if name == node.target:
-                            # print("attr:", id(state.root), name)
                             param_obj = obj
                             break
                     if param_obj is None:
@@ -520,12 +520,6 @@ class State:
                     caller_var = self.objects.get(obj, False)
                     if isinstance(caller_var, vs.TensorVar):
                         old_obj = state.objects.get(obj, False)
-                        print("old obj", old_obj, id(old_obj), id(old_obj.obj))
-                        print("obj:", obj, id(obj))
-                        print("self obj var:", caller_var, id(caller_var))
-                        # if isinstance(old_obj, vs.TorchParamVar):
-                        #     new_var = self.objects.get(obj)
-                        # else:
                         assert isinstance(old_obj, vs.TensorVar)
                         old_node = old_obj.fx_node
                         new_node = replacement_mapping[old_node]
@@ -685,13 +679,6 @@ class GuardTracker:
     def record(
             self, frame: FrameType, frame_id: int
     ) -> None:  # pass frame and frame_id only for assertion
-        # if deberta_model is not None:
-        #     # print("check deberta with id", id(deberta_model))
-        #     layer_found = False
-        #     for name, param in deberta_model.named_parameters():
-        #         if name == 'rel_embeddings.weight':
-        #             layer_found = True
-        # if not layer_found: raise ValueError("orz")
         assert frame_id == self.frame_id
         assert frame == self.frame, (frame, self.frame)
         self.process_last_inst()
@@ -1063,7 +1050,6 @@ class GuardTracker:
 
     def fetch_function_parameters(self, obj: Any) -> None:
         if not self.state.objects.contains(obj):
-            print("fetch: ", obj, type(obj))
             var = vs.make_var_from_value(obj, False,
                                          self.state.objects.helper_functions,
                                          self.state.fx_graph, [])
@@ -1094,7 +1080,6 @@ class GuardTracker:
             partials = self.state.partial_var[self.frame.f_lasti // 2]
         else:
             partials = []
-        # print("patials:", partials)
         for i, partial in enumerate(partials):
             if partial is None:
                 continue
@@ -1120,8 +1105,6 @@ class GuardTracker:
                                       self.state.objects.helper_functions,
                                       self.state.fx_graph,
                                       partial.extract_code_at_start)
-                    # node = self.state.fx_graph.create_node(
-                    #     "get_attr", self.state.subparam_paths[value], (), {})
                 elif node is None:
                     if self.state.objects.contains(value):
                         var = self.state.objects.get(value)
@@ -1146,7 +1129,6 @@ class GuardTracker:
             elif node is not None:
                 if isinstance(value, tuple):
                     for i, sub_value in enumerate(value):
-                        # print("sub_value", id(sub_value), sub_value)
                         if isinstance(sub_value, torch.Tensor):
                             if self.state.objects.contains(sub_value):
                                 raise NotImplementedError
@@ -1325,7 +1307,6 @@ class GuardTracker:
             if len(args) == 0:
                 raise NotImplementedError
             if not self.state.objects.contains(args[0]):
-                print("inplace id:", id(args[0]))
                 self.state.add_object(
                     vs.make_var_from_value(args[0], False,
                                            self.state.objects.helper_functions,
@@ -1350,7 +1331,8 @@ class GuardTracker:
             (is_graph_func(func) or func in (float, int, min, max))):
             if hasattr(func, "__name__") and func.__name__ in (
                     "size", "named_children",
-                    "_are_functorch_transforms_active", "finfo", "dim", "save_for_backward"):
+                    "_are_functorch_transforms_active", "finfo", "dim",
+                    "save_for_backward"):
                 self.state.set_partial_var({
                     -1: [
                         PartialVar(node=None,
@@ -1359,7 +1341,7 @@ class GuardTracker:
                     ]
                 })
                 return
-            print("record function in graph", func)
+            # print("record function in graph", func)
             self.state.record_function(func,
                                        args,
                                        kwargs,
@@ -1561,7 +1543,6 @@ class GuardTracker:
                     obj, True, self.state.objects.helper_functions,
                     self.state.fx_graph, [pos])
                 self.state.add_object(var, obj)
-                print("load fast:", id(obj))
             else:
                 var = self.state.objects.get(obj)
                 if var.prev is None:
@@ -1707,15 +1688,12 @@ class GuardTracker:
         else:
             kwargs = {}
         # print(f"function ex: {func}, type: {type(func)},args:{(func.__self__,) + args}, kwargs:{kwargs}")
-        if hasattr(func, '__self__'):
-            self.call_function(func, (func.__self__,) + args, kwargs)
-        else:
-            self.call_function(func, args, kwargs)
+        if hasattr(func, '__self__') and func.__self__ is not None:
+            args = (func.__self__,) + args
+        self.call_function(func, args, kwargs)
 
     def STORE_FAST(self, inst: Instruction) -> None:
         self.state.add_stored_locals(inst.argval)
-        # obj = get_value_stack_from_top(self.frame, 0)
-        # print("store id:", id(obj))
 
     def STORE_DEREF(self, inst: Instruction) -> None:
         self.state.add_stored_locals(inst.argval)

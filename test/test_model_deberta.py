@@ -1,8 +1,9 @@
 from frontend.compile import compile, reset
+from common.checker import assert_equal, run_and_check_cache, run_and_check, HIT, MISS, ALL_MISS
 from transformers import AutoTokenizer, AutoConfig, AutoModel
 import torch
 
-# dynamo compile error in torch 2.0.1: torch._dynamo.exc.BackendCompilerFailed: debug_wrapper raised ValueError: Cannot view a tensor with shape torch.Size([1, 512, 12, 64]) and strides (393216, 64, 32768, 1) as a tensor with shape (1, 512, 768)! 
+# dynamo compile error in torch 2.0.1: torch._dynamo.exc.BackendCompilerFailed: debug_wrapper raised ValueError: Cannot view a tensor with shape torch.Size([1, 512, 12, 64]) and strides (393216, 64, 32768, 1) as a tensor with shape (1, 512, 768)!
 # 10.4: dont know how to reproduce the bug
 
 from collections.abc import Sequence
@@ -42,7 +43,6 @@ _QA_EXPECTED_LOSS = 0.14
 _QA_TARGET_START_INDEX = 12
 _QA_TARGET_END_INDEX = 14
 
-
 DEBERTA_PRETRAINED_MODEL_ARCHIVE_LIST = [
     "microsoft/deberta-base",
     "microsoft/deberta-large",
@@ -54,9 +54,11 @@ DEBERTA_PRETRAINED_MODEL_ARCHIVE_LIST = [
 
 
 class ContextPooler(nn.Module):
+
     def __init__(self, config):
         super().__init__()
-        self.dense = nn.Linear(config.pooler_hidden_size, config.pooler_hidden_size)
+        self.dense = nn.Linear(config.pooler_hidden_size,
+                               config.pooler_hidden_size)
         self.dropout = StableDropout(config.pooler_dropout)
         self.config = config
 
@@ -108,7 +110,8 @@ class XSoftmax(torch.autograd.Function):
         self.dim = dim
         rmask = ~(mask.to(torch.bool))
 
-        output = input.masked_fill(rmask, torch.tensor(torch.finfo(input.dtype).min))
+        output = input.masked_fill(rmask,
+                                   torch.tensor(torch.finfo(input.dtype).min))
         output = torch.softmax(output, self.dim)
         output.masked_fill_(rmask, 0)
         self.save_for_backward(output)
@@ -117,7 +120,8 @@ class XSoftmax(torch.autograd.Function):
     @staticmethod
     def backward(self, grad_output):
         (output,) = self.saved_tensors
-        inputGrad = softmax_backward_data(self, grad_output, output, self.dim, output)
+        inputGrad = softmax_backward_data(self, grad_output, output, self.dim,
+                                          output)
         return inputGrad, None, None
 
     @staticmethod
@@ -125,28 +129,38 @@ class XSoftmax(torch.autograd.Function):
         import torch.onnx.symbolic_helper as sym_help
         from torch.onnx.symbolic_opset9 import masked_fill, softmax
 
-        mask_cast_value = g.op("Cast", mask, to_i=sym_help.cast_pytorch_to_onnx["Long"])
+        mask_cast_value = g.op("Cast",
+                               mask,
+                               to_i=sym_help.cast_pytorch_to_onnx["Long"])
         r_mask = g.op(
             "Cast",
-            g.op("Sub", g.op("Constant", value_t=torch.tensor(1, dtype=torch.int64)), mask_cast_value),
+            g.op("Sub",
+                 g.op("Constant", value_t=torch.tensor(1, dtype=torch.int64)),
+                 mask_cast_value),
             to_i=sym_help.cast_pytorch_to_onnx["Byte"],
         )
         output = masked_fill(
-            g, self, r_mask, g.op("Constant", value_t=torch.tensor(torch.finfo(self.type().dtype()).min))
-        )
+            g, self, r_mask,
+            g.op("Constant",
+                 value_t=torch.tensor(torch.finfo(self.type().dtype()).min)))
         output = softmax(g, output, dim)
-        return masked_fill(g, output, r_mask, g.op("Constant", value_t=torch.tensor(0, dtype=torch.bool)))
+        return masked_fill(
+            g, output, r_mask,
+            g.op("Constant", value_t=torch.tensor(0, dtype=torch.bool)))
 
 
 def xsoftmax_call(input, mask, dim):
     rmask = ~(mask.to(torch.bool))
 
-    output = input.masked_fill(rmask, torch.tensor(torch.finfo(input.dtype).min))
+    output = input.masked_fill(rmask,
+                               torch.tensor(torch.finfo(input.dtype).min))
     output = torch.softmax(output, dim)
     output.masked_fill_(rmask, 0)
     return output
 
+
 class DropoutContext(object):
+
     def __init__(self):
         self.dropout = 0
         self.mask = None
@@ -164,7 +178,8 @@ def get_mask(input, local_context):
         mask = local_context.mask if local_context.reuse_mask else None
 
     if dropout > 0 and mask is None:
-        mask = (1 - torch.empty_like(input).bernoulli_(1 - dropout)).to(torch.bool)
+        mask = (1 - torch.empty_like(input).bernoulli_(1 - dropout)).to(
+            torch.bool)
 
     if isinstance(local_context, DropoutContext):
         if local_context.mask is None:
@@ -195,7 +210,8 @@ class XDropout(torch.autograd.Function):
             return grad_output, None
 
     @staticmethod
-    def symbolic(g: torch._C.Graph, input: torch._C.Value, local_ctx: Union[float, DropoutContext]) -> torch._C.Value:
+    def symbolic(g: torch._C.Graph, input: torch._C.Value,
+                 local_ctx: Union[float, DropoutContext]) -> torch._C.Value:
         from torch.onnx import symbolic_opset12
 
         dropout_p = local_ctx
@@ -275,17 +291,20 @@ class DebertaLayerNorm(nn.Module):
         hidden_states = hidden_states.float()
         mean = hidden_states.mean(-1, keepdim=True)
         variance = (hidden_states - mean).pow(2).mean(-1, keepdim=True)
-        hidden_states = (hidden_states - mean) / torch.sqrt(variance + self.variance_epsilon)
+        hidden_states = (hidden_states -
+                         mean) / torch.sqrt(variance + self.variance_epsilon)
         hidden_states = hidden_states.to(input_type)
         y = self.weight * hidden_states + self.bias
         return y
 
 
 class DebertaSelfOutput(nn.Module):
+
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        self.LayerNorm = DebertaLayerNorm(config.hidden_size, config.layer_norm_eps)
+        self.LayerNorm = DebertaLayerNorm(config.hidden_size,
+                                          config.layer_norm_eps)
         self.dropout = StableDropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
@@ -296,6 +315,7 @@ class DebertaSelfOutput(nn.Module):
 
 
 class DebertaAttention(nn.Module):
+
     def __init__(self, config):
         super().__init__()
         self.self = DisentangledSelfAttention(config)
@@ -333,6 +353,7 @@ class DebertaAttention(nn.Module):
 
 # Copied from transformers.models.bert.modeling_bert.BertIntermediate with Bert->Deberta
 class DebertaIntermediate(nn.Module):
+
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
@@ -348,10 +369,12 @@ class DebertaIntermediate(nn.Module):
 
 
 class DebertaOutput(nn.Module):
+
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
-        self.LayerNorm = DebertaLayerNorm(config.hidden_size, config.layer_norm_eps)
+        self.LayerNorm = DebertaLayerNorm(config.hidden_size,
+                                          config.layer_norm_eps)
         self.dropout = StableDropout(config.hidden_dropout_prob)
         self.config = config
 
@@ -363,6 +386,7 @@ class DebertaOutput(nn.Module):
 
 
 class DebertaLayer(nn.Module):
+
     def __init__(self, config):
         super().__init__()
         self.attention = DebertaAttention(config)
@@ -401,13 +425,16 @@ class DebertaEncoder(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.layer = nn.ModuleList([DebertaLayer(config) for _ in range(config.num_hidden_layers)])
+        self.layer = nn.ModuleList(
+            [DebertaLayer(config) for _ in range(config.num_hidden_layers)])
         self.relative_attention = getattr(config, "relative_attention", False)
         if self.relative_attention:
-            self.max_relative_positions = getattr(config, "max_relative_positions", -1)
+            self.max_relative_positions = getattr(config,
+                                                  "max_relative_positions", -1)
             if self.max_relative_positions < 1:
                 self.max_relative_positions = config.max_position_embeddings
-            self.rel_embeddings = nn.Embedding(self.max_relative_positions * 2, config.hidden_size)
+            self.rel_embeddings = nn.Embedding(self.max_relative_positions * 2,
+                                               config.hidden_size)
         self.gradient_checkpointing = False
 
     def get_rel_embedding(self):
@@ -417,7 +444,8 @@ class DebertaEncoder(nn.Module):
     def get_attention_mask(self, attention_mask):
         if attention_mask.dim() <= 2:
             extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
-            attention_mask = extended_attention_mask * extended_attention_mask.squeeze(-2).unsqueeze(-1)
+            attention_mask = extended_attention_mask * extended_attention_mask.squeeze(
+                -2).unsqueeze(-1)
             attention_mask = attention_mask.byte()
         elif attention_mask.dim() == 3:
             attention_mask = attention_mask.unsqueeze(1)
@@ -426,8 +454,10 @@ class DebertaEncoder(nn.Module):
 
     def get_rel_pos(self, hidden_states, query_states=None, relative_pos=None):
         if self.relative_attention and relative_pos is None:
-            q = query_states.size(-2) if query_states is not None else hidden_states.size(-2)
-            relative_pos = build_relative_position(q, hidden_states.size(-2), hidden_states.device)
+            q = query_states.size(
+                -2) if query_states is not None else hidden_states.size(-2)
+            relative_pos = build_relative_position(q, hidden_states.size(-2),
+                                                   hidden_states.device)
         return relative_pos
 
     def forward(
@@ -441,7 +471,8 @@ class DebertaEncoder(nn.Module):
         return_dict=True,
     ):
         attention_mask = self.get_attention_mask(attention_mask)
-        relative_pos = self.get_rel_pos(hidden_states, query_states, relative_pos)
+        relative_pos = self.get_rel_pos(hidden_states, query_states,
+                                        relative_pos)
 
         all_hidden_states = () if output_hidden_states else None
         all_attentions = () if output_attentions else None
@@ -458,6 +489,7 @@ class DebertaEncoder(nn.Module):
             if self.gradient_checkpointing and self.training:
 
                 def create_custom_forward(module):
+
                     def custom_forward(*inputs):
                         return module(*inputs, output_attentions)
 
@@ -487,7 +519,8 @@ class DebertaEncoder(nn.Module):
             if query_states is not None:
                 query_states = hidden_states
                 if isinstance(hidden_states, Sequence):
-                    next_kv = hidden_states[i + 1] if i + 1 < len(self.layer) else None
+                    next_kv = hidden_states[i + 1] if i + 1 < len(
+                        self.layer) else None
             else:
                 next_kv = hidden_states
 
@@ -498,10 +531,12 @@ class DebertaEncoder(nn.Module):
             all_hidden_states = all_hidden_states + (hidden_states,)
 
         if not return_dict:
-            return tuple(v for v in [hidden_states, all_hidden_states, all_attentions] if v is not None)
-        return BaseModelOutput(
-            last_hidden_state=hidden_states, hidden_states=all_hidden_states, attentions=all_attentions
-        )
+            return tuple(
+                v for v in [hidden_states, all_hidden_states, all_attentions]
+                if v is not None)
+        return BaseModelOutput(last_hidden_state=hidden_states,
+                               hidden_states=all_hidden_states,
+                               attentions=all_attentions)
 
 
 def build_relative_position(query_size, key_size, device):
@@ -531,17 +566,28 @@ def build_relative_position(query_size, key_size, device):
 
 # @torch.jit.script
 def c2p_dynamic_expand(c2p_pos, query_layer, relative_pos):
-    return c2p_pos.expand([query_layer.size(0), query_layer.size(1), query_layer.size(2), relative_pos.size(-1)])
+    return c2p_pos.expand([
+        query_layer.size(0),
+        query_layer.size(1),
+        query_layer.size(2),
+        relative_pos.size(-1)
+    ])
 
 
 # @torch.jit.script
 def p2c_dynamic_expand(c2p_pos, query_layer, key_layer):
-    return c2p_pos.expand([query_layer.size(0), query_layer.size(1), key_layer.size(-2), key_layer.size(-2)])
+    return c2p_pos.expand([
+        query_layer.size(0),
+        query_layer.size(1),
+        key_layer.size(-2),
+        key_layer.size(-2)
+    ])
 
 
 # @torch.jit.script
 def pos_dynamic_expand(pos_index, p2c_att, key_layer):
-    return pos_index.expand(p2c_att.size()[:2] + (pos_index.size(-2), key_layer.size(-2)))
+    return pos_index.expand(p2c_att.size()[:2] +
+                            (pos_index.size(-2), key_layer.size(-2)))
 
 
 class DisentangledSelfAttention(nn.Module):
@@ -560,33 +606,45 @@ class DisentangledSelfAttention(nn.Module):
         if config.hidden_size % config.num_attention_heads != 0:
             raise ValueError(
                 f"The hidden size ({config.hidden_size}) is not a multiple of the number of attention "
-                f"heads ({config.num_attention_heads})"
-            )
+                f"heads ({config.num_attention_heads})")
         self.num_attention_heads = config.num_attention_heads
-        self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
+        self.attention_head_size = int(config.hidden_size /
+                                       config.num_attention_heads)
         self.all_head_size = self.num_attention_heads * self.attention_head_size
-        self.in_proj = nn.Linear(config.hidden_size, self.all_head_size * 3, bias=False)
-        self.q_bias = nn.Parameter(torch.zeros((self.all_head_size), dtype=torch.float))
-        self.v_bias = nn.Parameter(torch.zeros((self.all_head_size), dtype=torch.float))
+        self.in_proj = nn.Linear(config.hidden_size,
+                                 self.all_head_size * 3,
+                                 bias=False)
+        self.q_bias = nn.Parameter(
+            torch.zeros((self.all_head_size), dtype=torch.float))
+        self.v_bias = nn.Parameter(
+            torch.zeros((self.all_head_size), dtype=torch.float))
         self.pos_att_type = config.pos_att_type if config.pos_att_type is not None else []
 
         self.relative_attention = getattr(config, "relative_attention", False)
         self.talking_head = getattr(config, "talking_head", False)
 
         if self.talking_head:
-            self.head_logits_proj = nn.Linear(config.num_attention_heads, config.num_attention_heads, bias=False)
-            self.head_weights_proj = nn.Linear(config.num_attention_heads, config.num_attention_heads, bias=False)
+            self.head_logits_proj = nn.Linear(config.num_attention_heads,
+                                              config.num_attention_heads,
+                                              bias=False)
+            self.head_weights_proj = nn.Linear(config.num_attention_heads,
+                                               config.num_attention_heads,
+                                               bias=False)
 
         if self.relative_attention:
-            self.max_relative_positions = getattr(config, "max_relative_positions", -1)
+            self.max_relative_positions = getattr(config,
+                                                  "max_relative_positions", -1)
             if self.max_relative_positions < 1:
                 self.max_relative_positions = config.max_position_embeddings
             self.pos_dropout = StableDropout(config.hidden_dropout_prob)
 
             if "c2p" in self.pos_att_type:
-                self.pos_proj = nn.Linear(config.hidden_size, self.all_head_size, bias=False)
+                self.pos_proj = nn.Linear(config.hidden_size,
+                                          self.all_head_size,
+                                          bias=False)
             if "p2c" in self.pos_att_type:
-                self.pos_q_proj = nn.Linear(config.hidden_size, self.all_head_size)
+                self.pos_q_proj = nn.Linear(config.hidden_size,
+                                            self.all_head_size)
 
         self.dropout = StableDropout(config.attention_probs_dropout_prob)
 
@@ -634,8 +692,10 @@ class DisentangledSelfAttention(nn.Module):
 
         """
         if query_states is None:
-            qp = self.in_proj(hidden_states)  # .split(self.all_head_size, dim=-1)
-            query_layer, key_layer, value_layer = self.transpose_for_scores(qp).chunk(3, dim=-1)
+            qp = self.in_proj(
+                hidden_states)  # .split(self.all_head_size, dim=-1)
+            query_layer, key_layer, value_layer = self.transpose_for_scores(
+                qp).chunk(3, dim=-1)
         else:
 
             def linear(w, b, x):
@@ -645,38 +705,56 @@ class DisentangledSelfAttention(nn.Module):
                     return torch.matmul(x, w.t())  # + b.t()
 
             ws = self.in_proj.weight.chunk(self.num_attention_heads * 3, dim=0)
-            qkvw = [torch.cat([ws[i * 3 + k] for i in range(self.num_attention_heads)], dim=0) for k in range(3)]
+            qkvw = [
+                torch.cat(
+                    [ws[i * 3 + k] for i in range(self.num_attention_heads)],
+                    dim=0) for k in range(3)
+            ]
             qkvb = [None] * 3
 
             q = linear(qkvw[0], qkvb[0], query_states.to(dtype=qkvw[0].dtype))
-            k, v = [linear(qkvw[i], qkvb[i], hidden_states.to(dtype=qkvw[i].dtype)) for i in range(1, 3)]
-            query_layer, key_layer, value_layer = [self.transpose_for_scores(x) for x in [q, k, v]]
+            k, v = [
+                linear(qkvw[i], qkvb[i], hidden_states.to(dtype=qkvw[i].dtype))
+                for i in range(1, 3)
+            ]
+            query_layer, key_layer, value_layer = [
+                self.transpose_for_scores(x) for x in [q, k, v]
+            ]
 
-        query_layer = query_layer + self.transpose_for_scores(self.q_bias[None, None, :])
-        value_layer = value_layer + self.transpose_for_scores(self.v_bias[None, None, :])
+        query_layer = query_layer + self.transpose_for_scores(
+            self.q_bias[None, None, :])
+        value_layer = value_layer + self.transpose_for_scores(
+            self.v_bias[None, None, :])
 
         rel_att = None
         # Take the dot product between "query" and "key" to get the raw attention scores.
         scale_factor = 1 + len(self.pos_att_type)
-        scale = torch.sqrt(torch.tensor(query_layer.size(-1), dtype=torch.float) * scale_factor)
+        scale = torch.sqrt(
+            torch.tensor(query_layer.size(-1), dtype=torch.float) *
+            scale_factor)
         query_layer = query_layer / scale.to(dtype=query_layer.dtype)
-        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
+        attention_scores = torch.matmul(query_layer,
+                                        key_layer.transpose(-1, -2))
         if self.relative_attention:
             rel_embeddings = self.pos_dropout(rel_embeddings)
-            rel_att = self.disentangled_att_bias(query_layer, key_layer, relative_pos, rel_embeddings, scale_factor)
+            rel_att = self.disentangled_att_bias(query_layer, key_layer,
+                                                 relative_pos, rel_embeddings,
+                                                 scale_factor)
 
         if rel_att is not None:
             attention_scores = attention_scores + rel_att
 
         # bxhxlxd
         if self.talking_head:
-            attention_scores = self.head_logits_proj(attention_scores.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+            attention_scores = self.head_logits_proj(
+                attention_scores.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
 
         attention_probs = XSoftmax.apply(attention_scores, attention_mask, -1)
         # attention_probs = xsoftmax_call(attention_scores, attention_mask, -1)
         attention_probs = self.dropout(attention_probs)
         if self.talking_head:
-            attention_probs = self.head_weights_proj(attention_probs.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+            attention_probs = self.head_weights_proj(
+                attention_probs.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
 
         context_layer = torch.matmul(attention_probs, value_layer)
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
@@ -687,23 +765,28 @@ class DisentangledSelfAttention(nn.Module):
         else:
             return context_layer
 
-    def disentangled_att_bias(self, query_layer, key_layer, relative_pos, rel_embeddings, scale_factor):
+    def disentangled_att_bias(self, query_layer, key_layer, relative_pos,
+                              rel_embeddings, scale_factor):
         if relative_pos is None:
             q = query_layer.size(-2)
-            relative_pos = build_relative_position(q, key_layer.size(-2), query_layer.device)
+            relative_pos = build_relative_position(q, key_layer.size(-2),
+                                                   query_layer.device)
         if relative_pos.dim() == 2:
             relative_pos = relative_pos.unsqueeze(0).unsqueeze(0)
         elif relative_pos.dim() == 3:
             relative_pos = relative_pos.unsqueeze(1)
         # bxhxqxk
         elif relative_pos.dim() != 4:
-            raise ValueError(f"Relative position ids must be of dim 2 or 3 or 4. {relative_pos.dim()}")
+            raise ValueError(
+                f"Relative position ids must be of dim 2 or 3 or 4. {relative_pos.dim()}"
+            )
 
-        att_span = min(max(query_layer.size(-2), key_layer.size(-2)), self.max_relative_positions)
+        att_span = min(max(query_layer.size(-2), key_layer.size(-2)),
+                       self.max_relative_positions)
         relative_pos = relative_pos.long().to(query_layer.device)
-        rel_embeddings = rel_embeddings[
-            self.max_relative_positions - att_span : self.max_relative_positions + att_span, :
-        ].unsqueeze(0)
+        rel_embeddings = rel_embeddings[self.max_relative_positions -
+                                        att_span:self.max_relative_positions +
+                                        att_span, :].unsqueeze(0)
 
         score = 0
 
@@ -713,27 +796,41 @@ class DisentangledSelfAttention(nn.Module):
             pos_key_layer = self.transpose_for_scores(pos_key_layer)
             c2p_att = torch.matmul(query_layer, pos_key_layer.transpose(-1, -2))
             c2p_pos = torch.clamp(relative_pos + att_span, 0, att_span * 2 - 1)
-            c2p_att = torch.gather(c2p_att, dim=-1, index=c2p_dynamic_expand(c2p_pos, query_layer, relative_pos))
+            c2p_att = torch.gather(c2p_att,
+                                   dim=-1,
+                                   index=c2p_dynamic_expand(
+                                       c2p_pos, query_layer, relative_pos))
             score += c2p_att
 
         # position->content
         if "p2c" in self.pos_att_type:
             pos_query_layer = self.pos_q_proj(rel_embeddings)
             pos_query_layer = self.transpose_for_scores(pos_query_layer)
-            pos_query_layer /= torch.sqrt(torch.tensor(pos_query_layer.size(-1), dtype=torch.float) * scale_factor)
+            pos_query_layer /= torch.sqrt(
+                torch.tensor(pos_query_layer.size(-1), dtype=torch.float) *
+                scale_factor)
             if query_layer.size(-2) != key_layer.size(-2):
-                r_pos = build_relative_position(key_layer.size(-2), key_layer.size(-2), query_layer.device)
+                r_pos = build_relative_position(key_layer.size(-2),
+                                                key_layer.size(-2),
+                                                query_layer.device)
             else:
                 r_pos = relative_pos
             p2c_pos = torch.clamp(-r_pos + att_span, 0, att_span * 2 - 1)
-            p2c_att = torch.matmul(key_layer, pos_query_layer.transpose(-1, -2).to(dtype=key_layer.dtype))
-            p2c_att = torch.gather(
-                p2c_att, dim=-1, index=p2c_dynamic_expand(p2c_pos, query_layer, key_layer)
-            ).transpose(-1, -2)
+            p2c_att = torch.matmul(
+                key_layer,
+                pos_query_layer.transpose(-1, -2).to(dtype=key_layer.dtype))
+            p2c_att = torch.gather(p2c_att,
+                                   dim=-1,
+                                   index=p2c_dynamic_expand(
+                                       p2c_pos, query_layer,
+                                       key_layer)).transpose(-1, -2)
 
             if query_layer.size(-2) != key_layer.size(-2):
                 pos_index = relative_pos[:, :, :, 0].unsqueeze(-1)
-                p2c_att = torch.gather(p2c_att, dim=-2, index=pos_dynamic_expand(pos_index, p2c_att, key_layer))
+                p2c_att = torch.gather(p2c_att,
+                                       dim=-2,
+                                       index=pos_dynamic_expand(
+                                           pos_index, p2c_att, key_layer))
             score += p2c_att
 
         return score
@@ -745,28 +842,44 @@ class DebertaEmbeddings(nn.Module):
     def __init__(self, config):
         super().__init__()
         pad_token_id = getattr(config, "pad_token_id", 0)
-        self.embedding_size = getattr(config, "embedding_size", config.hidden_size)
-        self.word_embeddings = nn.Embedding(config.vocab_size, self.embedding_size, padding_idx=pad_token_id)
+        self.embedding_size = getattr(config, "embedding_size",
+                                      config.hidden_size)
+        self.word_embeddings = nn.Embedding(config.vocab_size,
+                                            self.embedding_size,
+                                            padding_idx=pad_token_id)
 
-        self.position_biased_input = getattr(config, "position_biased_input", True)
+        self.position_biased_input = getattr(config, "position_biased_input",
+                                             True)
         if not self.position_biased_input:
             self.position_embeddings = None
         else:
-            self.position_embeddings = nn.Embedding(config.max_position_embeddings, self.embedding_size)
+            self.position_embeddings = nn.Embedding(
+                config.max_position_embeddings, self.embedding_size)
 
         if config.type_vocab_size > 0:
-            self.token_type_embeddings = nn.Embedding(config.type_vocab_size, self.embedding_size)
+            self.token_type_embeddings = nn.Embedding(config.type_vocab_size,
+                                                      self.embedding_size)
 
         if self.embedding_size != config.hidden_size:
-            self.embed_proj = nn.Linear(self.embedding_size, config.hidden_size, bias=False)
-        self.LayerNorm = DebertaLayerNorm(config.hidden_size, config.layer_norm_eps)
+            self.embed_proj = nn.Linear(self.embedding_size,
+                                        config.hidden_size,
+                                        bias=False)
+        self.LayerNorm = DebertaLayerNorm(config.hidden_size,
+                                          config.layer_norm_eps)
         self.dropout = StableDropout(config.hidden_dropout_prob)
         self.config = config
 
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
-        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+        self.register_buffer(
+            "position_ids",
+            torch.arange(config.max_position_embeddings).expand((1, -1)))
 
-    def forward(self, input_ids=None, token_type_ids=None, position_ids=None, mask=None, inputs_embeds=None):
+    def forward(self,
+                input_ids=None,
+                token_type_ids=None,
+                position_ids=None,
+                mask=None,
+                inputs_embeds=None):
         if input_ids is not None:
             input_shape = input_ids.size()
         else:
@@ -778,7 +891,9 @@ class DebertaEmbeddings(nn.Module):
             position_ids = self.position_ids[:, :seq_length]
 
         if token_type_ids is None:
-            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
+            token_type_ids = torch.zeros(input_shape,
+                                         dtype=torch.long,
+                                         device=self.position_ids.device)
 
         if inputs_embeds is None:
             inputs_embeds = self.word_embeddings(input_ids)
@@ -830,11 +945,13 @@ class DebertaPreTrainedModel(PreTrainedModel):
         if isinstance(module, nn.Linear):
             # Slightly different from the TF version which uses truncated_normal for initialization
             # cf https://github.com/pytorch/pytorch/pull/5617
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            module.weight.data.normal_(mean=0.0,
+                                       std=self.config.initializer_range)
             if module.bias is not None:
                 module.bias.data.zero_()
         elif isinstance(module, nn.Embedding):
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            module.weight.data.normal_(mean=0.0,
+                                       std=self.config.initializer_range)
             if module.padding_idx is not None:
                 module.weight.data[module.padding_idx].zero_()
 
@@ -909,6 +1026,7 @@ DEBERTA_INPUTS_DOCSTRING = r"""
     DEBERTA_START_DOCSTRING,
 )
 class DebertaModel(DebertaPreTrainedModel):
+
     def __init__(self, config):
         super().__init__(config)
 
@@ -930,9 +1048,11 @@ class DebertaModel(DebertaPreTrainedModel):
         Prunes heads of the model. heads_to_prune: dict of {layer_num: list of heads to prune in this layer} See base
         class PreTrainedModel
         """
-        raise NotImplementedError("The prune function is not implemented in DeBERTa model.")
+        raise NotImplementedError(
+            "The prune function is not implemented in DeBERTa model.")
 
-    @add_start_docstrings_to_model_forward(DEBERTA_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
+    @add_start_docstrings_to_model_forward(
+        DEBERTA_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=BaseModelOutput,
@@ -950,26 +1070,31 @@ class DebertaModel(DebertaPreTrainedModel):
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutput]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
+        output_hidden_states = (output_hidden_states
+                                if output_hidden_states is not None else
+                                self.config.output_hidden_states)
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if input_ids is not None and inputs_embeds is not None:
-            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
+            raise ValueError(
+                "You cannot specify both input_ids and inputs_embeds at the same time"
+            )
         elif input_ids is not None:
             input_shape = input_ids.size()
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
         else:
-            raise ValueError("You have to specify either input_ids or inputs_embeds")
+            raise ValueError(
+                "You have to specify either input_ids or inputs_embeds")
 
         device = input_ids.device if input_ids is not None else inputs_embeds.device
 
         if attention_mask is None:
             attention_mask = torch.ones(input_shape, device=device)
         if token_type_ids is None:
-            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
+            token_type_ids = torch.zeros(input_shape,
+                                         dtype=torch.long,
+                                         device=device)
 
         embedding_output = self.embeddings(
             input_ids=input_ids,
@@ -1009,19 +1134,21 @@ class DebertaModel(DebertaPreTrainedModel):
         sequence_output = encoded_layers[-1]
 
         if not return_dict:
-            return (sequence_output,) + encoder_outputs[(1 if output_hidden_states else 2) :]
+            return (sequence_output,) + encoder_outputs[
+                (1 if output_hidden_states else 2):]
 
         return BaseModelOutput(
             last_hidden_state=sequence_output,
-            hidden_states=encoder_outputs.hidden_states if output_hidden_states else None,
+            hidden_states=encoder_outputs.hidden_states
+            if output_hidden_states else None,
             attentions=encoder_outputs.attentions,
         )
 
 
-
 model_name = "microsoft/deberta-base"
-# device = "cuda:0"
-device = "cpu"
+device = "cuda:0"
+# device = "cpu"
+
 
 def get_model():
     config = AutoConfig.from_pretrained(model_name)
@@ -1038,20 +1165,30 @@ def get_input(batch_size):
     # return (inputs['input_ids'], inputs['attention_mask'], inputs['token_type_ids']), {}
     vocab_size = 50265
     seq_len = 256
-    input_ids = torch.randint(0, vocab_size, (batch_size, seq_len), dtype=torch.int64).to(device)
-    attention_mask = torch.ones((batch_size, seq_len), dtype=torch.int64).to(device)
-    token_type_ids = torch.zeros((batch_size, seq_len), dtype=torch.int64).to(device)
+    input_ids = torch.randint(0,
+                              vocab_size, (batch_size, seq_len),
+                              dtype=torch.int64).to(device)
+    attention_mask = torch.ones((batch_size, seq_len),
+                                dtype=torch.int64).to(device)
+    token_type_ids = torch.zeros((batch_size, seq_len),
+                                 dtype=torch.int64).to(device)
     return (input_ids, attention_mask, token_type_ids), {}
 
 
-if __name__ == "__main__":
-    # torch.jit._state.disable()
+# if __name__ == "__main__":
+def test_model_deberta(caplog):
+    reset()
+    # NOTE: functions with torch.jit.script are inverted to eager mode
     with torch.no_grad():
         model = get_model().eval()
         input_args, input_kwargs = get_input(batch_size=1)
         # print([x.shape for x in input_args])
-        # outputs = model(*input_args, **input_kwargs)
+        expect = model(*input_args, **input_kwargs)
         # print(outputs)
         compiled = compile(model)
-        print(compiled(*input_args, **input_kwargs))
-        print(compiled(*input_args, **input_kwargs))
+        # print(compiled(*input_args, **input_kwargs))
+        # print(compiled(*input_args, **input_kwargs))
+        run_and_check(compiled, [ALL_MISS], 1, caplog, expect, *input_args,
+                      **input_kwargs)
+        run_and_check(compiled, [HIT], 1, caplog, expect, *input_args,
+                      **input_kwargs)

@@ -48,7 +48,6 @@ def test_inplace_add(caplog):
     run_and_check(compiled, [HIT], 5, caplog, result8, 3, torch.tensor(9))
 
 
-
 # TODO:
 # def inplace_add2(a, b):
 #     a += b

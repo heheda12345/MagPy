@@ -60,13 +60,17 @@ class ObjectTable:
     def get_all_with_id(self) -> list[Tuple[int, Variable]]:
         return list(self.objs.items())
 
-    def get(self, value: Any, allow_unexist_const: bool = False, fx_graph: Optional[FxGraph] = None) -> Variable:
+    def get(self,
+            value: Any,
+            allow_unexist_const: bool = False,
+            fx_graph: Optional[FxGraph] = None) -> Variable:
         if id(value) in self.objs:
             return self.objs[id(value)]
         elif allow_unexist_const:
             if isinstance(value, get_args(CONST_TYPES)) or isinstance(
                     value, (list, tuple, set, dict, CodeType)):
-                return make_var_from_value(value, False, self.helper_functions, fx_graph)
+                return make_var_from_value(value, False, self.helper_functions,
+                                           fx_graph)
         raise RuntimeError(
             f"Object({id(value)}) {value} not found in object table")
 
