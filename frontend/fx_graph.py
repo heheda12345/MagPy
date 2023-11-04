@@ -2,6 +2,7 @@ from typing import Any, Callable, Dict, Optional, Tuple, Union
 import torch
 import torch.fx
 import torch._inductor.compile_fx
+import torch._dynamo.backends.torchxla
 from .utils import NO_LD_PRELOAD_CTX
 from . import config
 
@@ -27,6 +28,9 @@ def backend_compile(gm: torch.fx.GraphModule,
         return gm
     elif backend == 'inductor':
         return torch._inductor.compile_fx.compile_fx(gm, example_inputs)
+    elif backend == 'xla':
+        return torch._dynamo.backends.torchxla.aot_torchxla_trace_once(
+            gm, example_inputs)
     else:
         raise RuntimeError(f"Unknown backend: {backend}")
 

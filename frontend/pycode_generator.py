@@ -5,6 +5,7 @@ import torch.fx
 from .pycode_writer import PyCodeWriter, new_name, is_valid_name
 from .store_pos import StorePos
 from .variables import Variable
+from .config import get_config
 
 
 def gen_imports(writer: PyCodeWriter, imports: set[str]) -> None:
@@ -83,8 +84,9 @@ class GraphFnCodegen(FnCodegen):
         gen_imports(writer, self.imports)
         writer.wl(f"def fn(locals):")
         writer.block_start()
-        writer.wl(
-            f"print('running graph_fn (key = {self.key})', locals.keys())")
+        if get_config('debug'):
+            writer.wl(
+                f"print('running graph_fn (key = {self.key})', locals.keys())")
         # TODO: simplify
         graph_inputs = []
         for x, to_tensor in self.graph_inputs:
@@ -149,15 +151,17 @@ class GuardFnCodegen(FnCodegen):
         writer.block_start()
         writer.write(f"try:")
         writer.block_start()
-        writer.wl(
-            f"print('running guard_fn (key = {self.key})', locals.keys())")
+        if get_config('debug'):
+            writer.wl(
+                f"print('running guard_fn (key = {self.key})', locals.keys())")
         writer.write(self.writer.get_code())
         if len(self.checks) == 0:
             writer.wl(f"ok = True")
         else:
             writer.wl(
                 f"ok = {' and '.join(map(lambda x: f'({x})', self.checks))}")
-        writer.wl(f"print('ok = ', ok)")
+        if get_config('debug'):
+            writer.wl(f"print('ok = ', ok)")
         writer.block_end()
         writer.wl(f"except Exception as e:")
         writer.block_start()
