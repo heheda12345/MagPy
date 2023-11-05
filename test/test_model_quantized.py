@@ -68,8 +68,7 @@ class UniformQuantize(InplaceFunction):
         qmin = 0.0
         qmax = 2.0**num_bits - 1.0
         scale = (max_value - min_value) / (qmax - qmin)
-        scale = torch.tensor(scale, device='cuda').clamp(min=1e-8)
-        # scale = max(scale, 1e-08)  # FIXME: support
+        scale = max(scale, 1e-08)
         if enforce_true_zero:
             initial_zero_point = qmin - min_value / scale
             zero_point = 0.0
@@ -131,11 +130,8 @@ class QuantMeasure(nn.Module):
             self.running_max.mul_(self.momentum).add_(max_value *
                                                       (1 - self.momentum))
         else:
-            # FIXME: getattr of caller
-            min_value = torch.zeros(1)
-            max_value = torch.zeros(1)
-            # min_value = self.running_min
-            # max_value = self.running_max
+            min_value = self.running_min
+            max_value = self.running_max
         return quantize(input,
                         self.num_bits,
                         min_value=float(min_value),
