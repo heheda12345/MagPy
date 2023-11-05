@@ -83,6 +83,10 @@ def parse_rangeiterobject(obj: Any) -> Tuple[int, int, int, int]:
     pass
 
 
+def parse_mapproxyobject(obj: Any) -> Any:
+    pass
+
+
 def make_rangeiterobject(start: int, stop: int, step: int) -> Any:
     pass
 

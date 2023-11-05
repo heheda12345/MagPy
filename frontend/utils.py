@@ -169,6 +169,8 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
 
     if hasattr(func, '__name__') and func.__name__ == '<genexpr>':
         return False
+    if hasattr(func, '__name__') and func.__name__ == '_conv_forward':
+        return True
 
     if hasattr(func, '__name__') and func.__name__ == 'apply':
         assert hasattr(func, '__self__')
@@ -178,7 +180,8 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
         return False
 
     root_module = get_root_module(func)
-    if root_module in ('math', 'builtins', 'torch', 'numpy', '_operator'):
+    if root_module in ('math', 'builtins', 'torch', 'numpy', '_operator',
+                       'inspect', 'collections'):
         #NOTE:self.function should be recursive-checked to find out where it's defined, but not implemented
         if hasattr(func, '__self__'
                   ) and func.__self__ is not None and is_user_defined_func(

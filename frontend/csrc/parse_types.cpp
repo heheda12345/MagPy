@@ -1,5 +1,6 @@
 #include "csrc.h"
 #include <Python.h>
+#include <descrobject.h>
 #include <object.h>
 
 namespace frontend_csrc {
@@ -39,4 +40,21 @@ PyObject *make_rangeiterobject(PyObject *self, PyObject *args) {
     return (PyObject *)robj;
 }
 
+typedef struct {
+    PyObject_HEAD PyObject *mapping;
+} mappingproxyobject;
+
+PyObject *parse_mapproxyobject(PyObject *self, PyObject *args) {
+    PyObject *obj;
+    if (!PyArg_ParseTuple(args, "O", &obj)) {
+        return NULL;
+    }
+    if (Py_TYPE(obj) != &PyDictProxy_Type) {
+        PyErr_SetString(PyExc_TypeError, "Expected mapproxyobject");
+        return NULL;
+    }
+    mappingproxyobject *mobj = (mappingproxyobject *)obj;
+    Py_INCREF(mobj->mapping);
+    return mobj->mapping;
+}
 } // namespace frontend_csrc

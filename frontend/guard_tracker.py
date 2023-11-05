@@ -1,4 +1,4 @@
-from types import FrameType
+from types import FrameType, MappingProxyType
 from typing import Dict, Any, Callable, List, Optional, cast, Union
 import inspect
 import logging
@@ -10,6 +10,7 @@ import dis
 import traceback
 import copy
 import dataclasses
+import collections
 import torch.fx.immutable_collections as fx_immutable
 import numpy as np
 from .code import ProcessedCode
@@ -207,7 +208,7 @@ class State:
             scalar = None
             node = None
             for i, obj in enumerate(pargs):
-                if isinstance(obj, (int, float)):
+                if isinstance(obj, (int, float)) and not dyn.contains(obj):
                     scalar = obj
                     position = i
                 else:
@@ -220,6 +221,28 @@ class State:
                     {},
                 )
                 pargs = (fx_node, node)
+        if func in (min, max):
+            scalar = None
+            node = None
+            assert len(pargs) == 2
+            for i, obj in enumerate(pargs):
+                if isinstance(obj, (int, float)) and not dyn.contains(obj):
+                    scalar = obj
+                    position = i
+                else:
+                    node = obj
+            if scalar is not None and node is not None:
+                fx_node = self.fx_graph.create_node(
+                    "call_function",
+                    torch.full_like,
+                    (node, scalar),
+                    {},
+                )
+                pargs_list = list(pargs)
+                pargs_list[position] = fx_node
+                pargs = tuple(pargs_list)
+                func_dict = {min: torch.minimum, max: torch.maximum}
+                func = func_dict[func]
 
         self.written = True
         scalar2tensor: dict[Callable[..., Any], Callable[..., Any]] = {
@@ -1093,6 +1116,11 @@ class GuardTracker:
                     value = new_value
                 elif isinstance(value, (bool, int)):
                     raise NotImplementedError
+                elif isinstance(value, torch.Tensor):
+                    new_value = torch.clone(value)
+                    assert id(value) != id(new_value)
+                    set_value_stack_from_top(self.frame, i, new_value)
+                    value = new_value
                 else:
                     raise ValueError("duplicate id", value)
             default_make_var_fn: MAKE_VAR_FN_TYPE = vs.make_var_from_value
@@ -1364,7 +1392,8 @@ class GuardTracker:
             return
         elif self.has_arg_of_type(
                 args, kwargs,
-            (set, list, dict)) and get_root_module(func) != 'torch':
+            (set, list, dict, collections.OrderedDict,
+             MappingProxyType)) and get_root_module(func) != 'torch':
             set_if_inplace_return()
             return
         elif self.has_arg_of_type(args, kwargs, np.generic):
@@ -1401,6 +1430,15 @@ class GuardTracker:
                 })
                 return
         elif func == isinstance:
+            return
+        elif func == inspect.signature:
+            self.state.set_partial_var({
+                -1: [
+                    PartialVar(node=None,
+                               need_guard_check=False,
+                               extract_code_at_start=[])
+                ]
+            })
             return
 
         raise NotImplementedError(func, args, kwargs)

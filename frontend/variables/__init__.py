@@ -1,7 +1,8 @@
 from typing import Any, Union, Optional, Tuple, TYPE_CHECKING, Callable
-from types import ModuleType, CodeType, CellType
+from types import ModuleType, CodeType, CellType, MappingProxyType
 import torch
 import numpy as np
+from collections import OrderedDict
 from .base import Variable, HelperFunctions
 from .scalar import ScalarVar, NumpyScalarVar
 from .tensor import TensorVar, TorchParamVar, TorchSizeVar, TorchDtypeVar, TorchDeviceVar
@@ -12,8 +13,8 @@ from .iterator import IteratorVar, RangeIterVar
 from .tuple_ import TupleVar
 from .set_ import SetVar
 from .list_ import ListVar
-from .dict_ import DictVar
-from .builtin_types import CellVar
+from .dict_ import DictVar, OrderedDictVar
+from .builtin_types import CellVar, MappingProxyVar
 from ..fx_graph import FxGraph
 from ..utils import NullObject, UnknownTypeError, is_structseq
 from ..store_pos import StorePos
@@ -36,6 +37,7 @@ ty2var: dict[type[Any], type[Variable]] = {
     torch.device: TorchDeviceVar,
     dict: DictVar,
     CodeType: CodeVar,
+    OrderedDict: OrderedDictVar
 }
 
 CONST_TYPES = Union[int, float, bool, str, NullObject, None, slice]
@@ -80,6 +82,10 @@ def make_var_from_value(
     elif is_structseq(value):
         return TupleVar.from_value(value, need_guard_check, helper_functions,
                                    fx_graph, extract_code_at_start)
+    elif type(value) == MappingProxyType:
+        return MappingProxyVar.from_value(value, need_guard_check,
+                                          helper_functions, fx_graph,
+                                          extract_code_at_start)
     else:
         # NOTE: use any instead of iteartor_var to represent iterator with unknown source due to the hardness of getting iterable and num_iters
         print("generate any for", value, type(value), extract_code_at_start)
