@@ -1,5 +1,6 @@
 from frontend.compile import compile, reset
 from common.checker import run_and_check, HIT, MISS, assert_equal
+from collections import OrderedDict
 import torch
 
 
@@ -95,3 +96,18 @@ def test_with_tensor(caplog):
                   temp2,
                   b=temp3,
                   c=temp4)
+
+
+def run_ordered_dict(a):
+    b = OrderedDict([("three", 3)])
+    return OrderedDict([("one", a["one"]), ("two", a["two"]),
+                        ("three", b["three"])])
+
+
+def test_ordered_dict(caplog):
+    reset()
+    numbers = OrderedDict([("one", 1), ("two", 2)])
+    compiled_ordered_dict = compile(run_ordered_dict)
+    result = run_ordered_dict(numbers)
+    run_and_check(compiled_ordered_dict, [MISS], 1, caplog, result, numbers)
+    run_and_check(compiled_ordered_dict, [HIT], 1, caplog, result, numbers)

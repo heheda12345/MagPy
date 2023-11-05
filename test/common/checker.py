@@ -31,6 +31,10 @@ def assert_equal(ref, out):
         assert (isinstance(out, Iterable))
         if isinstance(ref, set):
             assert (len(ref) == len(out))
+        elif isinstance(ref, dict):
+            assert (len(ref) == len(out))
+            for k, v in ref.items():
+                assert_equal(v, out[k])
         else:
             for r, o in zip(ref, out):
                 assert_equal(r, o)

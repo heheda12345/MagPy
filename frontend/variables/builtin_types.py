@@ -3,6 +3,7 @@ from types import CellType
 from .base import Variable, HelperFunctions
 from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos, StoreInAttr, StoreInFreeVar
+from ..c_api import parse_mapproxyobject
 import torch
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -71,6 +72,49 @@ class CellVar(Variable):
             ]
             old_var.extract_code_at_start.extend(new_extract)
             old_var.need_guard_check |= self.need_guard_check
+        else:
+            table.add_by_id(self.sub_var, self.sub_id)
+            self.sub_var.add_subvars_to_table(table)
+
+
+class MappingProxyVar(Variable):
+    sub_var: Variable
+    sub_id: int
+
+    def __init__(self, value: Any, need_guard_check: bool,
+                 helper_functions: HelperFunctions, fx_graph: Optional[FxGraph],
+                 extract_code_at_start: list[StorePos]) -> None:
+        super().__init__(need_guard_check, value, extract_code_at_start)
+        # assert len(extract_code_at_start) > 0
+        sub_obj = parse_mapproxyobject(value)
+        new_extract: list[StorePos] = []
+        self.sub_var = helper_functions.get_or_make_var(sub_obj,
+                                                        need_guard_check,
+                                                        fx_graph, new_extract)
+        self.sub_id = id(sub_obj)
+
+    @classmethod
+    def from_value(cls, value: Any, need_guard_check: bool,
+                   helper_functions: HelperFunctions,
+                   fx_graph: Optional[FxGraph],
+                   extract_code_at_start: list[StorePos]) -> "MappingProxyVar":
+        return cls(value, need_guard_check, helper_functions, fx_graph,
+                   extract_code_at_start)
+
+    def make_guard_inner(self, codegen: 'GuardFnCodegen',
+                         pos: StorePos) -> None:
+        raise ValueError("TOOD")
+
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: 'GraphFnCodegen', in_return: bool,
+                          idx: int) -> None:
+        raise ValueError("TOOD")
+
+    def add_subvars_to_table(self, table: 'ObjectTable') -> None:
+        old_var = table.get_or_none_by_id(self.sub_id)
+        if old_var is not None:
+            # TODO: handle extract_code_at_start
+            pass
         else:
             table.add_by_id(self.sub_var, self.sub_id)
             self.sub_var.add_subvars_to_table(table)

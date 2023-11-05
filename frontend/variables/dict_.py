@@ -110,3 +110,70 @@ class DictVar(Variable):
             else:
                 table.add_by_id(var, idx)
                 var.add_subvars_to_table(table)
+
+
+class OrderedDictVar(DictVar):
+
+    def __init__(self,
+                 value: dict[Any, Any],
+                 need_guard_check: bool,
+                 helper_functions: HelperFunctions,
+                 fx_graph: Optional[FxGraph] = None,
+                 extract_code_at_start: list[StorePos] = []) -> None:
+        super().__init__(value, need_guard_check, helper_functions, fx_graph,
+                         extract_code_at_start)
+
+    @classmethod
+    def from_value(
+            cls,
+            value: dict[Any, Any],
+            need_guard_check: bool,
+            helper_functions: HelperFunctions,
+            fx_graph: Optional[FxGraph] = None,
+            extract_code_at_start: list[StorePos] = []) -> "OrderedDictVar":
+        return cls(value, need_guard_check, helper_functions, fx_graph,
+                   extract_code_at_start)
+
+    def make_guard_inner(self, codegen: "GuardFnCodegen",
+                         pos: StorePos) -> None:
+        codegen.add_check(f"isinstance({pos}, dict)")
+        codegen.add_check(f"len({pos}) == {self.length}")
+        for key, var in zip(self.value.keys(), self.vars):
+            if not isinstance(var, TensorVar):
+                if isinstance(key, str):
+                    var.make_guard_inner(codegen,
+                                         StoreInIndex(pos, id(var), f"'{key}'"))
+                else:
+                    var.make_guard_inner(codegen,
+                                         StoreInIndex(pos, id(var), str(key)))
+        # TODO: check order
+
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: "GraphFnCodegen", in_return: bool,
+                          idx: int) -> None:
+        oldest = self.get_oldest_var()
+        for j, (idx_j, var) in enumerate(zip(self.obj_ids, self.vars)):
+            var.make_output(f"{name_in_graph_fn}_{j}", store_pos, codegen,
+                            False, idx_j)
+        if len(oldest.extract_code_at_start) > 0:
+            assert isinstance(oldest, DictVar)
+            old_store_pos = oldest.extract_code_at_start[0]
+            codegen.add_stmt(f"{old_store_pos}.clear()")
+            for i, key in enumerate(self.value.keys()):
+                codegen.add_stmt(
+                    f"{old_store_pos}[{key}]={name_in_graph_fn}_{i}")
+            codegen.output(name_in_graph_fn, store_pos, str(old_store_pos),
+                           in_return, idx)
+        else:
+            codegen.add_import("collections")
+
+            def to_str(value: Any) -> str:
+                if isinstance(value, str):
+                    return f"'{value}'"
+                else:
+                    return str(value)
+
+            codegen.output(
+                name_in_graph_fn, store_pos,
+                f"collections.OrderedDict([{','.join(f'({to_str(key)}, {name_in_graph_fn}_{j})' for key, j in zip(self.value.keys(), range(len(self.vars))))}])"
+                if len(self.vars) > 0 else "{}", in_return, idx)

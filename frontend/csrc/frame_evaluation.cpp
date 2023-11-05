@@ -543,6 +543,8 @@ static PyMethodDef _methods[] = {
     {"get_from_freevars", get_from_freevars, METH_VARARGS, NULL},
     {"parse_rangeiterobject", frontend_csrc::parse_rangeiterobject,
      METH_VARARGS, NULL},
+    {"parse_mapproxyobject", frontend_csrc::parse_mapproxyobject, METH_VARARGS,
+     NULL},
     {"make_rangeiterobject", frontend_csrc::make_rangeiterobject, METH_VARARGS,
      NULL},
     {NULL, NULL, 0, NULL}};

@@ -1,4 +1,4 @@
-from types import FrameType
+from types import FrameType, MappingProxyType
 from typing import Dict, Any, Callable, List, Optional, cast, Union
 import inspect
 import logging
@@ -10,6 +10,7 @@ import dis
 import traceback
 import copy
 import dataclasses
+import collections
 import torch.fx.immutable_collections as fx_immutable
 import numpy as np
 from .code import ProcessedCode
@@ -1364,7 +1365,8 @@ class GuardTracker:
             return
         elif self.has_arg_of_type(
                 args, kwargs,
-            (set, list, dict)) and get_root_module(func) != 'torch':
+            (set, list, dict, collections.OrderedDict,
+             MappingProxyType)) and get_root_module(func) != 'torch':
             set_if_inplace_return()
             return
         elif self.has_arg_of_type(args, kwargs, np.generic):
@@ -1401,6 +1403,15 @@ class GuardTracker:
                 })
                 return
         elif func == isinstance:
+            return
+        elif func == inspect.signature:
+            self.state.set_partial_var({
+                -1: [
+                    PartialVar(node=None,
+                               need_guard_check=False,
+                               extract_code_at_start=[])
+                ]
+            })
             return
 
         raise NotImplementedError(func, args, kwargs)
