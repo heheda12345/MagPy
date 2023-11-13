@@ -8,7 +8,7 @@ from .scalar import ScalarVar, NumpyScalarVar
 from .tensor import TensorVar, TorchParamVar, TorchSizeVar, TorchDtypeVar, TorchDeviceVar
 from .torch_module import TorchModuleVar, TorchSequentialVar, TorchModuleListVar
 from .any_ import AnyVar
-from .const import NullVar, NoneVar, SliceVar, ModuleVar, FunctionVar, RangeVar, CodeVar
+from .const import NullVar, NoneVar, SliceVar, ModuleVar, FunctionVar, RangeVar, CodeVar, EllipsisVar
 from .iterator import IteratorVar, RangeIterVar
 from .tuple_ import TupleVar
 from .set_ import SetVar
@@ -40,7 +40,7 @@ ty2var: dict[type[Any], type[Variable]] = {
     OrderedDict: OrderedDictVar
 }
 
-CONST_TYPES = Union[int, float, bool, str, NullObject, None, slice]
+CONST_TYPES = Union[int, float, bool, str, NullObject, None, slice, type(Ellipsis)]
 
 
 def make_var_from_value(
@@ -63,8 +63,9 @@ def make_var_from_value(
         return ModuleVar.from_value(value, need_guard_check, helper_functions,
                                     fx_graph, extract_code_at_start)
     elif callable(value):
-        return FunctionVar.from_value(value, need_guard_check, helper_functions,
-                                      fx_graph, extract_code_at_start)
+        return FunctionVar.from_value(value, need_guard_check,
+                                      helper_functions, fx_graph,
+                                      extract_code_at_start)
     elif isinstance(value, range):
         return RangeVar.from_value(value, need_guard_check, helper_functions,
                                    fx_graph, extract_code_at_start)
@@ -86,6 +87,10 @@ def make_var_from_value(
         return MappingProxyVar.from_value(value, need_guard_check,
                                           helper_functions, fx_graph,
                                           extract_code_at_start)
+    elif isinstance(value, type(Ellipsis)):
+        return EllipsisVar.from_value(value, need_guard_check,
+                                      helper_functions, fx_graph,
+                                      extract_code_at_start)
     else:
         # NOTE: use any instead of iteartor_var to represent iterator with unknown source due to the hardness of getting iterable and num_iters
         print("generate any for", value, type(value), extract_code_at_start)

@@ -1,6 +1,7 @@
 from frontend.compile import compile, reset
 from common.checker import run_and_check, HIT, MISS, assert_equal
 import torch
+import numpy as np
 
 
 def without_tensor_0(a):
@@ -77,6 +78,9 @@ def tensor_4(list_a, list_b):
     return list_a + [3]
 
 
+def tensor_5(list_a):
+    return list_a[..., 2:]
+
 def list_id(list_a, list_b):
     c = list_a + list_b
     return c[3], c[6]
@@ -90,6 +94,7 @@ def test_with_tensor(caplog):
     compiled_tensor3 = compile(tensor_3)
     compiled_tensor4 = compile(tensor_4)
     compiled_tensor5 = compile(list_id)
+    compiled_tensor6 = compile(tensor_5)
     a = torch.full((1,), 5.0)
     b = torch.full((1,), 7.0)
     list_a = [1, 2, 4, a]
@@ -122,6 +127,14 @@ def test_with_tensor(caplog):
     result = tensor_3(list_a, list_b)
     run_and_check(compiled_tensor3, [MISS], 7, caplog, result, list_a, list_b)
     run_and_check(compiled_tensor3, [HIT], 7, caplog, result, list_a, list_b)
+    #TODO: support numpy array variables
+    # list_a = np.array([[1, 2, 3, 4],
+    #             [5, 6, 7, 8],
+    #             [9, 10, 11, 12]])
+    # result = tensor_5(list_a)
+    # run_and_check(compiled_tensor6, [MISS], 8, caplog, result, list_a)
+    # run_and_check(compiled_tensor6, [HIT], 8, caplog, result, list_a)
+    
 
 
 def list_contains(a, b):
