@@ -4,6 +4,7 @@ import inspect
 import logging
 import itertools
 import torch
+import torch.nn as nn
 import torch.fx
 import operator
 import dis
@@ -20,7 +21,7 @@ from .cache import CachedGraph, get_frame_cache
 from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromNew, UnknownPosInCaller
 from . import variables as vs
 from . import dynamic as dyn
-from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs, print_bytecode, get_method_defined_class
+from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs, print_bytecode, get_method_defined_class, is_math_func
 from .object_table import ObjectTable
 from .pycode_writer import new_name
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -29,6 +30,7 @@ from .bytecode_analysis import livevars_analysis, end_of_control_flow
 from .variables.tuple_ import TupleVar
 from .variables.base import Variable
 from .control_flow import ControlFlowInfo, LoopModule, ForLoopInfo, LoopPosMap
+from types import ModuleType
 
 MAKE_VAR_FN_TYPE = Callable[[
     Any, bool, vs.HelperFunctions, Optional[FxGraph], Optional[list[StorePos]]
@@ -111,10 +113,6 @@ class State:
         self.frame_id = -1
         self.callee_returns = None
 
-        # if hasattr(root, '__class__') and root.__class__.__name__ == 'DebertaEncoder':
-        #     global deberta_model
-        #     deberta_model = root
-
     def update_subpath(self, module: torch.nn.Module, prefix: str) -> None:
 
         def get_name(prefix: str, name: str) -> str:
@@ -178,12 +176,6 @@ class State:
                     return self.fx_graph.create_node("call_method", "to",
                                                      (cpu_node, ),
                                                      {"device": common_device})
-            # if common_device is not None and common_device != torch.device(
-            #             'cpu') and var.obj.device == torch.device('cpu'):
-            #         cpu_node = var.as_fx_node()
-            #         return self.fx_graph.create_node("call_method", "to",
-            #                                          (cpu_node,),
-            #                                          {"device": common_device})
 
             return var.as_fx_node()
 
@@ -342,6 +334,10 @@ class State:
         self.written = True
         self.stored_globals.add(name)
 
+    def delete_stored_locals(self, name: str) -> None:
+        self.written = True
+        self.stored_locals.remove(name)
+
     def store_pos_in_caller(self, pos: StorePos,
                             idx: int) -> Optional[StorePos]:
         if idx in self.objects.objs:
@@ -353,7 +349,7 @@ class State:
             raise ValueError("unknown local in callee", pos)
         elif isinstance(pos, StoreInStack):
             raise ValueError("cannot store in stack in callee")
-        elif isinstance(pos, (StoreInGlobal, StoreInBuiltin)):
+        elif isinstance(pos, (StoreInGlobal, StoreInBuiltin, StoreInFreeVar)):
             return pos
         elif isinstance(pos, StoreInAttr):
             # print("in callee", pos, self.frame_id)
@@ -381,6 +377,7 @@ class State:
             return ExtractFromFunction(parent_poses, pos.var_id, pos.func_name,
                                        pos.func_obj, pos.need_add_to_fn)
         else:
+            # print("pos", pos, idx, self.frame_id)
             raise NotImplementedError
 
     def merge_call(self, state: 'State', stack_objs: list[Any]) -> None:
@@ -1171,7 +1168,11 @@ class GuardTracker:
                             self.state.objects.add(sub_var, sub_value)
                         else:
                             raise NotImplementedError
+                elif inspect.isclass(type(value)):
+                    pass
                 else:
+                    print("partial node with unknown value", value,
+                          type(value))
                     raise NotImplementedError
                 var = make_var_fn(value, partial.need_guard_check,
                                   self.state.objects.helper_functions,
@@ -1302,7 +1303,7 @@ class GuardTracker:
                                extract_code_at_start=new_store_pos)
                 ]
             })
-        if is_user_defined_func(func) or isinstance(func, torch.nn.Sequential):
+        if is_user_defined_func(func) or isinstance(func, nn.Sequential):
             if inspect.isclass(func):
                 class_define_new = get_method_defined_class(func, '__new__')
                 if class_define_new not in (object, torch._C._FunctionBase):
@@ -1362,9 +1363,9 @@ class GuardTracker:
                 })
 
         pc, inst = self.code.get_orig_inst(self.frame.f_lasti)
-        if get_root_module(func) == 'torch' or (
-                self.has_tensor_arg(args, kwargs) and
-            (is_graph_func(func) or func in (float, int, min, max))):
+        if get_root_module(func) == 'torch' or (self.has_tensor_arg(
+                args, kwargs) and (is_graph_func(func) or is_math_func(func) or
+                                   (func in (float, int, min, max, len)))):
             if hasattr(func, "__name__") and (
                     func.__name__ in ("size", "named_children",
                                       "_are_functorch_transforms_active",
@@ -1478,6 +1479,9 @@ class GuardTracker:
     def BINARY_MULTIPLY(self, _inst: Instruction) -> None:
         self.binary_operation(operator.mul)
 
+    def BINARY_MATRIX_MULTIPLY(self, _inst: Instruction) -> None:
+        self.binary_operation(operator.matmul)
+
     def BINARY_FLOOR_DIVIDE(self, _inst: Instruction) -> None:
         self.binary_operation(operator.floordiv)
 
@@ -1581,6 +1585,15 @@ class GuardTracker:
     def LOAD_CONST(self, _inst: Instruction) -> None:
         pass
 
+    def SETUP_FINALLY(self, _inst: Instruction) -> None:
+        pass
+
+    def SETUP_WITH(self, _inst: Instruction) -> None:
+        pass
+
+    # def WITH_EXCEPT_START(self, _inst: Instruction) -> None:
+    #     pass
+
     def LOAD_FAST(self, inst: Instruction) -> None:
         if inst.argval not in self.state.stored_locals:
             obj = self.frame.f_locals[inst.argval]
@@ -1671,16 +1684,12 @@ class GuardTracker:
         if inst.argval not in self.state.stored_locals:
             obj = get_from_freevars(self.frame, inst.arg)
             pos = StoreInFreeVar(inst.arg)
-            need_guard_check = not self.state.objects.contains(obj.cell_contents)
+            need_guard_check = not self.state.objects.contains(
+                obj.cell_contents)
             var = vs.make_var_from_value(obj, need_guard_check,
-                                            self.state.objects.helper_functions,
-                                            self.state.fx_graph, [pos])
+                                         self.state.objects.helper_functions,
+                                         self.state.fx_graph, [pos])
             self.state.add_object(var, obj)
-        # if not self.state.objects.contains(obj.cell_contents):
-        #     print("load closure", obj, inst, id(obj))
-        # else:
-        #     var = self.state.objects.get(obj.cell_contents)
-        #     var.add_extract_code_at_start(pos)
 
     def CALL_FUNCTION(self, inst: Instruction) -> None:
         num_args = inst.argval
@@ -1728,8 +1737,11 @@ class GuardTracker:
         for arg, kw_name in zip(args[-len(kw_names):], kw_names):
             kwargs[kw_name] = arg
         args = args[:-len(kw_names)]
-        if hasattr(func, '__self__') and func.__self__ is not None:
-            args = [func.__self__] + args
+        if hasattr(
+                func,
+                '__self__') and func.__self__ is not None and not isinstance(
+                    func.__self__, ModuleType):
+            args = [func.__self__] + list(args)
         # print(f"function kw: {func}, type: {type(func)},args:{args}, kwargs:{kwargs}")
         self.call_function(func, args, kwargs)
 
@@ -1742,8 +1754,11 @@ class GuardTracker:
         else:
             kwargs = {}
         # print(f"function ex: {func}, type: {type(func)},args:{(func.__self__,) + args}, kwargs:{kwargs}")
-        if hasattr(func, '__self__') and func.__self__ is not None:
-            args = (func.__self__, ) + args
+        if hasattr(
+                func,
+                '__self__') and func.__self__ is not None and not isinstance(
+                    func.__self__, ModuleType):
+            args = [func.__self__] + list(args)
         self.call_function(func, args, kwargs)
 
     def STORE_FAST(self, inst: Instruction) -> None:
@@ -1776,6 +1791,10 @@ class GuardTracker:
         new_self_var.add_modified_attr(inst.argval, value_var)
         self.state.objects.update_by_id(new_self_var, id(self_obj))
 
+    def DELETE_FAST(self, inst: Instruction) -> None:
+        if inst.argval in self.state.stored_locals:
+            self.state.delete_stored_locals(inst.argval)
+
     def IS_OP(self, inst: Instruction) -> None:
         self.binary_operation(operator.is_)
 
@@ -1806,17 +1825,40 @@ class GuardTracker:
     def DICT_MERGE(self, inst: Instruction) -> None:
         pass
 
+    def DICT_UPDATE(self, inst: Instruction) -> None:
+        pass
+
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = get_value_stack_from_top(self.frame, 0)
         if isinstance(seq, (tuple, list)):
             self.state.set_partial_var({
-                -1: [PartialVar(node=None,
-                           need_guard_check=False,
-                           extract_code_at_start=[],
-                           make_var_fn=vs.make_var_from_value) for _ in range(len(seq))]}
-            )
+                -1: [
+                    PartialVar(node=None,
+                               need_guard_check=False,
+                               extract_code_at_start=[],
+                               make_var_fn=vs.make_var_from_value)
+                    for _ in range(len(seq))
+                ]
+            })
         else:
             raise NotImplementedError
+
+    def UNPACK_EX(self, inst: Instruction) -> None:
+        amount = get_value_stack_from_top(self.frame, 0)
+        assert isinstance(amount, int)
+        seq = get_value_stack_from_top(self.frame, 1)
+        if isinstance(seq, (tuple, list)):
+            self.state.set_partial_var({
+                -1: [
+                    PartialVar(node=None,
+                               need_guard_check=False,
+                               extract_code_at_start=[],
+                               make_var_fn=vs.make_var_from_value)
+                    for _ in range(amount)
+                ]
+            })
+        else:
+            raise ValueError("unknow type in unpack_ex", type(seq))
 
     def POP_TOP(self, _inst: Instruction) -> None:
         pass

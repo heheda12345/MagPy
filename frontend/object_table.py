@@ -35,7 +35,6 @@ class ObjectTable:
             old_var.need_guard_check |= var.need_guard_check
         else:
             self.add_by_id(var, id(value))
-            var.add_subvars_to_table(self)
 
     def add_by_id(self, var: Variable, idx: int) -> None:
         assert idx not in self.objs

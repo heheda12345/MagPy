@@ -89,11 +89,15 @@ fx_graph_functions: set[Callable[..., Any]] = {
     operator.rshift,
     operator.and_,
     operator.or_,
+    operator.is_,
     operator.xor,
     operator.eq,
     operator.lt,
     operator.ne,
     operator.le,
+    operator.gt,
+    operator.ge,
+    operator.contains,
 }
 fx_graph_functions = fx_graph_functions.union(fx_graph_inplace_functions)
 
@@ -184,8 +188,8 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
                        'inspect', 'collections'):
         #NOTE:self.function should be recursive-checked to find out where it's defined, but not implemented
         if hasattr(func, '__self__'
-                  ) and func.__self__ is not None and is_user_defined_func(
-                      func.__self__):
+                   ) and func.__self__ is not None and is_user_defined_func(
+                       func.__self__):
             if is_own_method(func.__name__, func.__self__):
                 return True
             else:
@@ -207,6 +211,11 @@ def is_graph_func(func: Callable[..., Any]) -> bool:
     if root_module == '':
         return False
     return root_module == 'torch'
+
+
+def is_math_func(func: Callable[..., Any]) -> bool:
+    root_module = get_root_module(func)
+    return root_module == 'math'
 
 
 random_state = None
@@ -338,18 +347,18 @@ class SetConfig:
 @no_type_check
 def is_namedtuple(obj: Any) -> bool:
     cls: type[Any] = obj if inspect.isclass(cls) else type(obj)
-    return (issubclass(cls, tuple) and
-            isinstance(getattr(cls, '_fields', None), tuple) and
-            all(isinstance(field, str) for field in cls._fields))
+    return (issubclass(cls, tuple)
+            and isinstance(getattr(cls, '_fields', None), tuple)
+            and all(isinstance(field, str) for field in cls._fields))
 
 
 @no_type_check
 def is_structseq(obj: Any) -> bool:
     cls: type[Any] = obj if inspect.isclass(obj) else type(obj)
-    if (cls.__base__ is tuple and
-            isinstance(getattr(cls, 'n_sequence_fields', None), int) and
-            isinstance(getattr(cls, 'n_fields', None), int) and
-            isinstance(getattr(cls, 'n_unnamed_fields', None), int)):
+    if (cls.__base__ is tuple
+            and isinstance(getattr(cls, 'n_sequence_fields', None), int)
+            and isinstance(getattr(cls, 'n_fields', None), int)
+            and isinstance(getattr(cls, 'n_unnamed_fields', None), int)):
         try:
 
             class subcls(cls):  # type: ignore[misc]
