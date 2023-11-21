@@ -103,7 +103,7 @@ class TensorVar(Variable):
             self.is_quantized == value.is_quantized and \
             self.is_sparse == value.is_sparse and \
             self.class_type == type(value)
-    
+
     def tensor_guard_check(self, value: torch.Tensor) -> bool:
         return isinstance(value, torch.Tensor) and self.dtype == value.dtype and self.device == value.device and \
             self.layout == value.layout and self.ndim == value.ndim and \
@@ -119,7 +119,8 @@ class TensorVar(Variable):
                          pos: StorePos) -> None:
         name_in_codegen = codegen.add_obj(self)
         if config.get_config("dynshape"):
-            codegen.add_check(f"{name_in_codegen}.tensor_guard_check_dyn({pos})")
+            codegen.add_check(
+                f"{name_in_codegen}.tensor_guard_check_dyn({pos})")
         else:
             codegen.add_check(f"{name_in_codegen}.tensor_guard_check({pos})")
 

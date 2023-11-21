@@ -1,4 +1,5 @@
 from frontend.compile import compile, reset
+from frontend.utils import enable_dyn_shape
 from common.checker import run_and_check, HIT, MISS
 import torch
 
@@ -187,3 +188,27 @@ def test_tensor_dtype(caplog):
     expect_result = tensor_dtype(a)
     run_and_check(compiled_tensor_dtype, [MISS], 1, caplog, expect_result, a)
     run_and_check(compiled_tensor_dtype, [HIT], 1, caplog, expect_result, a)
+
+
+def dyn_shape1(a):
+    b = a * 2
+    return b.view((b.shape[0] * 2, 2))
+
+
+def dyn_shape2(a):
+    return a.view((a.shape[0] * 2, 2)) * 2
+
+
+def test_dyn_shape(caplog):
+    reset()
+    for i, fn in enumerate((dyn_shape1, dyn_shape2)):
+        with enable_dyn_shape():
+            inp1 = torch.randn((5, 2, 2))
+            y1 = fn(inp1)
+            inp2 = torch.randn((10, 2, 2))
+            y2 = dyn_shape1(inp2)
+
+            compiled = compile(fn)
+            run_and_check(compiled, [MISS], i + 1, caplog, y1, inp1)
+            run_and_check(compiled, [HIT], i + 1, caplog, y1, inp1)
+            run_and_check(compiled, [HIT], i + 1, caplog, y2, inp2)
