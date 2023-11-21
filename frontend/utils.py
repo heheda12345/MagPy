@@ -5,6 +5,7 @@ from types import FrameType
 import random
 import operator
 import os
+import contextlib
 import torch
 import torch._C
 from .config import get_config, set_config
@@ -362,3 +363,10 @@ def is_structseq(obj: Any) -> bool:
             return True
 
     return False
+
+
+@contextlib.contextmanager
+def enable_dyn_shape() -> None:
+    with torch._dynamo.eval_frame.enable_dynamic():
+        with SetConfig({'dynshape': True}):
+            yield

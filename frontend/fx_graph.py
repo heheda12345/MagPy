@@ -1,6 +1,7 @@
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 import torch
 import torch.fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 import torch._inductor.compile_fx
 import torch._dynamo.backends.torchxla
 from .utils import NO_LD_PRELOAD_CTX
@@ -47,7 +48,8 @@ class FxGraph:
         self.root = root
         self.result_graph = torch.fx.Graph(root)
         self.mark_written_fn = mark_written_fn
-        self.fake_mode = torch._subclasses.FakeTensorMode()
+        self.dynamic_shape = config.get_config('dynshape')
+        self.fake_mode = torch._subclasses.FakeTensorMode(shape_env=ShapeEnv() if self.dynamic_shape else None)
         self.example_inputs = []
 
     def create_node(
@@ -73,7 +75,7 @@ class FxGraph:
         name: str,
         type_expr: Optional[Any] = None,
     ) -> torch.fx.Node:
-        fake_tensor = self.fake_mode.from_tensor(value, static_shapes=True)
+        fake_tensor = self.fake_mode.from_tensor(value, static_shapes= not self.dynamic_shape)
         self.mark_written_fn()
         self.example_inputs.append((fake_tensor, name))
         return self.create_node("placeholder", target, args, kwargs, name,

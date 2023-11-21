@@ -1036,6 +1036,7 @@ class GuardTracker:
 
                 self.state.fx_graph.set_output_nodes(
                     graph_codegen.get_graph_outputs())
+                print("graph input", [(name, x.shape) for x, name in self.state.fx_graph.example_inputs])
                 print("graph", self.state.fx_graph.result_graph)
                 graph_code = graph_codegen.get_code()
                 compiled_graph = self.state.fx_graph.compile()
