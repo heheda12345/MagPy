@@ -49,8 +49,8 @@ class DictVar(Variable):
         for key, obj in zip(self.value.keys(), self.vars):
             if not isinstance(obj, TensorVar):
                 if isinstance(key, str):
-                    obj.make_guard_inner(codegen,
-                                         StoreInIndex(pos, id(obj), f"'{key}'"))
+                    obj.make_guard_inner(
+                        codegen, StoreInIndex(pos, id(obj), f"'{key}'"))
                 else:
                     obj.make_guard_inner(codegen,
                                          StoreInIndex(pos, id(obj), str(key)))
@@ -73,10 +73,18 @@ class DictVar(Variable):
             codegen.output(name_in_graph_fn, store_pos, str(old_store_pos),
                            in_return, idx)
         else:
-            codegen.output(
-                name_in_graph_fn, store_pos,
-                f"{{{','.join(f'{key}: {name_in_graph_fn}_{j}' for key, j in zip(self.value.keys(), range(len(self.vars))))}}}"
-                if len(self.vars) > 0 else "{}", in_return, idx)
+            items = []
+            for key, j in zip(self.value.keys(), range(len(self.vars))):
+                if isinstance(key, str):
+                    key_part = f"'{key}'"
+                else:
+                    key_part = key
+                item = f'{key_part}: {name_in_graph_fn}_{j}'
+                items.append(item)
+            target = f"{{{', '.join(i for i in items)}}}"
+            codegen.output(name_in_graph_fn, store_pos,
+                           target if len(self.vars) > 0 else "{}", in_return,
+                           idx)
 
     @classmethod
     def from_value(cls,
@@ -141,8 +149,8 @@ class OrderedDictVar(DictVar):
         for key, var in zip(self.value.keys(), self.vars):
             if not isinstance(var, TensorVar):
                 if isinstance(key, str):
-                    var.make_guard_inner(codegen,
-                                         StoreInIndex(pos, id(var), f"'{key}'"))
+                    var.make_guard_inner(
+                        codegen, StoreInIndex(pos, id(var), f"'{key}'"))
                 else:
                     var.make_guard_inner(codegen,
                                          StoreInIndex(pos, id(var), str(key)))

@@ -1167,6 +1167,7 @@ class GuardTracker:
                                 partial.extract_code_at_start)
                             self.state.objects.add(sub_var, sub_value)
                         else:
+                            print("tuple inner unknown node", sub_value, type(sub_value))
                             raise NotImplementedError
                 elif inspect.isclass(type(value)):
                     pass
@@ -1265,7 +1266,7 @@ class GuardTracker:
         return (hasattr(func, '__name__') and func.__name__ == '<genexpr>')
 
     def is_builtin_func(self, func: Callable[..., Any]) -> bool:
-        return func in (dict, tuple, set, list)
+        return func in (dict, tuple, set, list, hasattr, slice)
 
     def get_live_objs(self, pc: int = -1) -> list[tuple[str, Any]]:
         if pc == -1:
@@ -1582,6 +1583,12 @@ class GuardTracker:
     def BUILD_SLICE(self, _inst: Instruction) -> None:
         pass
 
+    def FORMAT_VALUE(self, _inst: Instruction) -> None:
+        pass
+
+    def BUILD_STRING(self, _inst: Instruction) -> None:
+        pass
+
     def LOAD_CONST(self, _inst: Instruction) -> None:
         pass
 
@@ -1593,6 +1600,9 @@ class GuardTracker:
 
     # def WITH_EXCEPT_START(self, _inst: Instruction) -> None:
     #     pass
+
+    def RAISE_VARARGS(self, _inst: Instruction) -> None:
+        pass
 
     def LOAD_FAST(self, inst: Instruction) -> None:
         if inst.argval not in self.state.stored_locals:
@@ -1822,6 +1832,9 @@ class GuardTracker:
     def LIST_APPEND(self, inst: Instruction) -> None:
         pass
 
+    def MAP_ADD(self, inst: Instruction) -> None:
+        pass
+
     def DICT_MERGE(self, inst: Instruction) -> None:
         pass
 
@@ -1864,6 +1877,9 @@ class GuardTracker:
         pass
 
     def POP_BLOCK(self, _inst: Instruction) -> None:
+        pass
+
+    def POP_EXCEPT(self, _inst: Instruction) -> None:
         pass
 
     def ROT_TWO(self, _inst: Instruction) -> None:
