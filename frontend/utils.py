@@ -1,6 +1,6 @@
 import inspect
 import dis
-from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic, Optional, no_type_check, Iterator
+from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic, Optional, no_type_check, Iterator, Union
 from types import FrameType
 import random
 import operator
@@ -45,6 +45,9 @@ def print_bytecode() -> None:
     code_options = {k: getattr(code, k) for k in keys}
     for k, v in code_options.items():
         print(k, v)
+
+
+ScalarType = Union[int, float, bool, str]
 
 
 def is_scalar(value: Any) -> bool:

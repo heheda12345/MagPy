@@ -3,13 +3,12 @@ import torch
 import torch.fx
 from frontend.pycode_generator import GraphFnCodegen, GuardFnCodegen
 from .base import Variable, HelperFunctions
+from ..utils import ScalarType
 from ..fx_graph import FxGraph, NodeArgs
 from ..store_pos import StorePos, StoreInIndex
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
     from ..object_table import ObjectTable
-
-ScalarType = Union[int, float, bool, str]
 
 
 class TorchModuleVar(Variable):

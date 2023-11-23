@@ -516,6 +516,8 @@ class State:
                     new_node.target = name_in_caller
                 elif node.op == "call_method":
                     pass
+                if config.get_config('dynshape'):
+                    self.fx_graph.infer_fake_value(new_node)
                 replacement_mapping[node] = new_node
 
         def merge_output() -> None:
@@ -1035,7 +1037,7 @@ class GuardTracker:
                 self.state.fx_graph.set_output_nodes(
                     graph_codegen.get_graph_outputs())
                 print("graph input",
-                      [(name, x.shape)
+                      [(name, x)
                        for x, name in self.state.fx_graph.example_inputs])
                 print("graph", self.state.fx_graph.result_graph)
                 graph_code = graph_codegen.get_code()
