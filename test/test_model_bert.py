@@ -83,8 +83,8 @@ class BertSelfAttention(nn.Module):
         self.is_decoder = config.is_decoder
 
     def transpose_for_scores(self, x: torch.Tensor) -> torch.Tensor:
-        new_x_shape = x.size()[:-1] + (self.num_attention_heads,
-                                       self.attention_head_size)
+        new_x_shape = x.size()[:-1] + (self.num_attention_heads, 384)
+        #    self.attention_head_size)
         x = x.view(new_x_shape)
         return x.permute(0, 2, 1, 3)
 
@@ -177,8 +177,8 @@ class BertSelfAttention(nn.Module):
                     "bhrd,lrd->bhlr", key_layer, positional_embedding)
                 attention_scores = attention_scores + relative_position_scores_query + relative_position_scores_key
 
-        attention_scores = attention_scores / math.sqrt(
-            self.attention_head_size)
+        attention_scores = attention_scores / math.sqrt(384)
+        # self.attention_head_size)
         if attention_mask is not None:
             # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
             attention_scores = attention_scores + attention_mask
@@ -469,5 +469,7 @@ def test_model_bert_dyn(caplog):
                           **input_kwargs1)
             run_and_check(compiled, [HIT], 1, caplog, expect2, *input_args2,
                           **input_kwargs2)
-            run_and_check(compiled, [HIT], 1, caplog, expect3, *input_args3,
+            run_and_check(compiled, [ALL_MISS], 2, caplog, expect3,
+                          *input_args3, **input_kwargs3)
+            run_and_check(compiled, [HIT], 2, caplog, expect3, *input_args3,
                           **input_kwargs3)

@@ -144,6 +144,20 @@ class StoreInIndex(StorePos):
                 self.self_pos.get_value_from_frame(frame))[self.self_index]
 
 
+class StoreNegate(StorePos):
+    pos: StorePos
+    neg_id: int
+
+    def __init__(self, pos: StorePos) -> None:
+        self.pos = pos
+
+    def __repr__(self) -> str:
+        return f"-({self.pos})"
+
+    def get_value_from_frame(self, frame: FrameType) -> Any:
+        return -self.pos.get_value_from_frame(frame)
+
+
 class ExtractFromMethod(StorePos):
     self_pos: StorePos
     self_id: int

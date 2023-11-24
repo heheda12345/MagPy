@@ -56,6 +56,8 @@ class DeferRestartState:
 
 deberta_model = None
 
+the_first_input = None
+
 
 class State:
     objects: ObjectTable
@@ -164,6 +166,9 @@ class State:
         def as_fx_node(arg: Any) -> NodeArgs:
             if isinstance(arg, (tuple, list)):
                 return fx_immutable.immutable_list([as_fx_node(x) for x in arg])
+            if isinstance(arg, slice):
+                return slice(as_fx_node(arg.start), as_fx_node(arg.stop),
+                             as_fx_node(arg.step))
             var = self.objects.get(arg,
                                    allow_unexist_const=True,
                                    fx_graph=self.fx_graph)
@@ -229,7 +234,8 @@ class State:
                     position = i
                 else:
                     node = obj
-            if scalar is not None and node is not None:
+            if scalar is not None and node is not None and not config.get_config(
+                    'dynshape'):
                 fx_node = self.fx_graph.create_node(
                     "call_function",
                     torch.full_like,
@@ -991,6 +997,8 @@ class GuardTracker:
                     while var.prev is not None:
                         var = var.prev
                     var.make_guard(guard_codegen)
+                if config.get_config('dynshape'):
+                    self.state.fx_graph.make_shape_env_guard(guard_codegen)
                 guard_code = guard_codegen.get_code()
                 graph_codegen = GraphFnCodegen(key=key)
                 for node in self.state.fx_graph.result_graph.nodes:
@@ -1036,9 +1044,9 @@ class GuardTracker:
 
                 self.state.fx_graph.set_output_nodes(
                     graph_codegen.get_graph_outputs())
-                print("graph input",
-                      [(name, x)
-                       for x, name in self.state.fx_graph.example_inputs])
+                print("graph input", [
+                    (name, x) for x, name in self.state.fx_graph.example_inputs
+                ])
                 print("graph", self.state.fx_graph.result_graph)
                 graph_code = graph_codegen.get_code()
                 compiled_graph = self.state.fx_graph.compile()
@@ -1130,6 +1138,14 @@ class GuardTracker:
             partial_make_var_fn: Optional[
                 MAKE_VAR_FN_TYPE] = partial.make_var_fn
             make_var_fn: MAKE_VAR_FN_TYPE = partial_make_var_fn if partial_make_var_fn is not None else default_make_var_fn
+            if isinstance(value, bool) and config.get_config(
+                    "dynshape") and node is not None:
+                fake = node.meta["fake"]
+                if isinstance(fake, torch.SymBool):
+                    fake_bool = fake.node.expr
+                    import sympy
+                    if fake_bool is sympy.true or fake_bool is sympy.false:  # not a dynamic value
+                        node = None
             if isinstance(value, torch.Tensor):
                 if isinstance(value, torch.nn.Parameter):
                     var = make_var_fn(value, partial.need_guard_check,
