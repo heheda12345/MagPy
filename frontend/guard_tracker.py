@@ -1407,12 +1407,14 @@ class GuardTracker:
                 })
                 return
             # print("record function in graph", func)
-            self.state.record_function(func,
-                                       args,
-                                       kwargs,
-                                       inplace_ref=inplace_ref,
-                                       force_new_value=(func in (float, int,
-                                                                 min, max)))
+            self.state.record_function(
+                func,
+                args,
+                kwargs,
+                inplace_ref=inplace_ref,
+                force_new_value=(func in (float, int, min, max) or
+                                 (hasattr(func, '__name__') and
+                                  func.__name__ == 'contiguous')))
             return
         elif self.all_scalar_arg(args, kwargs) and self.all_static_arg(
                 args, kwargs):
