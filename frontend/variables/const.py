@@ -277,3 +277,6 @@ class RangeVar(Variable):
                    extract_code_at_start: list[StorePos]) -> "RangeVar":
         return cls(value.start, value.stop, value.step, need_guard_check,
                    value, extract_code_at_start)
+    
+    def as_fx_node(self) -> NodeArgs:
+        return range(self.start, self.stop, self.step)

@@ -1108,12 +1108,12 @@ class GuardTracker:
             value = get_value_stack_from_top(self.frame, i)
             node = partial.node
             if partial.force_new_value and self.state.objects.contains(value):
-                if isinstance(value, float):
+                if isinstance(value, (float, int)):
                     new_value = -(-value)
                     assert id(value) != id(new_value)
                     set_value_stack_from_top(self.frame, i, new_value)
                     value = new_value
-                elif isinstance(value, (bool, int)):
+                elif isinstance(value, bool):
                     raise NotImplementedError
                 elif isinstance(value, torch.Tensor):
                     new_value = torch.clone(value)
@@ -1167,7 +1167,8 @@ class GuardTracker:
                                 partial.extract_code_at_start)
                             self.state.objects.add(sub_var, sub_value)
                         else:
-                            print("tuple inner unknown node", sub_value, type(sub_value))
+                            print("tuple inner unknown node", sub_value,
+                                  type(sub_value))
                             raise NotImplementedError
                 elif inspect.isclass(type(value)):
                     pass
@@ -1266,7 +1267,7 @@ class GuardTracker:
         return (hasattr(func, '__name__') and func.__name__ == '<genexpr>')
 
     def is_builtin_func(self, func: Callable[..., Any]) -> bool:
-        return func in (dict, tuple, set, list, hasattr, slice)
+        return func in (dict, tuple, set, list, hasattr, slice, range, len, super)
 
     def get_live_objs(self, pc: int = -1) -> list[tuple[str, Any]]:
         if pc == -1:
@@ -1366,7 +1367,7 @@ class GuardTracker:
         pc, inst = self.code.get_orig_inst(self.frame.f_lasti)
         if get_root_module(func) == 'torch' or (self.has_tensor_arg(
                 args, kwargs) and (is_graph_func(func) or is_math_func(func) or
-                                   (func in (float, int, min, max, len)))):
+                                   (func in (float, int, min, max, len, list)))):
             if hasattr(func, "__name__") and (
                     func.__name__ in ("size", "named_children",
                                       "_are_functorch_transforms_active",
@@ -1412,6 +1413,14 @@ class GuardTracker:
         elif self.is_genexpr_func(func):
             return
         elif self.is_builtin_func(func):
+            # print("come here")
+            # self.state.set_partial_var({
+            #         -1: [
+            #             PartialVar(node=None,
+            #                        need_guard_check=False,
+            #                        extract_code_at_start=[])
+            #         ]
+            #     })
             return
         elif is_graph_func(func):
             return
@@ -1788,6 +1797,16 @@ class GuardTracker:
                                        add_partial_var=False)
         else:
             self.state.add_inplace_update_obj(target)
+    
+    def DELETE_SUBSCR(self, inst: Instruction) -> None:
+        index = get_value_stack_from_top(self.frame, 0)
+        target = get_value_stack_from_top(self.frame, 1)
+        if isinstance(target, torch.Tensor):
+            self.state.record_function(operator.delitem,
+                                       [target, index], {},
+                                       add_partial_var=False)
+        else:
+            self.state.add_inplace_update_obj(target)
 
     def STORE_ATTR(self, inst: Instruction) -> None:
         value = get_value_stack_from_top(self.frame, 1)
@@ -1800,6 +1819,9 @@ class GuardTracker:
             self.state.fx_graph, [])
         new_self_var.add_modified_attr(inst.argval, value_var)
         self.state.objects.update_by_id(new_self_var, id(self_obj))
+
+    def DELETE_ATTR(self, inst: Instruction) -> None:
+        pass
 
     def DELETE_FAST(self, inst: Instruction) -> None:
         if inst.argval in self.state.stored_locals:
@@ -1839,6 +1861,24 @@ class GuardTracker:
         pass
 
     def DICT_UPDATE(self, inst: Instruction) -> None:
+        pass
+
+    def IMPORT_NAME(self, inst: Instruction) -> None:
+        partial = [
+            PartialVar(node=None,
+                       need_guard_check=False,
+                       extract_code_at_start=[]), None
+        ]
+        self.state.set_partial_var({-1: partial})
+        pass
+
+    def IMPORT_FROM(self, inst: Instruction) -> None:
+        partial = [
+            PartialVar(node=None,
+                       need_guard_check=False,
+                       extract_code_at_start=[]), None
+        ]
+        self.state.set_partial_var({-1: partial})
         pass
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:

@@ -124,7 +124,7 @@ def get_root_module(func: Callable[..., Any]) -> str:
     if hasattr(func, '__objclass__'):
         if func.__objclass__ == torch._C._TensorBase:
             return 'torch'
-        elif func.__objclass__ in (list, tuple, set, dict):
+        elif func.__objclass__ in (list, tuple, set, dict, str):
             return 'builtins'
 
     if hasattr(func, '__self__') and isinstance(func.__self__, torch.Tensor):
@@ -163,13 +163,17 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
     # print([(x, getattr(func, x)) for x in dir(func)])
     if hasattr(func,
                '__objclass__') and func.__objclass__ in (torch._C._TensorBase,
-                                                         dict):
+                                                         dict, str):
         return False
 
     # NOTE: random should be called as a UDF, not handled
-    if hasattr(func, '__self__') and isinstance(func.__self__,
-                                                (torch.Tensor, random.Random)):
-        return False
+    if hasattr(func, '__self__'):
+        if isinstance(func.__self__, (torch.Tensor, random.Random)):
+            return False
+        elif isinstance(func.__self__, (list, tuple, set, dict, str)):
+            return False
+        elif isinstance(func.__self__, torch.nn.Sequential):
+            return True
 
     if hasattr(func, '__name__') and func.__name__ == '<genexpr>':
         return False

@@ -67,7 +67,7 @@ class ObjectTable:
             return self.objs[id(value)]
         elif allow_unexist_const:
             if isinstance(value, get_args(CONST_TYPES)) or isinstance(
-                    value, (list, tuple, set, dict, CodeType, type(Ellipsis), np.ndarray)):
+                    value, (list, tuple, set, dict, range, CodeType, type(Ellipsis), np.ndarray)):
                 return make_var_from_value(value, False, self.helper_functions,
                                            fx_graph)
         raise RuntimeError(
