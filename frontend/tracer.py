@@ -8,7 +8,6 @@ from .guard_tracker import push_tracker, pop_tracker, record
 from .cache import enable_cache, check_cache_updated, get_frame_cache
 from .fx_graph import set_frame_root
 from .c_api import set_eval_frame, mark_need_postprocess
-from .bytecode_writter import rewrite_bytecode
 from .code import ProcessedCode
 from .instruction import format_insts
 from .config import get_config
@@ -85,25 +84,12 @@ def get_process_frame(
                       hex(id(frame)), frame.f_code.co_name)
             enable_cache(frame_id)
             set_frame_root(frame_id, f)
-            if check_cache_updated(frame_id):
-                print("new bytecode: \n")
-                new_code, code_map = rewrite_bytecode(frame.f_code, frame_id,
-                                                      is_callee)
-                get_frame_cache(frame_id).set_new_code(new_code, code_map)
-                trace_func = get_trace_func(frame_id)
-
-            else:
-                old_frame = get_frame_cache(frame_id)
-                assert old_frame.code_map is not None, "Code map doesn't exist for frame id {}".format(
-                    frame_id)
-                assert old_frame.new_code is not None, "New code doesn't exist for frame id {}".format(
-                    frame_id)
-                if is_debug:
-                    print("old bytecode: \n")
-                    print(format_insts(old_frame.code_map.guard_insts))
-                new_code = old_frame.new_code
-                code_map = old_frame.code_map
-                trace_func = get_trace_func(frame_id)
+            frame_cache = get_frame_cache(frame_id)
+            frame_cache.update_code(frame.f_code, frame_id, is_callee)
+            new_code, code_map = frame_cache.get_new_code(is_callee)
+            print("bytecode to run:")
+            print(format_insts(code_map.guard_insts))
+            trace_func = get_trace_func(frame_id)
 
         except Exception as e:
             print("exception in preprocess:", e, type(e))
@@ -117,13 +103,9 @@ def get_process_frame(
             if SHOULD_NOT_CALL_REWRITE:
                 raise ValueError("should not call postprocess")
             print(f"postprocess frame {frame.f_code.co_filename}")
-            if check_cache_updated(frame_id):
-                print("new bytecode: \n")
-                set_frame_root(frame_id, f)
-                new_code, code_map = rewrite_bytecode(frame.f_code, frame_id,
-                                                      is_callee)
-                get_frame_cache(frame_id).set_new_code(new_code, code_map)
-
+            set_frame_root(frame_id, f)
+            frame_cache = get_frame_cache(frame_id)
+            frame_cache.update_code(frame.f_code, frame_id, is_callee)
         except Exception as e:
             print("exception in postprocess:", e, type(e))
             print(traceback.format_exc())
