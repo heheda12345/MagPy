@@ -441,7 +441,7 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int,
     for original_inst, inst in zip(original_instructions, instructions):
         inst.original_inst = original_inst
     instructions[0].is_start = True
-    print(format_insts(instructions))
+    # print(format_insts(instructions))
     frame_cache = get_frame_cache(frame_id)
     # list of (start_pc, traced_instructions)
     run_traced_insts: list[tuple[int, list[Instruction]]] = []
@@ -506,8 +506,8 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int,
              list(new_names_all["names"]))
     strip_extended_args(instructions)
     fix_instructions_for_assemble(instructions, code_options)
-    print("guarded code")
-    print(format_insts(instructions))
+    # print("guarded code")
+    # print(format_insts(instructions))
     code_map = generate_code_map(original_instructions, instructions,
                                  in_trace_insts, next_original_pc)
     new_code = assemble_instructions(instructions, code_options)[1]

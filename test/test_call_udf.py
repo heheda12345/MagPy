@@ -321,3 +321,22 @@ def test_call_run_udf(caplog):
         compiled_model = compile(call_run_udf)
         run_and_check(compiled_model, [MISS, MISS], 1, caplog, result, x)
         run_and_check(compiled_model, [HIT], 1, caplog, result, x)
+
+
+def b_aba(a):
+    return a_aba(a + 2.0, 0)
+
+
+def a_aba(a, b):
+    if b == 0:
+        return a + 3.0
+    else:
+        return b_aba(a + 1.0)
+
+
+def test_call_aba(caplog):
+    reset()
+    compiled = compile(a_aba)
+    expect = a_aba(1.0, 1)
+    run_and_check(compiled, [MISS, MISS, MISS], 1, caplog, expect, 1.0, 1)
+    run_and_check(compiled, [HIT], 1, caplog, expect, 1.0, 1)

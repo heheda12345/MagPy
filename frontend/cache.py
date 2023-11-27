@@ -1,5 +1,5 @@
 from types import CodeType
-from typing import Callable, Any, Optional
+from typing import Callable, Any, Optional, Tuple
 from dataclasses import dataclass
 
 from frontend.code import ProcessedCode
@@ -30,9 +30,9 @@ class FrameCache:
                         list[CachedGraph]]  # start_pc -> list of cached graph
     callsite_id: dict[int, int]  # start_pc -> callsite_id
     pre_cache_size: int
-    new_code: Optional[CodeType]
-    code_map: Optional[ProcessedCode]
     updated: bool
+    # 0 for root, 1 for callee
+    code: list[Optional[Tuple[CodeType, ProcessedCode]]]
 
     def __init__(self, frame_id: int) -> None:
         self.frame_id = frame_id
@@ -40,6 +40,7 @@ class FrameCache:
         self.callsite_id = {0: 0}
         self.new_code = None
         self.code_map = None
+        self.code = [None, None]
         self.updated = True  # rewrite bytecode for the first time
 
     def add(self, traced_code: CachedGraph) -> None:
@@ -58,9 +59,27 @@ class FrameCache:
         TOTAL_SIZE += 1
         self.updated = True
 
-    def set_new_code(self, new_code: CodeType, code_map: ProcessedCode) -> None:
-        self.new_code = new_code
-        self.code_map = code_map
+    def set_new_code(self, new_code: CodeType, code_map: ProcessedCode,
+                     is_callee: bool) -> None:
+        self.code[is_callee] = (new_code, code_map)
+
+    def get_new_code(self, is_callee: bool) -> Tuple[CodeType, ProcessedCode]:
+        code = self.code[is_callee]
+        assert code is not None
+        return code
+
+    def is_valid(self, is_callee: bool) -> bool:
+        return not self.updated and self.code[is_callee] is not None
+
+    def update_code(self, f_code: CodeType, frame_id: int,
+                    is_callee: bool) -> None:
+        if not self.is_valid(is_callee):
+            from .bytecode_writter import rewrite_bytecode
+            for i in (False, True):
+                if i == is_callee or self.code[i] is not None:
+                    print("new_code for is_callee =", i)
+                    new_code, code_map = rewrite_bytecode(f_code, frame_id, i)
+                    self.set_new_code(new_code, code_map, i)
         self.updated = False
 
 
