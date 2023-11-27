@@ -2,7 +2,8 @@ from typing import Optional, Any, Callable, TYPE_CHECKING
 import torch
 import torch.fx
 
-from frontend.pycode_generator import GuardFnCodegen, GraphFnCodegen
+from ..pycode_generator import GuardFnCodegen, GraphFnCodegen
+from .. import config
 from .base import Variable, HelperFunctions
 from .tuple_ import TupleVar
 from ..pycode_writer import new_name
@@ -95,6 +96,14 @@ class TensorVar(Variable):
     def as_fx_node(self) -> NodeArgs:
         return self.fx_node
 
+    def tensor_guard_check_dyn(self, value: torch.Tensor) -> bool:
+        return isinstance(value, torch.Tensor) and self.dtype == value.dtype and self.device == value.device and \
+            self.layout == value.layout and self.ndim == value.ndim and \
+            self.requires_grad == value.requires_grad and \
+            self.is_quantized == value.is_quantized and \
+            self.is_sparse == value.is_sparse and \
+            self.class_type == type(value)
+
     def tensor_guard_check(self, value: torch.Tensor) -> bool:
         return isinstance(value, torch.Tensor) and self.dtype == value.dtype and self.device == value.device and \
             self.layout == value.layout and self.ndim == value.ndim and \
@@ -109,7 +118,11 @@ class TensorVar(Variable):
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
         name_in_codegen = codegen.add_obj(self)
-        codegen.add_check(f"{name_in_codegen}.tensor_guard_check({pos})")
+        if config.get_config("dynshape"):
+            codegen.add_check(
+                f"{name_in_codegen}.tensor_guard_check_dyn({pos})")
+        else:
+            codegen.add_check(f"{name_in_codegen}.tensor_guard_check({pos})")
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,

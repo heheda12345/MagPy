@@ -1,9 +1,9 @@
 import pytest
 from frontend.compile import compile, reset
-from frontend.utils import add_force_graph_break
+from frontend.utils import add_force_graph_break, enable_dyn_shape
 from frontend.c_api import get_next_frame_id
 import logging
-from common.checker import run_and_check, HIT, MISS
+from common.checker import run_and_check, HIT, MISS, assert_equal, ALL_MISS
 
 from functools import partial
 from typing import Any, Callable, List, Optional, Type, Union
@@ -323,3 +323,18 @@ def test_resnet(caplog):
         compiled_model = compile(model)
         run_and_check(compiled_model, [MISS] * 17, 1, caplog, result, inp)
         run_and_check(compiled_model, [HIT], 1, caplog, result, inp)
+
+
+def test_resnet_dynamic(caplog):
+    reset()
+    with enable_dyn_shape():
+        with torch.no_grad():
+            model = resnet18().eval()
+            inp1 = torch.randn(4, 3, 224, 224)
+            inp2 = torch.randn(8, 3, 224, 224)
+            expect1 = model(inp1)
+            expect2 = model(inp2)
+            compiled = compile(model)
+            run_and_check(compiled, [ALL_MISS], 1, caplog, expect1, inp1)
+            run_and_check(compiled, [HIT], 1, caplog, expect1, inp1)
+            run_and_check(compiled, [HIT], 1, caplog, expect2, inp2)

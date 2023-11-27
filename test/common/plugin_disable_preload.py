@@ -1,4 +1,4 @@
-from frontend.utils import NO_LD_PRELOAD_CTX
+from frontend.no_preload import NO_LD_PRELOAD_CTX
 
 no_ld_preload = NO_LD_PRELOAD_CTX()
 

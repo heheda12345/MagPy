@@ -4,7 +4,6 @@ import torch
 import torch.fx
 from .pycode_writer import PyCodeWriter, new_name, is_valid_name
 from .store_pos import StorePos
-from .variables import Variable
 from .config import get_config
 
 
@@ -25,22 +24,22 @@ class FnCodegen:
         self.imports = set()
         self.objs = {}
 
-    def add_obj(self, var: Any, name: str = "", force: bool = False) -> str:
+    def add_obj(self, obj: Any, name: str = "", force: bool = False) -> str:
         if force:
             assert name != ""
             assert is_valid_name(name)
             if name in self.objs:
-                assert self.objs[name] == var
+                assert self.objs[name] == obj
             else:
-                self.objs[name] = var
+                self.objs[name] = obj
             return name
         else:
             if name == "" or not is_valid_name(name):
-                name = new_name("var")
+                name = new_name("obj")
             elif name in self.objs:
                 name = new_name(name)
 
-            self.objs[name] = var
+            self.objs[name] = obj
             return name
 
     def add_import(self, module_name: str) -> None:
