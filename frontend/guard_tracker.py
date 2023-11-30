@@ -152,8 +152,8 @@ class State:
             if isinstance(arg, torch.Tensor):
                 var = self.objects.get(arg, allow_unexist_const=True)
                 nonlocal common_device
-                assert common_device is None or common_device == var.obj.device or var.obj.numel(
-                ) == 1
+                # assert common_device is None or common_device == var.obj.device or var.obj.dim(
+                # ) <= 1
                 common_device = var.obj.device
 
         def as_fx_node(arg: Any) -> NodeArgs:
@@ -462,15 +462,22 @@ class State:
 
             def get_original_node(node: torch.fx.Node) -> torch.fx.Node:
                 idx = get_tensor_idx(node)
+                var = node.meta["var"]
+                pos = var.extract_code_at_start[0] if len(var.extract_code_at_start) > 0 else None
                 if self.objects.contains_by_id(idx):
                     gen_by_caller = self.objects.get_by_id(idx)
+                elif pos and isinstance(pos, StoreInAttr) and pos.attr_name == 'data' and self.objects.contains_by_id(pos.self_id):
+                    gen_by_caller = self.objects.get_by_id(pos.self_id)
+                    assert isinstance(gen_by_caller, vs.TensorVar)
                 else:
-                    var = node.meta["var"]
                     new: list[StorePos] = []
                     for pos in var.extract_code_at_start:
                         new_pos = self.store_pos_in_caller(pos, idx)
                         if new_pos is not None:
                             new.append(new_pos)
+                    if len(new) == 0:
+                        # the inputs of callee come from generated outputs in caller, should not add to graph as input
+                        new.append(UnknownPosInCaller)
                     new_var = vs.make_var_from_value(
                         var.obj, var.need_guard_check,
                         self.objects.helper_functions, self.fx_graph, new)
@@ -1267,7 +1274,7 @@ class GuardTracker:
         return (hasattr(func, '__name__') and func.__name__ == '<genexpr>')
 
     def is_builtin_func(self, func: Callable[..., Any]) -> bool:
-        return func in (dict, tuple, set, list, hasattr, slice, range, len, super)
+        return func in (dict, tuple, set, list, hasattr, slice, range, len, super, type)
 
     def get_live_objs(self, pc: int = -1) -> list[tuple[str, Any]]:
         if pc == -1:
@@ -1367,7 +1374,7 @@ class GuardTracker:
         pc, inst = self.code.get_orig_inst(self.frame.f_lasti)
         if get_root_module(func) == 'torch' or (self.has_tensor_arg(
                 args, kwargs) and (is_graph_func(func) or is_math_func(func) or
-                                   (func in (float, int, min, max, len, list)))):
+                                   (func in (float, int, min, max, len, list, abs, sum)))):
             if hasattr(func, "__name__") and (
                     func.__name__ in ("size", "named_children",
                                       "_are_functorch_transforms_active",
@@ -1413,7 +1420,7 @@ class GuardTracker:
         elif self.is_genexpr_func(func):
             return
         elif self.is_builtin_func(func):
-            # print("come here")
+            # TODO: add map and set correct partial var
             # self.state.set_partial_var({
             #         -1: [
             #             PartialVar(node=None,

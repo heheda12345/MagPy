@@ -243,6 +243,9 @@ class FunctionVar(Variable):
             else:
                 table.add_by_id(var, idx)
                 var.add_subvars_to_table(table)
+    
+    # def as_fx_node(self) -> NodeArgs:
+    #     return self.obj
 
 
 class RangeVar(Variable):

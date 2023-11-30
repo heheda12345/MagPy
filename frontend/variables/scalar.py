@@ -22,8 +22,9 @@ class ScalarVar(Variable):
                  need_guard_check: bool, fx_node: Optional[torch.fx.Node],
                  extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, value, extract_code_at_start)
-        if isinstance(value, bool) and not value_fix:
-            raise NotImplementedError
+        # NOTE: should implement bool genererated from tensor
+        # if isinstance(value, bool) and not value_fix:
+        #     raise NotImplementedError
         if not value_fix:
             assert fx_node is not None
         self.value_fix = value_fix
@@ -116,8 +117,9 @@ class NumpyScalarVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
+        codegen.add_import("numpy")
         codegen.add_check(
-            f"isinstance({pos}.item(), {type(self.obj).__name__})")
+            f"isinstance({pos}, numpy.{type(self.obj).__name__})")
         if self.value_fix:
             item = self.obj.item()
             if type(item) == float:

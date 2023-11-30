@@ -7,6 +7,7 @@ import operator
 import os
 import torch
 import torch._C
+import collections
 from .config import get_config, set_config
 
 if TYPE_CHECKING:
@@ -163,7 +164,7 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
     # print([(x, getattr(func, x)) for x in dir(func)])
     if hasattr(func,
                '__objclass__') and func.__objclass__ in (torch._C._TensorBase,
-                                                         dict, str):
+                                                         dict, str, collections.OrderedDict):
         return False
 
     # NOTE: random should be called as a UDF, not handled

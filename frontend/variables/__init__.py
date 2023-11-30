@@ -12,7 +12,7 @@ from .const import NullVar, NoneVar, SliceVar, ModuleVar, FunctionVar, RangeVar,
 from .iterator import IteratorVar, RangeIterVar
 from .tuple_ import TupleVar
 from .set_ import SetVar
-from .list_ import ListVar
+from .list_ import ListVar, NdarrayVar
 from .dict_ import DictVar, OrderedDictVar
 from .builtin_types import CellVar, MappingProxyVar
 from ..fx_graph import FxGraph
@@ -37,7 +37,8 @@ ty2var: dict[type[Any], type[Variable]] = {
     torch.device: TorchDeviceVar,
     dict: DictVar,
     CodeType: CodeVar,
-    OrderedDict: OrderedDictVar
+    OrderedDict: OrderedDictVar,
+    np.ndarray: NdarrayVar,
 }
 
 CONST_TYPES = Union[int, float, bool, str, NullObject, None, slice, type(Ellipsis)]
