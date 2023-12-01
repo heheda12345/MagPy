@@ -1,3 +1,4 @@
+import pytest
 from frontend.compile import compile, reset
 from common.checker import assert_equal, run_and_check_cache, run_and_check, HIT, MISS, ALL_MISS
 
@@ -2052,6 +2053,7 @@ from frontend.compile import compile
 from common.checker import assert_equal
 
 
+@pytest.mark.model
 def test_model_tridentnet(caplog):
     reset()
     torch.random.manual_seed(66666)

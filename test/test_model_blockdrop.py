@@ -243,6 +243,7 @@ def get_input(batch_size):
                        32).cuda(), torch.randint(0, 2, (batch_size, 15)).cuda()
 
 
+@pytest.mark.model
 def test_blockdrop_full(caplog):
     reset()
     with torch.no_grad():

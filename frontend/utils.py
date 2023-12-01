@@ -1,11 +1,12 @@
 import inspect
 import dis
-from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic, Optional, no_type_check, Iterator, Union
+from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic, Optional, no_type_check, Iterator, Union, Dict, List
 from types import FrameType
 import random
 import operator
 import os
 import contextlib
+import itertools
 import torch
 import torch._C
 from .config import get_config, set_config
@@ -160,10 +161,12 @@ def get_method_defined_class(cls: type[Any],
 
 
 def is_user_defined_func(func: Callable[..., Any]) -> bool:
-    # print([(x, getattr(func, x)) for x in dir(func)])
     if hasattr(func,
                '__objclass__') and func.__objclass__ in (torch._C._TensorBase,
-                                                         dict):
+                                                         dict, list):
+        return False
+    if hasattr(func, '__class__') and func.__class__ in (torch._C._TensorBase,
+                                                         dict, list):
         return False
 
     # NOTE: random should be called as a UDF, not handled
@@ -360,3 +363,37 @@ def enable_dyn_shape() -> Iterator[None]:
     with torch._dynamo.eval_frame.enable_dynamic():
         with SetConfig({'dynshape': True}):
             yield
+
+
+def is_high_order_func(func: Callable[..., Any]) -> bool:
+    return func in (map, filter, zip, list)
+
+
+def is_high_order_func_with_udf(func: Callable[..., Any], args: List[Any],
+                                kwargs: Dict[str, Any]) -> bool:
+    if not is_high_order_func(func):  # fast path
+        return False
+
+    def is_user_defined_iter(x: Any) -> bool:
+        return isinstance(x, torch.Tensor) or (hasattr(x, '__iter__') and
+                                               is_user_defined_func(x.__iter__))
+
+    def call_user_defined_iterator(x: Any) -> bool:
+        if isinstance(x, map):
+            from .c_api import parse_mapobject
+            it, map_fn = parse_mapobject(x)
+            return is_user_defined_func(map_fn)
+        return False
+
+    if func == zip:
+        return any(
+            is_user_defined_iter(x)
+            for x in itertools.chain(args, kwargs.values()))
+    elif func in (map, filter):
+        return is_user_defined_iter(
+            args[1]
+        )  # not check args[0] is udf because the function is not called during map() call
+    elif func == list:
+        return call_user_defined_iterator(args[0])
+    else:
+        raise NotImplementedError

@@ -72,7 +72,7 @@ class ObjectTable:
                 return make_var_from_value(value, False, self.helper_functions,
                                            fx_graph)
         raise RuntimeError(
-            f"Object({id(value)}) {value} not found in object table")
+            f"Object({id(value)}) {value} not found in object table {id(self)}")
 
     def get_or_none(self, value: Any) -> Optional[Variable]:
         if id(value) in self.objs:

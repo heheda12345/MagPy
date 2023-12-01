@@ -1,3 +1,4 @@
+import pytest
 from frontend.compile import compile, reset
 from frontend.utils import enable_dyn_shape
 from common.checker import assert_equal, run_and_check_cache, run_and_check, HIT, MISS, ALL_MISS
@@ -438,6 +439,7 @@ def get_input(batch_size, seq_len=256):
     return (inputs,), {}
 
 
+@pytest.mark.model
 def test_model_bert(caplog):
     reset()
     with torch.no_grad():
@@ -451,6 +453,7 @@ def test_model_bert(caplog):
                       **input_kwargs)
 
 
+@pytest.mark.model
 def test_model_bert_dyn(caplog):
     reset()
     with enable_dyn_shape():

@@ -1,3 +1,4 @@
+import pytest
 import math
 import torch
 import torch.nn as nn
@@ -465,6 +466,7 @@ from frontend.compile import compile, reset
 from common.checker import assert_equal, run_and_check_cache, run_and_check, HIT, MISS, ALL_MISS
 
 
+@pytest.mark.model
 def test_model_quantized(caplog):
     reset()
     with torch.no_grad():

@@ -228,6 +228,7 @@ class SingleLayerRNN(nn.Module):
         return h
 
 
+@pytest.mark.model
 def test_rnn_break(caplog):
     reset()
     with torch.no_grad():
@@ -246,6 +247,7 @@ def test_rnn_break(caplog):
                       inputs)
 
 
+@pytest.mark.model
 def test_rnn_no_break(caplog):
     reset()
     with torch.no_grad():

@@ -366,6 +366,7 @@ def get_input(batch_size):
     return (torch.randn((batch_size, 3, 256, 512)).cuda(),), {}
 
 
+@pytest.mark.model
 def test_model_monodepth(caplog):
     reset()
     model = get_model()

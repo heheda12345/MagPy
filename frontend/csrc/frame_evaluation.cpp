@@ -35,6 +35,7 @@
     }
 
 static PyObject *skip_files = Py_None;
+static PyObject *end_files = Py_None;
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 static int active_working_threads = 0;
 static PyObject *(*previous_eval_frame)(PyThreadState *tstate,
@@ -193,7 +194,7 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     Py_DECREF(postprocess);
     Py_DECREF(trace_func);
 
-    // set_eval_frame_callback(callback);
+    set_eval_frame_callback(callback);
     return result;
 }
 
@@ -207,6 +208,9 @@ static PyObject *custom_eval_frame_shim(PyThreadState *tstate,
     }
     assert(PyObject_IsInstance(skip_files, (PyObject *)&PySet_Type));
     if (PySet_Contains(skip_files, frame->f_code->co_filename)) {
+        return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
+    } else if (PySet_Contains(end_files, frame->f_code->co_filename)) {
+        set_eval_frame_callback(Py_None);
         return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
     }
     PyObject *result = _custom_eval_frame(tstate, frame, throw_flag, callback);
@@ -279,11 +283,15 @@ static PyObject *set_skip_files(PyObject *self, PyObject *args) {
     if (skip_files != Py_None) {
         Py_DECREF(skip_files);
     }
-    if (!PyArg_ParseTuple(args, "O", &skip_files)) {
+    if (end_files != Py_None) {
+        Py_DECREF(end_files);
+    }
+    if (!PyArg_ParseTuple(args, "OO", &skip_files, &end_files)) {
         PRINT_PYERR
         PyErr_SetString(PyExc_TypeError, "invalid parameter in set_skip_files");
     }
     Py_INCREF(skip_files);
+    Py_INCREF(end_files);
     Py_RETURN_NONE;
 }
 
@@ -547,6 +555,7 @@ static PyMethodDef _methods[] = {
      NULL},
     {"make_rangeiterobject", frontend_csrc::make_rangeiterobject, METH_VARARGS,
      NULL},
+    {"parse_mapobject", frontend_csrc::parse_mapobject, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

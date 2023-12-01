@@ -21,7 +21,7 @@ from .cache import CachedGraph, get_frame_cache
 from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromNew, UnknownPosInCaller
 from . import variables as vs
 from . import dynamic as dyn
-from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs, print_bytecode, get_method_defined_class
+from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs, print_bytecode, get_method_defined_class, is_high_order_func_with_udf, is_high_order_func
 from .object_table import ObjectTable
 from .pycode_writer import new_name
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -52,6 +52,7 @@ class DeferRestartState:
     live_vars: list[tuple[str, Any]]
     guard_lasti: int
     reason: str
+    need_restart: bool
 
 
 deberta_model = None
@@ -78,7 +79,7 @@ class State:
     inplace_update_objs: list[Any]
     guarded_pcs: list[int]
     initial_args: list[Any]
-    calling_func: Optional[Any]
+    calling_func: Optional[Callable[..., Any]]
     callee_returns: Any
     can_guard: bool
     gen_by_caller: Callable[[Any], bool]
@@ -388,19 +389,16 @@ class State:
             raise NotImplementedError
 
     def merge_call(self, state: 'State', stack_objs: list[Any]) -> None:
-        if self.defer_restart is None:  # callee will not perform defer restart
-            print("skip merge call due to defer_restart")
-            return
-
         print("to merge graph", state.fx_graph.result_graph)
         print("to merge frameid", state.frame_id, self.frame_id)
         # self.written = True
-        self.defer_restart = None
+        # self.defer_restart = None
         replacement_mapping: dict[torch.fx.Node, torch.fx.Node] = {}
         calling_func = self.calling_func
         ignore_objs: list[Any] = []
         if calling_func is not None:
-            if inspect.isclass(calling_func):
+            if inspect.isclass(
+                    calling_func) and not is_high_order_func(calling_func):
                 new_obj = state.initial_args[0]
                 assert isinstance(new_obj, calling_func)
                 assert not self.objects.contains(new_obj)
@@ -422,6 +420,7 @@ class State:
                         ignore_objs.append(state.initial_args[arg_id])
                         break
         ignore_ids = [id(x) for x in ignore_objs]
+        obj_id_need_merge: set[int] = set()
 
         def merge_call_guard() -> None:
             for idx, var in state.objects.objs.items():
@@ -525,6 +524,10 @@ class State:
                 if config.get_config('dynshape'):
                     self.fx_graph.infer_fake_value(new_node)
                 replacement_mapping[node] = new_node
+                if 'var' in node.meta:
+                    var = node.meta['var']
+                    assert isinstance(var, vs.Variable)
+                    obj_id_need_merge.add(id(var.obj))
 
         def merge_output() -> None:
             merged_ids: set[int] = set()
@@ -620,20 +623,21 @@ class State:
                 return new_var
 
             for idx, var in state.objects.get_all_with_id():
-                if var.prev is not None and idx not in ignore_ids:
+                if (var.prev is not None and
+                        idx not in ignore_ids) or idx in obj_id_need_merge:
                     oldest = var.get_oldest_var()
-                    if len(oldest.extract_code_at_start) == 0:
+                    if len(oldest.extract_code_at_start
+                          ) == 0 and idx not in obj_id_need_merge:
                         continue
                     new_extract: list[StorePos] = get_new_store_pos(
                         oldest.extract_code_at_start, idx)
-                    get_or_make_var(var.obj, var.need_guard_check,
-                                    self.fx_graph, new_extract)
-
-            for obj in stack_objs:
-                var = state.objects.get(obj, allow_unexist_const=True)
-                new_extract = get_new_store_pos(var.extract_code_at_start,
-                                                id(var.obj))
-                get_or_make_var(obj, False, self.fx_graph, new_extract)
+                    get_or_make_var(var.obj, False, self.fx_graph, new_extract)
+            if calling_func is None or not is_high_order_func(calling_func):
+                for obj in stack_objs:
+                    var = state.objects.get(obj, allow_unexist_const=True)
+                    new_extract = get_new_store_pos(var.extract_code_at_start,
+                                                    id(var.obj))
+                    get_or_make_var(obj, False, self.fx_graph, new_extract)
 
         if len(state.objects.objs_no_id) > 0:
             raise NotImplementedError
@@ -641,13 +645,17 @@ class State:
         merge_fx_graph()
         merge_output()
         self.object_refs.extend(state.object_refs)
-        if self.calling_func is not None:
+        if calling_func is not None:
             assert len(stack_objs) == 1
             self.callee_returns = stack_objs[0]
 
     def mark_defer_restart(self,
                            defer_restart_state: DeferRestartState) -> None:
         self.defer_restart = defer_restart_state
+
+    def mark_need_defer_restart(self) -> None:
+        assert self.defer_restart is not None
+        self.defer_restart.need_restart = True
 
     def add_inplace_update_obj(self, obj: Any) -> None:
         self.written = True
@@ -714,11 +722,12 @@ class GuardTracker:
 
         pc, inst = self.code.get_orig_inst(self.frame.f_lasti)
         if self.cf_info is not None and pc == self.cf_info.end_pc:
-            self.restart("reach end of nested tracker")
+            self.restart("reach end of nested tracker", restart_caller=False)
             return
         if inst is None:
             self.restart(
-                f"running injected code (f_lasti={self.frame.f_lasti})")
+                f"running injected code (f_lasti={self.frame.f_lasti})",
+                restart_caller=False)
             if self.code.get_inst(self.frame.f_lasti).opname == 'RETURN_VALUE':
                 if trackers[-1] == self:
                     pop_tracker(self.frame_id)
@@ -1240,6 +1249,8 @@ class GuardTracker:
                     stack_top_var = vs.TensorVar.from_tensor_and_node(
                         stack_top, new_node, False, [])
                     self.state.add_object(stack_top_var, stack_top)
+                elif is_high_order_func(self.state.calling_func):  # zip / map
+                    pass
                 else:
                     raise NotImplementedError
 
@@ -1248,14 +1259,17 @@ class GuardTracker:
         self.state.written = False
         self.state.unmark_calling_func()
         # print('process last instruction done')
-        if self.state.defer_restart is not None:
+        if self.state.defer_restart is not None and self.state.defer_restart.need_restart:
             self.restart("defered restart " + self.state.defer_restart.reason)
+        self.state.defer_restart = None
 
-    def restart(self, restart_reason: str) -> None:
+    def restart(self, restart_reason: str, restart_caller: bool = True) -> None:
         print(f"restart: {restart_reason}")
         self.have_error = True
         self.num_breaks += 1
         self.commit()
+        if self.caller is not None and restart_caller:
+            self.caller.state.mark_need_defer_restart()
         if self.cf_info is not None and self.cf_info.end_pc == self.code.get_orig_pc(
                 self.frame.f_lasti):
             self.state.is_empty = True
@@ -1331,8 +1345,11 @@ class GuardTracker:
                                extract_code_at_start=new_store_pos)
                 ]
             })
-        if is_user_defined_func(func) or isinstance(func, torch.nn.Sequential):
-            if inspect.isclass(func):
+        is_high_order_udf = is_high_order_func_with_udf(func, args, kwargs)
+        # if is_high_order_udf: raise NotImplementedError
+        if is_user_defined_func(func) or isinstance(
+                func, torch.nn.Sequential) or is_high_order_udf:
+            if inspect.isclass(func) and not is_high_order_udf:
                 class_define_new = get_method_defined_class(func, '__new__')
                 if class_define_new not in (object, torch._C._FunctionBase):
                     raise NotImplementedError("user defined __new__",
@@ -1358,7 +1375,7 @@ class GuardTracker:
             self.state.mark_calling_func(func)
             self.state.mark_defer_restart(
                 DeferRestartState(stack_objs, self.get_live_objs(),
-                                  self.frame.f_lasti, f"call_function"))
+                                  self.frame.f_lasti, f"call_function", False))
             from .tracer import get_process_frame
             preprocess_frame, post_process_frame = get_process_frame(func, True)
             prior = set_eval_frame((preprocess_frame, post_process_frame))
@@ -1392,12 +1409,12 @@ class GuardTracker:
         if get_root_module(func) == 'torch' or (
                 self.has_tensor_arg(args, kwargs) and
             (is_graph_func(func) or func in (float, int, min, max))):
-            if hasattr(func,
-                       "__name__") and (func.__name__ in (
-                           "named_children", "_are_functorch_transforms_active",
-                           "finfo", "dim", "save_for_backward") or
-                                        (func.__name__ in ("size",) and
-                                         not config.get_config("dynshape"))):
+            if hasattr(func, "__name__") and (
+                    func.__name__ in
+                ("named_children", "_are_functorch_transforms_active", "finfo",
+                 "dim", "save_for_backward", "_get_tracing_state") or
+                (func.__name__ in ("size",) and
+                 not config.get_config("dynshape"))):
                 self.state.set_partial_var({
                     -1: [
                         PartialVar(node=None,
@@ -1945,7 +1962,8 @@ class GuardTracker:
                 stack_objs = get_all_objects_in_stack(self.frame)
                 self.state.mark_defer_restart(
                     DeferRestartState(stack_objs, self.get_live_objs(),
-                                      self.frame.f_lasti, f"dynamic for_iter"))
+                                      self.frame.f_lasti, f"dynamic for_iter",
+                                      False))
                 dyn.pop_dynamic_pc(self.frame_id, original_pc)
                 new_tracker = push_tracker(self.frame,
                                            self.frame_id,

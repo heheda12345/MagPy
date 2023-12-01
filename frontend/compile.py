@@ -6,7 +6,7 @@ from typing import Any, Tuple, Callable, cast
 import logging
 import inspect
 import torch
-from . import tracer, utils
+from . import tracer, utils, guard_tracker
 from .c_api import set_eval_frame, set_skip_files, guard_match, c_reset, set_null_object
 from .tracer import enable_trace, disable_trace, get_trace_func, get_process_frame
 from .cache import enable_cache
@@ -52,6 +52,8 @@ def compile(f: Callable[..., Any]) -> Callable[..., Any]:
                 utils.__file__,
                 torch.autograd.function.__file__,
                 torch._functorch.utils.__file__,
+            }), set({
+                guard_tracker.__file__,
             }))
         set_null_object(null_object)
         init = True

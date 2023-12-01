@@ -1,7 +1,7 @@
 from frontend.compile import compile, reset
 from frontend.utils import add_force_graph_break
 from frontend.c_api import get_next_frame_id
-from common.checker import run_and_check, HIT, MISS
+from common.checker import run_and_check, HIT, MISS, ALL_MISS
 import torch
 
 
@@ -340,3 +340,49 @@ def test_call_aba(caplog):
     expect = a_aba(1.0, 1)
     run_and_check(compiled, [MISS, MISS, MISS], 1, caplog, expect, 1.0, 1)
     run_and_check(compiled, [HIT], 1, caplog, expect, 1.0, 1)
+
+
+def list_zip1(x):
+    y = list(zip(x))
+    return y[0] + y[1] + y[2]
+
+
+def list_zip2(x):
+    y = list(zip(x))
+    return y[0][0] + y[1][0] + y[2][0]
+
+
+def map_fn(x):
+    return x + 1
+
+
+def map_caller1(x):
+    lx = []
+    mp = map(map_fn, lx)
+    lst = list(mp)
+    return lst
+
+
+def map_caller2(x):
+    lx = [x, x]
+    mp = map(map_fn, lx)
+    lst = list(mp)
+    return lst
+
+
+def map_caller3(x):
+    lx = x
+    mp = map(map_fn, lx)
+    lst = list(mp)
+    return lst
+
+
+def test_call_high_order(caplog):
+    reset()
+    for i, func in enumerate(
+        (list_zip1,)):  #, list_zip2, map_caller1, map_caller2, map_caller3)):
+        x = torch.rand((3, 3))
+        expect = func(x)
+        compiled = compile(func)
+        run_and_check(compiled, [ALL_MISS], i + 1, caplog, expect, x)
+        run_and_check(compiled, [HIT], i + 1, caplog, expect, x)
