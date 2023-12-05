@@ -1,5 +1,5 @@
 from frontend.compile import compile
-from frontend.utils import add_force_graph_break
+from frontend.utils import add_force_graph_break, enable_dyn_shape
 from frontend.c_api import get_next_frame_id
 from frontend.compile import reset
 from common.checker import assert_equal, run_and_check_cache, run_and_check, HIT, MISS, ALL_MISS
@@ -285,3 +285,21 @@ def test_model_densenet(caplog):
     run_and_check(compiled, [ALL_MISS], 1, caplog, expect, *inputs[0],
                   **inputs[1])
     run_and_check(compiled, [HIT], 1, caplog, expect, *inputs[0], **inputs[1])
+
+
+def test_model_densenet_dyn(caplog):
+    reset()
+    with enable_dyn_shape():
+        with torch.no_grad():
+            model = get_model().eval()
+            input_args1, input_kwargs1 = get_input(batch_size=5)
+            input_args2, input_kwargs2 = get_input(batch_size=7)
+            expect1 = model(*input_args1, **input_kwargs1)
+            expect2 = model(*input_args2, **input_kwargs2)
+            compiled = compile(model)
+            run_and_check(compiled, [ALL_MISS], 1, caplog, expect1,
+                          *input_args1, **input_kwargs1)
+            run_and_check(compiled, [HIT], 1, caplog, expect1, *input_args1,
+                          **input_kwargs1)
+            run_and_check(compiled, [HIT], 1, caplog, expect2, *input_args2,
+                          **input_kwargs2)

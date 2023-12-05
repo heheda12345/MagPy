@@ -14,6 +14,7 @@ import dataclasses
 import collections
 import torch.fx.immutable_collections as fx_immutable
 import numpy as np
+from . import config
 from .code import ProcessedCode
 from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method, get_from_freevars, set_value_stack_from_top
 from .instruction import Instruction, ci
@@ -53,6 +54,11 @@ class DeferRestartState:
     live_vars: list[tuple[str, Any]]
     guard_lasti: int
     reason: str
+
+
+deberta_model = None
+
+the_first_input = None
 
 
 class State:
@@ -158,8 +164,10 @@ class State:
 
         def as_fx_node(arg: Any) -> NodeArgs:
             if isinstance(arg, (tuple, list)):
-                return fx_immutable.immutable_list(
-                    [as_fx_node(x) for x in arg])
+                return fx_immutable.immutable_list([as_fx_node(x) for x in arg])
+            if isinstance(arg, slice):
+                return slice(as_fx_node(arg.start), as_fx_node(arg.stop),
+                             as_fx_node(arg.step))
             var = self.objects.get(arg,
                                    allow_unexist_const=True,
                                    fx_graph=self.fx_graph)
@@ -170,13 +178,16 @@ class State:
                                                  self.subparam_paths[var.obj],
                                                  (), {})
             if isinstance(var, vs.ScalarVar) and not var.value_fix:
-                if common_device is not None and common_device != torch.device(
-                        'cpu'):
-                    cpu_node = var.as_fx_node()
-                    return self.fx_graph.create_node("call_method", "to",
-                                                     (cpu_node, ),
-                                                     {"device": common_device})
-
+                if not config.get_config("dynshape"):
+                    if common_device is not None and common_device != torch.device(
+                            'cpu'):
+                        cpu_node = var.as_fx_node()
+                        return self.fx_graph.create_node(
+                            "call_method", "to", (cpu_node,),
+                            {"device": common_device})
+                else:
+                    # TODO: record all operation in SymInt or SymFloat
+                    pass
             return var.as_fx_node()
 
         for arg in itertools.chain(args, kwargs.values()):
@@ -222,7 +233,8 @@ class State:
                     position = i
                 else:
                     node = obj
-            if scalar is not None and node is not None:
+            if scalar is not None and node is not None and not config.get_config(
+                    'dynshape'):
                 fx_node = self.fx_graph.create_node(
                     "call_function",
                     torch.full_like,
@@ -527,6 +539,8 @@ class State:
                     new_node.target = name_in_caller
                 elif node.op == "call_method":
                     pass
+                if config.get_config('dynshape'):
+                    self.fx_graph.infer_fake_value(new_node)
                 replacement_mapping[node] = new_node
 
         def merge_output() -> None:
@@ -1000,6 +1014,8 @@ class GuardTracker:
                     while var.prev is not None:
                         var = var.prev
                     var.make_guard(guard_codegen)
+                if config.get_config('dynshape'):
+                    self.state.fx_graph.make_shape_env_guard(guard_codegen)
                 guard_code = guard_codegen.get_code()
                 graph_codegen = GraphFnCodegen(key=key)
                 for node in self.state.fx_graph.result_graph.nodes:
@@ -1045,6 +1061,9 @@ class GuardTracker:
 
                 self.state.fx_graph.set_output_nodes(
                     graph_codegen.get_graph_outputs())
+                print("graph input", [
+                    (name, x) for x, name in self.state.fx_graph.example_inputs
+                ])
                 print("graph", self.state.fx_graph.result_graph)
                 graph_code = graph_codegen.get_code()
                 compiled_graph = self.state.fx_graph.compile()
@@ -1124,7 +1143,7 @@ class GuardTracker:
                     assert id(value) != id(new_value)
                     set_value_stack_from_top(self.frame, i, new_value)
                     value = new_value
-                elif isinstance(value, bool):
+                elif isinstance(value, (bool,)):
                     raise NotImplementedError
                 elif isinstance(value, torch.Tensor):
                     new_value = torch.clone(value)
@@ -1137,6 +1156,14 @@ class GuardTracker:
             partial_make_var_fn: Optional[
                 MAKE_VAR_FN_TYPE] = partial.make_var_fn
             make_var_fn: MAKE_VAR_FN_TYPE = partial_make_var_fn if partial_make_var_fn is not None else default_make_var_fn
+            if isinstance(value, bool) and config.get_config(
+                    "dynshape") and node is not None:
+                fake = node.meta["fake"]
+                if isinstance(fake, torch.SymBool):
+                    fake_bool = fake.node.expr
+                    import sympy
+                    if fake_bool is sympy.true or fake_bool is sympy.false:  # not a dynamic value
+                        node = None
             if isinstance(value, torch.Tensor):
                 if isinstance(value, torch.nn.Parameter):
                     var = make_var_fn(value, partial.need_guard_check,
@@ -1177,12 +1204,26 @@ class GuardTracker:
                                 sub_value, fx_node, partial.need_guard_check,
                                 partial.extract_code_at_start)
                             self.state.objects.add(sub_var, sub_value)
-                        elif isinstance(sub_value, int):
-                            pass
+                        elif is_scalar(sub_value):
+                            assert isinstance(sub_value,
+                                              (int, float)), "not implemented"
+                            if self.state.objects.contains(sub_value):
+                                if dyn.contains(sub_value):
+                                    continue
+                                raise NotImplementedError
+                            fx_node = self.state.fx_graph.create_node(
+                                "call_function", operator.getitem, (node, i),
+                                {})
+                            sub_scalar_var = vs.ScalarVar.from_value_and_node(
+                                sub_value, fx_node, partial.need_guard_check,
+                                partial.extract_code_at_start)
+                            self.state.objects.add(sub_scalar_var, sub_value)
+                            dyn.mark_dynamic(sub_value,
+                                             dyn.ScalarWithUnknownValue())
                         else:
                             print("tuple inner unknown node", sub_value,
-                                  type(sub_value))
-                            raise NotImplementedError
+                                type(sub_value))
+                            raise NotImplementedError(type(sub_value))
                 elif inspect.isclass(type(value)):
                     pass
                 else:
@@ -1394,10 +1435,12 @@ class GuardTracker:
             (is_graph_func(func) or is_math_func(func) or
              (func in (float, int, min, max, len, list, abs, sum)))):
             if hasattr(func, "__name__") and (
-                    func.__name__ in ("size", "named_children",
+                    func.__name__ in ("named_children",
                                       "_are_functorch_transforms_active",
                                       "finfo", "dim", "save_for_backward") or
-                (func.__name__ == "type" and inst.argval == 0)):
+                (func.__name__ == "type" and inst.argval == 0)) or
+                                        (func.__name__ in ("size",) and
+                                         not config.get_config("dynshape")):
                 self.state.set_partial_var({
                     -1: [
                         PartialVar(node=None,
@@ -1710,15 +1753,24 @@ class GuardTracker:
             StoreInAttr(pos, id(obj), inst.argval)
             for pos in obj_var.extract_code_at_start
         ]
+
         if inst.argval in obj_var.modified_attrs:
             return
         if isinstance(obj, torch.Tensor) and inst.argval == 'data':
             node = obj_var.as_fx_node()
         else:
             node = None
+        need_guard_check = obj_var.need_guard_check
+        if config.get_config('dynshape') and isinstance(
+                obj, torch.Tensor) and inst.argval == 'shape':
+            node: Optional[torch.fx.Node] = self.state.fx_graph.create_node(
+                "call_method", "size", (obj_var.as_fx_node(),), {})
+            need_guard_check = False
+        else:
+            node = None
         partial: list[Optional[PartialVar]] = [
             PartialVar(node=node,
-                       need_guard_check=obj_var.need_guard_check,
+                       need_guard_check=need_guard_check,
                        extract_code_at_start=new_extract)
         ]
 

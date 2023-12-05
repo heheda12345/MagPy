@@ -1,5 +1,6 @@
 from frontend.compile import compile, reset
-from common.checker import run_and_check, HIT, MISS
+from frontend.utils import enable_dyn_shape
+from common.checker import run_and_check, HIT, MISS, ALL_MISS
 import torch
 
 
@@ -201,3 +202,62 @@ def test_tensor_type(caplog):
     result = tensor_type(a)
     run_and_check(compiled_tensor_type, [MISS], 1, caplog, result, a)
     run_and_check(compiled_tensor_type, [HIT], 1, caplog, result, a)
+
+
+def dyn_shape1(a):
+    b = a * 2
+    return b.view((b.shape[0] * 2, 2))
+
+
+def dyn_shape2(a):
+    return a.view((a.shape[0] * 2, 2)) * 2
+
+
+def dyn_callee(sz):
+    return torch.ones((sz,))
+
+
+def dyn_caller(a):
+    b = a * 2
+    return dyn_callee(b.size(0))
+
+
+def test_dyn_shape(caplog):
+    reset()
+    for i, fn in enumerate((dyn_shape1, dyn_shape2, dyn_caller)):
+        with enable_dyn_shape():
+            inp1 = torch.randn((5, 2, 2))
+            y1 = fn(inp1)
+            inp2 = torch.randn((10, 2, 2))
+            y2 = fn(inp2)
+
+            compiled = compile(fn)
+            run_and_check(compiled, [ALL_MISS], i + 1, caplog, y1, inp1)
+            run_and_check(compiled, [HIT], i + 1, caplog, y1, inp1)
+            run_and_check(compiled, [HIT], i + 1, caplog, y2, inp2)
+
+
+class Model(torch.nn.Module):
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.linear = torch.nn.Linear(3, 3, bias=False)
+
+    def forward(self, x):
+        return self.linear(x * 2)
+
+
+def test_dyn_module(caplog):
+    reset()
+    with enable_dyn_shape():
+        with torch.no_grad():
+            model = Model().cuda().eval()
+            inp1 = torch.randn((4, 5, 3)).cuda()
+            y1 = model(inp1)
+            inp2 = torch.randn((4, 5, 3)).cuda()
+            y2 = model(inp2)
+
+            compiled = compile(model)
+            run_and_check(compiled, [ALL_MISS], 1, caplog, y1, inp1)
+            run_and_check(compiled, [HIT], 1, caplog, y1, inp1)
+            run_and_check(compiled, [HIT], 1, caplog, y2, inp2)

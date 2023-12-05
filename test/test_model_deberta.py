@@ -1,4 +1,5 @@
 from frontend.compile import compile, reset
+from frontend.utils import enable_dyn_shape
 from common.checker import assert_equal, run_and_check_cache, run_and_check, HIT, MISS, ALL_MISS
 from transformers import AutoTokenizer, AutoConfig, AutoModel
 import torch
@@ -1152,6 +1153,7 @@ device = "cuda:0"
 
 def get_model():
     config = AutoConfig.from_pretrained(model_name)
+    config.num_hidden_layers = 2
     config.return_dict = False
     model = DebertaModel(config).to(device)
     print("model type", type(model))
@@ -1175,20 +1177,33 @@ def get_input(batch_size):
     return (input_ids, attention_mask, token_type_ids), {}
 
 
-# if __name__ == "__main__":
 def test_model_deberta(caplog):
     reset()
     # NOTE: functions with torch.jit.script are inverted to eager mode
     with torch.no_grad():
         model = get_model().eval()
         input_args, input_kwargs = get_input(batch_size=1)
-        # print([x.shape for x in input_args])
         expect = model(*input_args, **input_kwargs)
-        # print(outputs)
         compiled = compile(model)
-        # print(compiled(*input_args, **input_kwargs))
-        # print(compiled(*input_args, **input_kwargs))
         run_and_check(compiled, [ALL_MISS], 1, caplog, expect, *input_args,
                       **input_kwargs)
         run_and_check(compiled, [HIT], 1, caplog, expect, *input_args,
                       **input_kwargs)
+
+
+def test_model_deberta_dyn(caplog):
+    reset()
+    with enable_dyn_shape():
+        with torch.no_grad():
+            model = get_model().eval()
+            input_args1, input_kwargs1 = get_input(batch_size=5)
+            input_args2, input_kwargs2 = get_input(batch_size=7)
+            expect1 = model(*input_args1, **input_kwargs1)
+            expect2 = model(*input_args2, **input_kwargs2)
+            compiled = compile(model)
+            run_and_check(compiled, [ALL_MISS], 1, caplog, expect1,
+                          *input_args1, **input_kwargs1)
+            run_and_check(compiled, [HIT], 1, caplog, expect1, *input_args1,
+                          **input_kwargs1)
+            run_and_check(compiled, [HIT], 1, caplog, expect2, *input_args2,
+                          **input_kwargs2)

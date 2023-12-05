@@ -1,10 +1,11 @@
 import inspect
 import dis
-from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic, Optional, no_type_check
+from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic, Optional, no_type_check, Iterator, Union
 from types import FrameType
 import random
 import operator
 import os
+import contextlib
 import torch
 import torch._C
 import collections
@@ -45,6 +46,9 @@ def print_bytecode() -> None:
     code_options = {k: getattr(code, k) for k in keys}
     for k, v in code_options.items():
         print(k, v)
+
+
+ScalarType = Union[int, float, bool, str]
 
 
 def is_scalar(value: Any) -> bool:
@@ -299,19 +303,6 @@ def reset() -> None:
     random_state = None
 
 
-class NO_LD_PRELOAD_CTX:
-    old_ld_preload: str = ''
-
-    def __enter__(self) -> None:
-        if 'LD_PRELOAD' in os.environ:
-            self.old_ld_preload = os.environ['LD_PRELOAD']
-            del os.environ['LD_PRELOAD']
-
-    def __exit__(self, *args: Any) -> None:
-        if self.old_ld_preload:
-            os.environ['LD_PRELOAD'] = self.old_ld_preload
-
-
 T = TypeVar('T')
 
 
@@ -377,3 +368,10 @@ def is_structseq(obj: Any) -> bool:
             return True
 
     return False
+
+
+@contextlib.contextmanager
+def enable_dyn_shape() -> Iterator[None]:
+    with torch._dynamo.eval_frame.enable_dynamic():
+        with SetConfig({'dynshape': True}):
+            yield

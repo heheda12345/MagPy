@@ -106,7 +106,6 @@ def get_process_frame(
             set_frame_root(frame_id, f)
             frame_cache = get_frame_cache(frame_id)
             frame_cache.update_code(frame.f_code, frame_id, is_callee)
-
         except Exception as e:
             print("exception in postprocess:", e, type(e))
             print(traceback.format_exc())

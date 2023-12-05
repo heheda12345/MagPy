@@ -2,16 +2,16 @@ from typing import TYPE_CHECKING, Union, Optional, Callable, Any
 
 import torch.fx
 import numpy as np
+from .. import config
 from .base import Variable, HelperFunctions
 from ..pycode_writer import get_float_string
 from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos
 from ..pycode_writer import new_name
+from ..utils import ScalarType
 from .. import dynamic as dyn
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
-
-ScalarType = Union[int, float, bool, str]
 
 
 class ScalarVar(Variable):
@@ -75,8 +75,11 @@ class ScalarVar(Variable):
             if need_guard_check:
                 assert len(extract_code_at_start) > 0
             name = new_name('scalar')
-            fx_node = fx_graph.create_input(torch.tensor(value), name, (), {},
-                                            name)
+            if not config.get_config('dynshape'):
+                fx_node = fx_graph.create_input(torch.tensor(value), name, (),
+                                                {}, name)
+            else:
+                fx_node = fx_graph.create_sym_input(value, name, (), {}, name)
             var = cls.from_value_and_node(value, fx_node, need_guard_check,
                                           extract_code_at_start)
             return var

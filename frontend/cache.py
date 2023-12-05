@@ -31,7 +31,7 @@ class FrameCache:
     callsite_id: dict[int, int]  # start_pc -> callsite_id
     pre_cache_size: int
     updated: bool
-        # 0 for root, 1 for callee
+    # 0 for root, 1 for callee
     code: list[Optional[Tuple[CodeType, ProcessedCode]]]
 
     def __init__(self, frame_id: int) -> None:
