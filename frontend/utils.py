@@ -136,9 +136,10 @@ def get_root_module(func: Callable[..., Any]) -> str:
         return 'numpy'
 
     module = inspect.getmodule(func)
-    if module is None:
+    module = str(module).split('\'')[1]
+    if module is None or module in ('torch.distributions.bernoulli', 'torch.distributions.distribution'):
         return ""
-    root_module = str(module).split('\'')[1].split('.')[0]
+    root_module = module.split('.')[0]
     return root_module
 
 
