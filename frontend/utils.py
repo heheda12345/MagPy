@@ -8,6 +8,7 @@ import os
 import contextlib
 import torch
 import torch._C
+import collections
 from .config import get_config, set_config
 
 if TYPE_CHECKING:
@@ -93,11 +94,15 @@ fx_graph_functions: set[Callable[..., Any]] = {
     operator.rshift,
     operator.and_,
     operator.or_,
+    operator.is_,
     operator.xor,
     operator.eq,
     operator.lt,
     operator.ne,
     operator.le,
+    operator.gt,
+    operator.ge,
+    operator.contains,
 }
 fx_graph_functions = fx_graph_functions.union(fx_graph_inplace_functions)
 
@@ -124,7 +129,7 @@ def get_root_module(func: Callable[..., Any]) -> str:
     if hasattr(func, '__objclass__'):
         if func.__objclass__ == torch._C._TensorBase:
             return 'torch'
-        elif func.__objclass__ in (list, tuple, set, dict):
+        elif func.__objclass__ in (list, tuple, set, dict, str):
             return 'builtins'
 
     if hasattr(func, '__self__') and isinstance(func.__self__, torch.Tensor):
@@ -135,9 +140,13 @@ def get_root_module(func: Callable[..., Any]) -> str:
         return 'numpy'
 
     module = inspect.getmodule(func)
-    if module is None:
+    module_str = ""
+    if module is not None:
+        module_str = str(module).split('\'')[1]
+    if module is None or module_str in ('torch.distributions.bernoulli',
+                                        'torch.distributions.distribution'):
         return ""
-    root_module = str(module).split('\'')[1].split('.')[0]
+    root_module = module_str.split('.')[0]
     return root_module
 
 
@@ -161,15 +170,18 @@ def get_method_defined_class(cls: type[Any],
 
 def is_user_defined_func(func: Callable[..., Any]) -> bool:
     # print([(x, getattr(func, x)) for x in dir(func)])
-    if hasattr(func,
-               '__objclass__') and func.__objclass__ in (torch._C._TensorBase,
-                                                         dict):
+    if hasattr(func, '__objclass__') and func.__objclass__ in (
+            torch._C._TensorBase, dict, str, collections.OrderedDict):
         return False
 
     # NOTE: random should be called as a UDF, not handled
-    if hasattr(func, '__self__') and isinstance(func.__self__,
-                                                (torch.Tensor, random.Random)):
-        return False
+    if hasattr(func, '__self__'):
+        if isinstance(func.__self__, (torch.Tensor, random.Random)):
+            return False
+        elif isinstance(func.__self__, (list, tuple, set, dict, str)):
+            return False
+        elif isinstance(func.__self__, torch.nn.Sequential):
+            return True
 
     if hasattr(func, '__name__') and func.__name__ == '<genexpr>':
         return False
@@ -211,6 +223,11 @@ def is_graph_func(func: Callable[..., Any]) -> bool:
     if root_module == '':
         return False
     return root_module == 'torch'
+
+
+def is_math_func(func: Callable[..., Any]) -> bool:
+    root_module = get_root_module(func)
+    return root_module == 'math'
 
 
 random_state = None

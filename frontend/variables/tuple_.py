@@ -47,8 +47,8 @@ class TupleVar(Variable):
 
         codegen.output(
             name_in_graph_fn, store_pos,
-            f"({','.join(f'{name_in_graph_fn}_{j}' for j in range(len(self.vars)))},)",
-            in_return, idx)
+            f"({','.join(f'{name_in_graph_fn}_{j}' for j in range(len(self.vars)))},)"
+            if len(self.vars) > 0 else "()", in_return, idx)
 
     @classmethod
     def from_value(cls, value: Tuple[Any, ...], need_guard_check: bool,
