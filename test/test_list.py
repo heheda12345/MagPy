@@ -81,6 +81,7 @@ def tensor_4(list_a, list_b):
 def tensor_5(list_a):
     return list_a[..., 2:]
 
+
 def list_id(list_a, list_b):
     c = list_a + list_b
     return c[3], c[6]
@@ -134,7 +135,6 @@ def test_with_tensor(caplog):
     # result = tensor_5(list_a)
     # run_and_check(compiled_tensor6, [MISS], 8, caplog, result, list_a)
     # run_and_check(compiled_tensor6, [HIT], 8, caplog, result, list_a)
-    
 
 
 def list_contains(a, b):

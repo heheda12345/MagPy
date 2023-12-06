@@ -15,8 +15,7 @@ class ListVar(Variable):
     length: int
 
     def __init__(self, value: list[Any], need_guard_check: bool,
-                 helper_functions: HelperFunctions,
-                 fx_graph: Optional[FxGraph],
+                 helper_functions: HelperFunctions, fx_graph: Optional[FxGraph],
                  extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, value, extract_code_at_start)
         self.value = value
@@ -93,9 +92,8 @@ class NdarrayVar(Variable):
     obj_ids: list[int]
     length: int
 
-    def __init__(self, value: np.ndarray, need_guard_check: bool,
-                 helper_functions: HelperFunctions,
-                 fx_graph: Optional[FxGraph],
+    def __init__(self, value: np.ndarray[Any, Any], need_guard_check: bool,
+                 helper_functions: HelperFunctions, fx_graph: Optional[FxGraph],
                  extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, value, extract_code_at_start)
         self.value = value
@@ -133,7 +131,7 @@ class NdarrayVar(Variable):
         codegen.output(name_in_graph_fn, store_pos, var_str, in_return, idx)
 
     @classmethod
-    def from_value(cls, value: list[Any], need_guard_check: bool,
+    def from_value(cls, value: np.ndarray[Any, Any], need_guard_check: bool,
                    helper_functions: HelperFunctions,
                    fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "NdarrayVar":

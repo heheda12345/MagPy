@@ -140,10 +140,13 @@ def get_root_module(func: Callable[..., Any]) -> str:
         return 'numpy'
 
     module = inspect.getmodule(func)
-    module = str(module).split('\'')[1]
-    if module is None or module in ('torch.distributions.bernoulli', 'torch.distributions.distribution'):
+    module_str = ""
+    if module is not None:
+        module_str = str(module).split('\'')[1]
+    if module is None or module_str in ('torch.distributions.bernoulli',
+                                        'torch.distributions.distribution'):
         return ""
-    root_module = module.split('.')[0]
+    root_module = module_str.split('.')[0]
     return root_module
 
 
@@ -167,9 +170,8 @@ def get_method_defined_class(cls: type[Any],
 
 def is_user_defined_func(func: Callable[..., Any]) -> bool:
     # print([(x, getattr(func, x)) for x in dir(func)])
-    if hasattr(func,
-               '__objclass__') and func.__objclass__ in (torch._C._TensorBase,
-                                                         dict, str, collections.OrderedDict):
+    if hasattr(func, '__objclass__') and func.__objclass__ in (
+            torch._C._TensorBase, dict, str, collections.OrderedDict):
         return False
 
     # NOTE: random should be called as a UDF, not handled
@@ -198,8 +200,8 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
                        'inspect', 'collections'):
         #NOTE:self.function should be recursive-checked to find out where it's defined, but not implemented
         if hasattr(func, '__self__'
-                   ) and func.__self__ is not None and is_user_defined_func(
-                       func.__self__):
+                  ) and func.__self__ is not None and is_user_defined_func(
+                      func.__self__):
             if is_own_method(func.__name__, func.__self__):
                 return True
             else:
@@ -344,18 +346,18 @@ class SetConfig:
 @no_type_check
 def is_namedtuple(obj: Any) -> bool:
     cls: type[Any] = obj if inspect.isclass(cls) else type(obj)
-    return (issubclass(cls, tuple)
-            and isinstance(getattr(cls, '_fields', None), tuple)
-            and all(isinstance(field, str) for field in cls._fields))
+    return (issubclass(cls, tuple) and
+            isinstance(getattr(cls, '_fields', None), tuple) and
+            all(isinstance(field, str) for field in cls._fields))
 
 
 @no_type_check
 def is_structseq(obj: Any) -> bool:
     cls: type[Any] = obj if inspect.isclass(obj) else type(obj)
-    if (cls.__base__ is tuple
-            and isinstance(getattr(cls, 'n_sequence_fields', None), int)
-            and isinstance(getattr(cls, 'n_fields', None), int)
-            and isinstance(getattr(cls, 'n_unnamed_fields', None), int)):
+    if (cls.__base__ is tuple and
+            isinstance(getattr(cls, 'n_sequence_fields', None), int) and
+            isinstance(getattr(cls, 'n_fields', None), int) and
+            isinstance(getattr(cls, 'n_unnamed_fields', None), int)):
         try:
 
             class subcls(cls):  # type: ignore[misc]

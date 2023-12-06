@@ -14,8 +14,7 @@ class TupleVar(Variable):
     length: int
 
     def __init__(self, value: tuple[Any, ...], need_guard_check: bool,
-                 helper_functions: HelperFunctions,
-                 fx_graph: Optional[FxGraph],
+                 helper_functions: HelperFunctions, fx_graph: Optional[FxGraph],
                  extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, value, extract_code_at_start)
         self.value = value

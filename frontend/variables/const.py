@@ -55,8 +55,8 @@ class NullVar(Variable):
                           codegen: "GraphFnCodegen", in_return: bool,
                           idx: int) -> None:
         name_in_codegen = codegen.add_obj(null_object, "NULL_VAR")
-        codegen.output(name_in_graph_fn, store_pos,
-                       f"{name_in_codegen} # NULL", in_return, idx)
+        codegen.output(name_in_graph_fn, store_pos, f"{name_in_codegen} # NULL",
+                       in_return, idx)
 
     @classmethod
     def from_value(cls, value: NullObject, need_guard_check: bool,
@@ -126,8 +126,8 @@ class SliceVar(Variable):
                    _helper_functions: HelperFunctions,
                    _fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "SliceVar":
-        return cls(value.start, value.stop, value.step, need_guard_check,
-                   value, extract_code_at_start)
+        return cls(value.start, value.stop, value.step, need_guard_check, value,
+                   extract_code_at_start)
 
     def as_fx_node(self) -> NodeArgs:
         return slice(self.start, self.stop, self.step)
@@ -135,7 +135,7 @@ class SliceVar(Variable):
 
 class EllipsisVar(Variable):
 
-    def __init__(self, need_guard_check: bool, obj: type(Ellipsis),
+    def __init__(self, need_guard_check: bool, obj: Any,
                  extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, obj, extract_code_at_start)
 
@@ -150,7 +150,7 @@ class EllipsisVar(Variable):
         codegen.output(name_in_graph_fn, store_pos, name, in_return, idx)
 
     @classmethod
-    def from_value(cls, value: type(Ellipsis), need_guard_check: bool,
+    def from_value(cls, value: Any, need_guard_check: bool,
                    _helper_functions: HelperFunctions,
                    _fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "EllipsisVar":
@@ -199,21 +199,20 @@ class FunctionVar(Variable):
         super().__init__(need_guard_check, func, extract_code_at_start)
         self.closure_vars = []
         self.obj_ids = []
-        if hasattr(func, "__code__") and getattr(func,
-                                                 "__closure__") is not None:
-            assert len(func.__code__.co_freevars) == len(func.__closure__)
-            for i, x in enumerate(func.__closure__):
-                # NOTE: store position should be related to function's store position, ie., function.__closure__.[i], but it's hard to create, since some of function may be none
-                if x.cell_contents != func:
-                    cell_var = helper_functions.get_or_make_var(
-                        x, need_guard_check, None, [StoreInFreeVar(i)])
-                    self.closure_vars.append(cell_var)
-                    self.obj_ids.append(id(x))
+        if hasattr(func, "__code__") and hasattr(func, "__closure__"):
+            if func.__closure__ is not None:
+                assert len(func.__code__.co_freevars) == len(func.__closure__)
+                for i, x in enumerate(func.__closure__):
+                    if x.cell_contents != func:
+                        cell_var = helper_functions.get_or_make_var(
+                            x, need_guard_check, None, [StoreInFreeVar(i)])
+                        self.closure_vars.append(cell_var)
+                        self.obj_ids.append(id(x))
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        if hasattr(self.obj, '__self__') and isinstance(
-                self.obj.__self__, torch.Tensor):
+        if hasattr(self.obj, '__self__') and isinstance(self.obj.__self__,
+                                                        torch.Tensor):
             pass
         else:
             codegen.add_id_check(f"id({pos}) == {id(self.obj)}", self.obj)
@@ -243,19 +242,18 @@ class FunctionVar(Variable):
             else:
                 table.add_by_id(var, idx)
                 var.add_subvars_to_table(table)
-    
+
     # def as_fx_node(self) -> NodeArgs:
     #     return self.obj
 
 
 class RangeVar(Variable):
-    start: Optional[int]
-    stop: Optional[int]
-    step: Optional[int]
+    start: int
+    stop: int
+    step: int
 
-    def __init__(self, start: Optional[int], stop: Optional[int],
-                 step: Optional[int], need_guard_check: bool, obj: range,
-                 extract_code_at_start: list[StorePos]) -> None:
+    def __init__(self, start: int, stop: int, step: int, need_guard_check: bool,
+                 obj: range, extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, obj, extract_code_at_start)
         self.start = start
         self.stop = stop
@@ -278,8 +276,8 @@ class RangeVar(Variable):
                    _helper_functions: HelperFunctions,
                    _fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "RangeVar":
-        return cls(value.start, value.stop, value.step, need_guard_check,
-                   value, extract_code_at_start)
-    
+        return cls(value.start, value.stop, value.step, need_guard_check, value,
+                   extract_code_at_start)
+
     def as_fx_node(self) -> NodeArgs:
         return range(self.start, self.stop, self.step)

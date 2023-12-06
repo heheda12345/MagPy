@@ -93,8 +93,7 @@ def test_external_module(caplog):
         compiled_model = compile(call_model)
         run_and_check(compiled_model, [MISS], 1, caplog, expect_result, model,
                       x)
-        run_and_check(compiled_model, [HIT], 1, caplog, expect_result, model,
-                      x)
+        run_and_check(compiled_model, [HIT], 1, caplog, expect_result, model, x)
 
 
 def test_nn_module(caplog):

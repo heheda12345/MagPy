@@ -121,8 +121,7 @@ class NumpyScalarVar(Variable):
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
         codegen.add_import("numpy")
-        codegen.add_check(
-            f"isinstance({pos}, numpy.{type(self.obj).__name__})")
+        codegen.add_check(f"isinstance({pos}, numpy.{type(self.obj).__name__})")
         if self.value_fix:
             item = self.obj.item()
             if type(item) == float:

@@ -67,11 +67,13 @@ class ObjectTable:
             return self.objs[id(value)]
         elif allow_unexist_const:
             if isinstance(value, get_args(CONST_TYPES)) or isinstance(
-                    value, (list, tuple, set, dict, range, CodeType, type(Ellipsis), np.ndarray)):
+                    value, (list, tuple, set, dict, range, CodeType,
+                            type(Ellipsis), np.ndarray)):
                 return make_var_from_value(value, False, self.helper_functions,
                                            fx_graph)
         raise RuntimeError(
-            f"Object({id(value)}) {value} {type(value)} not found in object table")
+            f"Object({id(value)}) {value} {type(value)} not found in object table"
+        )
 
     def get_or_none(self, value: Any) -> Optional[Variable]:
         if id(value) in self.objs:

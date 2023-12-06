@@ -49,8 +49,8 @@ class DictVar(Variable):
         for key, obj in zip(self.value.keys(), self.vars):
             if not isinstance(obj, TensorVar):
                 if isinstance(key, str):
-                    obj.make_guard_inner(
-                        codegen, StoreInIndex(pos, id(obj), f"'{key}'"))
+                    obj.make_guard_inner(codegen,
+                                         StoreInIndex(pos, id(obj), f"'{key}'"))
                 else:
                     obj.make_guard_inner(codegen,
                                          StoreInIndex(pos, id(obj), str(key)))
@@ -149,8 +149,8 @@ class OrderedDictVar(DictVar):
         for key, var in zip(self.value.keys(), self.vars):
             if not isinstance(var, TensorVar):
                 if isinstance(key, str):
-                    var.make_guard_inner(
-                        codegen, StoreInIndex(pos, id(var), f"'{key}'"))
+                    var.make_guard_inner(codegen,
+                                         StoreInIndex(pos, id(var), f"'{key}'"))
                 else:
                     var.make_guard_inner(codegen,
                                          StoreInIndex(pos, id(var), str(key)))
