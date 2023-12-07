@@ -45,6 +45,11 @@ def call_model(model, a):
     return b
 
 
+def nn_module(a):
+    b = torch.nn.Softmax(dim=-1)(a)
+    return b
+
+
 def test_call_method(caplog):
     reset()
     with torch.no_grad():
@@ -89,6 +94,15 @@ def test_external_module(caplog):
         run_and_check(compiled_model, [MISS], 1, caplog, expect_result, model,
                       x)
         run_and_check(compiled_model, [HIT], 1, caplog, expect_result, model, x)
+
+
+def test_nn_module(caplog):
+    reset()
+    compiled = compile(nn_module)
+    x = torch.randn(1, 10)
+    expect_result = nn_module(x)
+    run_and_check(compiled, [MISS], 1, caplog, expect_result, x)
+    run_and_check(compiled, [HIT], 1, caplog, expect_result, x)
 
 
 if __name__ == "__main__":

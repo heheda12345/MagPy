@@ -7,7 +7,7 @@ from .variables.tuple_ import TupleVar
 from .utils import NullObject, ReadOnlyObject
 from .store_pos import StorePos
 from .fx_graph import FxGraph
-import torch
+import numpy as np
 
 
 class ObjectTable:
@@ -35,7 +35,6 @@ class ObjectTable:
             old_var.need_guard_check |= var.need_guard_check
         else:
             self.add_by_id(var, id(value))
-            var.add_subvars_to_table(self)
 
     def add_by_id(self, var: Variable, idx: int) -> None:
         assert idx not in self.objs
@@ -68,11 +67,13 @@ class ObjectTable:
             return self.objs[id(value)]
         elif allow_unexist_const:
             if isinstance(value, get_args(CONST_TYPES)) or isinstance(
-                    value, (list, tuple, set, dict, CodeType)):
+                    value, (list, tuple, set, dict, range, CodeType,
+                            type(Ellipsis), np.ndarray)):
                 return make_var_from_value(value, False, self.helper_functions,
                                            fx_graph)
         raise RuntimeError(
-            f"Object({id(value)}) {value} not found in object table {id(self)}")
+            f"Object({id(value)}) {value} {type(value)} not found in object table {id(self)}"
+        )
 
     def get_or_none(self, value: Any) -> Optional[Variable]:
         if id(value) in self.objs:

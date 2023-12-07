@@ -386,3 +386,28 @@ def test_call_high_order(caplog):
         compiled = compile(func)
         run_and_check(compiled, [ALL_MISS], i + 1, caplog, expect, x)
         run_and_check(compiled, [HIT], i + 1, caplog, expect, x)
+
+
+def func_attr1(a):
+    b = a + 2.0
+    return b
+
+
+def func_attr2(c):
+    d = c.data + 3.0
+    return d
+
+
+def func_attr(e):
+    e1 = e + 1.0
+    out = func_attr1(e1)
+    return func_attr2(out)
+
+
+def test_guard_attr(caplog):
+    reset()
+    para = torch.full((1,), 1.0)
+    compiled = compile(func_attr)
+    expect = func_attr(para)
+    run_and_check(compiled, [MISS, MISS, MISS], 1, caplog, expect, para)
+    run_and_check(compiled, [HIT], 1, caplog, expect, para)

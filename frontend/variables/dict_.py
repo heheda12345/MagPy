@@ -73,10 +73,18 @@ class DictVar(Variable):
             codegen.output(name_in_graph_fn, store_pos, str(old_store_pos),
                            in_return, idx)
         else:
-            codegen.output(
-                name_in_graph_fn, store_pos,
-                f"{{{','.join(f'{key}: {name_in_graph_fn}_{j}' for key, j in zip(self.value.keys(), range(len(self.vars))))}}}"
-                if len(self.vars) > 0 else "{}", in_return, idx)
+            items = []
+            for key, j in zip(self.value.keys(), range(len(self.vars))):
+                if isinstance(key, str):
+                    key_part = f"'{key}'"
+                else:
+                    key_part = key
+                item = f'{key_part}: {name_in_graph_fn}_{j}'
+                items.append(item)
+            target = f"{{{', '.join(i for i in items)}}}"
+            codegen.output(name_in_graph_fn, store_pos,
+                           target if len(self.vars) > 0 else "{}", in_return,
+                           idx)
 
     @classmethod
     def from_value(cls,

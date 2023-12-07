@@ -11,6 +11,19 @@ def numpy_to_int(x):
     return p
 
 
+def np_array(x):
+    return x
+
+
+def test_array(caplog):
+    reset()
+    compiled = compile(np_array)
+    a = np.array([1, 2.0, 3.33])
+    result = np_array(a)
+    run_and_check(compiled, [MISS], 1, caplog, result, a)
+    run_and_check(compiled, [HIT], 1, caplog, result, a)
+
+
 def test_numpy_to_int(caplog):
     reset()
     compiled_numpy_to_int = compile(numpy_to_int)
