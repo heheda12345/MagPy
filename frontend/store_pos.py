@@ -70,7 +70,7 @@ class StoreInFreeVar(StorePos):
     def add_name_to_fn(self, codegen: 'FnCodegen') -> None:
         codegen.add_import_from("frontend.c_api", "get_from_freevars")
         codegen.add_import("inspect")
-        codegen.add_stmt("frame = inspect.currentframe().f_back")
+        codegen.add_statements("frame = inspect.currentframe().f_back")
 
 
 class StoreInBuiltin(StorePos):

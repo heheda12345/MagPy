@@ -1021,6 +1021,10 @@ class GuardTracker:
                     if node.op == "placeholder":
                         var = node.meta["var"]
                         if isinstance(var, vs.TensorVar):
+                            pos = var.extract_code_at_start[0]
+                            # input comes from freevar?
+                            if isinstance(pos, StoreInAttr) and isinstance(pos.self_pos, StoreInFreeVar):
+                                pos.self_pos.add_name_to_fn(graph_codegen)
                             graph_codegen.add_graph_input(
                                 var.extract_code_at_start[0])
                         elif isinstance(var, vs.ScalarVar):
@@ -1356,6 +1360,7 @@ class GuardTracker:
                                extract_code_at_start=new_store_pos)
                 ]
             })
+            return
         if func == super:
             obj = self.state.initial_args[0]
             name = self.frame.f_code.co_varnames[0]
@@ -1366,6 +1371,10 @@ class GuardTracker:
                         obj, True, self.state.objects.helper_functions,
                         self.state.fx_graph, [pos])
                     self.state.add_object(var, obj)
+            return
+        # a series of classes and functions defined by warnings 
+        if get_root_module(func) in ('_warnings', 'warnings'):
+            return
         if is_user_defined_func(func) or isinstance(func, nn.Sequential):
             if inspect.isclass(func):
                 class_define_new = get_method_defined_class(func, '__new__')
@@ -1687,6 +1696,12 @@ class GuardTracker:
                 self.state.add_object(var, obj)
             else:
                 var = self.state.objects.get(obj)
+                # remove pos loaded from function closure
+                if len(var.extract_code_at_start) > 0:
+                    old_pos = var.extract_code_at_start[0]
+                    if isinstance(old_pos, StoreInAttr) and isinstance(old_pos.self_pos, StoreInFreeVar):
+                        var.clear_extract_code_at_start()
+                        var.need_guard_check = True
                 if var.prev is None:
                     var.add_extract_code_at_start(pos)
 
@@ -1751,12 +1766,11 @@ class GuardTracker:
 
         if inst.argval in obj_var.modified_attrs:
             return
+
+        need_guard_check = obj_var.need_guard_check
         if isinstance(obj, torch.Tensor) and inst.argval == 'data':
             node: Optional[torch.fx.Node] = obj_var.as_fx_node()
-        else:
-            node = None
-        need_guard_check = obj_var.need_guard_check
-        if config.get_config('dynshape') and isinstance(
+        elif config.get_config('dynshape') and isinstance(
                 obj, torch.Tensor) and inst.argval == 'shape':
             node = self.state.fx_graph.create_node("call_method", "size",
                                                    (obj_var.as_fx_node(),), {})
