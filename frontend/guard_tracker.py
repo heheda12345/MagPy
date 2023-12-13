@@ -1378,13 +1378,14 @@ class GuardTracker:
         if is_user_defined_func(func) or isinstance(func, nn.Sequential):
             if inspect.isclass(func):
                 class_define_new = get_method_defined_class(func, '__new__')
-                if class_define_new not in (object, torch._C._FunctionBase):
+                if class_define_new not in (object, torch._C._FunctionBase, dict):
                     raise NotImplementedError("user defined __new__",
                                               class_define_new)
                 class_define_init = get_method_defined_class(func, '__init__')
                 if class_define_init in (
                         torch.autograd.function.InplaceFunction,
-                        torch.autograd.function.Function, object):
+                        torch.autograd.function.Function, object, dict,
+                        torch.nn.modules.module.Module):
                     self.state.set_partial_var({
                         -1: [
                             PartialVar(node=None,
@@ -1397,6 +1398,20 @@ class GuardTracker:
                         ]
                     })
                     return
+            if hasattr(func, "__func__") and func.__func__ == torch.nn.Sequential.parameters:
+                method_var = self.state.objects.get(func)
+                pos = method_var.extract_code_at_start[0]
+                assert isinstance(pos, StoreInAttr)
+                self.state.set_partial_var({
+                    -1: [
+                        PartialVar(node=None,
+                                    need_guard_check=False,
+                                    extract_code_at_start=[ExtractFromMethod(
+                                        pos.self_pos, id(method_var.obj), pos.attr_name
+                                    )])
+                    ]
+                })
+                return
             print("run into user defined function", func)
             stack_objs = get_all_objects_in_stack(self.frame)
             self.state.mark_calling_func(func)
@@ -1769,7 +1784,14 @@ class GuardTracker:
 
         need_guard_check = obj_var.need_guard_check
         if isinstance(obj, torch.Tensor) and inst.argval == 'data':
-            node: Optional[torch.fx.Node] = obj_var.as_fx_node()
+            if isinstance(obj_var, vs.TorchParamVar):
+                if obj not in self.state.subparam_paths:
+                    self.state.add_subparam(obj)
+                node: Optional[torch.fx.Node] = self.state.fx_graph.create_node("get_attr",
+                                                 self.state.subparam_paths[obj],
+                                                 (), {})
+            else:
+                node = obj_var.as_fx_node()
         elif config.get_config('dynshape') and isinstance(
                 obj, torch.Tensor) and inst.argval == 'shape':
             node = self.state.fx_graph.create_node("call_method", "size",
@@ -1897,9 +1919,13 @@ class GuardTracker:
         self.fetch_function_parameters(self_obj)
         self.fetch_function_parameters(value)
         value_var = self.state.objects.get(value)
+        self_obj_var = self.state.objects.get(self_obj)
+        store_pos: list[StorePos] = []
+        if isinstance(self_obj, torch.Tensor):
+            store_pos = [pos for pos in self_obj_var.extract_code_at_start]
         new_self_var = vs.make_var_from_value(
             self_obj, False, self.state.objects.helper_functions,
-            self.state.fx_graph, [])
+            self.state.fx_graph, store_pos)
         new_self_var.add_modified_attr(inst.argval, value_var)
         self.state.objects.update_by_id(new_self_var, id(self_obj))
 

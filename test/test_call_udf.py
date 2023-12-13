@@ -365,3 +365,17 @@ def test_guard_attr(caplog):
     expect = func_attr(para)
     run_and_check(compiled, [MISS, MISS, MISS], 1, caplog, expect, para)
     run_and_check(compiled, [HIT], 1, caplog, expect, para)
+
+
+class parent_func_call(torch.nn.Sequential):
+    
+    def forward(self):
+        return self.parameters()
+
+def test_parent_func_call(caplog):
+    reset()
+    instance = parent_func_call()
+    expect = instance()
+    compiled = compile(instance)
+    run_and_check(compiled, [MISS], 1, caplog, expect)
+    run_and_check(compiled, [HIT], 1, caplog, expect)
