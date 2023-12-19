@@ -59,3 +59,36 @@ class ForLoopInfo(ControlFlowInfo):
         super().__init__(start_pc, end_pc)
         self.num_iter = num_iter
         self.cur_iter = 0
+
+
+class TraceError(Exception):
+    pass
+
+
+def recover() -> None:  # an empty function, handled in tracer
+    pass
+
+
+def break_at_callsite() -> None:  # NOTE: unimplemented
+    pass
+
+
+def fake_branch_call0(*_args: Any, **_kwargs: Any) -> None:
+    pass
+
+
+def fake_branch_call1(*_args: Any, **_kwargs: Any) -> None:
+    pass
+
+
+def if_stmt(cond, if_true, if_false):
+    if cond:
+        return if_true()
+    else:
+        return if_false()
+    # try:
+    #     if_false()
+    # except Exception as e:
+    #     break_at_callsite()
+    # recover()
+    # return if_true()

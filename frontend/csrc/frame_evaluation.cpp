@@ -110,19 +110,18 @@ inline static PyObject *eval_custom_code(PyThreadState *tstate,
                                          PyCodeObject *code, PyObject *code_map,
                                          int throw_flag, bool trace_bytecode,
                                          PyObject *trace_func) {
-    Py_ssize_t ncells = 0;
-    Py_ssize_t nfrees = 0;
     Py_ssize_t nlocals_new = code->co_nlocals;
     Py_ssize_t nlocals_old = frame->f_code->co_nlocals;
 
-    ncells = PyTuple_GET_SIZE(code->co_cellvars);
-    nfrees = PyTuple_GET_SIZE(code->co_freevars);
+    Py_ssize_t ncells_new = PyTuple_GET_SIZE(code->co_cellvars);
+    Py_ssize_t ncells_old = PyTuple_GET_SIZE(frame->f_code->co_cellvars);
+    Py_ssize_t nfrees = PyTuple_GET_SIZE(code->co_freevars);
 
     NULL_CHECK(tstate);
     NULL_CHECK(frame);
     NULL_CHECK(code);
-    CHECK(nlocals_new >= nlocals_old);
-    CHECK(ncells == PyTuple_GET_SIZE(frame->f_code->co_cellvars));
+    // CHECK(nlocals_new >= nlocals_old);
+    CHECK(ncells_new >= ncells_old);
     CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
 
     PyFrameObject *shadow = PyFrame_New(tstate, code, frame->f_globals, NULL);
@@ -137,14 +136,24 @@ inline static PyObject *eval_custom_code(PyThreadState *tstate,
     PyObject **fastlocals_old = frame->f_localsplus;
     PyObject **fastlocals_new = shadow->f_localsplus;
 
-    for (Py_ssize_t i = 0; i < nlocals_old; i++) {
+    for (Py_ssize_t i = 0; i < std::min(nlocals_old, nlocals_new); i++) {
         Py_XINCREF(fastlocals_old[i]);
         fastlocals_new[i] = fastlocals_old[i];
     }
 
-    for (Py_ssize_t i = 0; i < ncells + nfrees; i++) {
+    for (Py_ssize_t i = 0; i < ncells_old; i++) {
         Py_XINCREF(fastlocals_old[nlocals_old + i]);
         fastlocals_new[nlocals_new + i] = fastlocals_old[nlocals_old + i];
+    }
+
+    for (Py_ssize_t i = ncells_old; i < ncells_new; i++) {
+        fastlocals_new[nlocals_new + i] = PyCell_New(NULL);
+    }
+
+    for (Py_ssize_t i = 0; i < nfrees; i++) {
+        Py_XINCREF(fastlocals_old[nlocals_old + ncells_old + i]);
+        fastlocals_new[nlocals_new + ncells_new + i] =
+            fastlocals_old[nlocals_old + ncells_old + i];
     }
 
     frame_id_to_code_map[(size_t)shadow] = code_map;

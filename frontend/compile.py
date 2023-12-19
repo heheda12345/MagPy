@@ -12,6 +12,7 @@ from .tracer import enable_trace, disable_trace, get_trace_func, get_process_fra
 from .cache import enable_cache
 from .utils import null_object
 from .fx_graph import set_frame_root
+from .control_flow import if_stmt
 
 logging.basicConfig(
     format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s',
@@ -61,6 +62,7 @@ def compile(f: Callable[..., Any]) -> Callable[..., Any]:
         setattr(builtins, "guard_match", guard_match)
         setattr(builtins, "enable_trace", enable_trace)
         setattr(builtins, "disable_trace", disable_trace)
+        setattr(builtins, "_frontend_compile_if_stmt", if_stmt)
 
     def _fn(*args: Any, **kwargs: Any) -> Any:
         pre, post = get_process_frame(f, False)
