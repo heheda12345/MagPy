@@ -78,4 +78,23 @@ PyObject *parse_mapobject(PyObject *self, PyObject *args) {
     return PyTuple_Pack(2, mobj->iters, mobj->func);
 }
 
+PyObject *parse_cell(PyObject *self, PyObject *args) {
+    PyObject *cell;
+    if (!PyArg_ParseTuple(args, "O", &cell)) {
+        return NULL;
+    }
+    if (Py_TYPE(cell) != &PyCell_Type) {
+        PyErr_SetString(PyExc_TypeError, "Expected cell");
+        return NULL;
+    }
+    PyCellObject *cobj = (PyCellObject *)cell;
+    if (cobj->ob_ref == NULL) {
+        PyObject *null_obj = NullObjectSingleton::getInstance().getNullObject();
+        Py_INCREF(null_obj);
+        return null_obj;
+    }
+    Py_INCREF(cobj->ob_ref);
+    return cobj->ob_ref;
+}
+
 } // namespace frontend_csrc

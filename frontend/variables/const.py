@@ -9,6 +9,7 @@ from ..pycode_writer import get_float_string
 from ..fx_graph import NodeArgs, FxGraph
 from ..utils import NullObject, null_object
 from ..store_pos import StorePos, StoreInFreeVar, StoreInAttr
+from ..c_api import parse_cell
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
     from ..object_table import ObjectTable
@@ -203,7 +204,7 @@ class FunctionVar(Variable):
             if func.__closure__ is not None:
                 assert len(func.__code__.co_freevars) == len(func.__closure__)
                 for i, x in enumerate(func.__closure__):
-                    if x.cell_contents != func:
+                    if parse_cell(x) != func:
                         cell_var = helper_functions.get_or_make_var(
                             x, need_guard_check, None, [StoreInFreeVar(i)])
                         self.closure_vars.append(cell_var)

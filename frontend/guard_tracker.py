@@ -16,7 +16,7 @@ import torch.fx.immutable_collections as fx_immutable
 import numpy as np
 from . import config
 from .code import ProcessedCode
-from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method, get_from_freevars, set_value_stack_from_top
+from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method, get_from_freevars, set_value_stack_from_top, parse_cell
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
 from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromNew, UnknownPosInCaller
@@ -1793,8 +1793,10 @@ class GuardTracker:
         if inst.argval not in self.state.stored_locals:
             obj = get_from_freevars(self.frame, inst.arg)
             pos = StoreInFreeVar(inst.arg)
-            need_guard_check = not self.state.objects.contains(
-                obj.cell_contents)
+            cell_obj = parse_cell(obj)
+            need_guard_check = not isinstance(
+                cell_obj,
+                NullObject) and not self.state.objects.contains(cell_obj)
             var = vs.make_var_from_value(obj, need_guard_check,
                                          self.state.objects.helper_functions,
                                          self.state.fx_graph, [pos])

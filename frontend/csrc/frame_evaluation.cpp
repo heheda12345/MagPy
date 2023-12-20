@@ -565,7 +565,9 @@ static PyMethodDef _methods[] = {
     {"make_rangeiterobject", frontend_csrc::make_rangeiterobject, METH_VARARGS,
      NULL},
     {"parse_mapobject", frontend_csrc::parse_mapobject, METH_VARARGS, NULL},
-    {NULL, NULL, 0, NULL}};
+    {"parse_cell", frontend_csrc::parse_cell, METH_VARARGS, NULL},
+    {NULL, NULL, 0, NULL},
+};
 
 static struct PyModuleDef _module = {
     PyModuleDef_HEAD_INIT, "frontend.c_api",

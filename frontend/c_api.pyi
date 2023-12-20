@@ -1,5 +1,5 @@
 from typing import Any, Callable, Dict, Optional, Tuple, TYPE_CHECKING, Iterable
-from types import FrameType
+from types import FrameType, CellType
 
 if TYPE_CHECKING:
     from .code import ProcessedCode
@@ -96,4 +96,7 @@ def get_from_freevars(frame: FrameType, idx: int) -> Any:
 
 
 def parse_mapobject(obj: Any) -> Tuple[Iterable[Any], Callable[..., Any]]:
+    pass
+
+def parse_cell(cell: CellType) -> Any:
     pass

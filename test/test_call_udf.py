@@ -411,3 +411,24 @@ def test_guard_attr(caplog):
     expect = func_attr(para)
     run_and_check(compiled, [MISS, MISS, MISS], 1, caplog, expect, para)
     run_and_check(compiled, [HIT], 1, caplog, expect, para)
+
+
+def f(b):
+
+    def g():
+        return a + 1
+
+    a = b + 1
+    return g()
+
+
+def test_empty_cell(caplog):
+    reset()
+    compiled = compile(f)
+    expect = f(1)
+    run_and_check(compiled, [MISS, MISS], 1, caplog, expect, 1)
+    run_and_check(compiled, [HIT], 1, caplog, expect, 1)
+    x = torch.rand((3, 3))
+    expect = f(x)
+    run_and_check(compiled, [MISS, MISS], 2, caplog, expect, x)
+    run_and_check(compiled, [HIT], 2, caplog, expect, x)

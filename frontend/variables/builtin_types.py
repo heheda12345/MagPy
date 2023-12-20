@@ -3,7 +3,7 @@ from types import CellType
 from .base import Variable, HelperFunctions
 from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos, StoreInAttr, StoreInFreeVar
-from ..c_api import parse_mapproxyobject
+from ..c_api import parse_mapproxyobject, parse_cell
 import torch
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -19,7 +19,7 @@ class CellVar(Variable):
                  extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, value, extract_code_at_start)
         assert len(extract_code_at_start) > 0
-        sub_obj = value.cell_contents
+        sub_obj = parse_cell(value)
         new_extract: list[StorePos] = [
             StoreInAttr(pos, id(value), "cell_contents")
             for pos in self.extract_code_at_start
