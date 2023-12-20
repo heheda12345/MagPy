@@ -66,12 +66,13 @@ class CellVar(Variable):
     def add_subvars_to_table(self, table: 'ObjectTable') -> None:
         old_var = table.get_or_none_by_id(self.sub_id)
         if old_var is not None:
-            new_extract: list[StorePos] = [
-                StoreInAttr(pos, self.sub_id, "cell_contents")
-                for pos in self.extract_code_at_start
-            ]
-            old_var.extract_code_at_start.extend(new_extract)
-            old_var.need_guard_check |= self.need_guard_check
+            pass
+            # new_extract: list[StorePos] = [
+            #     StoreInAttr(pos, self.sub_id, "cell_contents")
+            #     for pos in self.extract_code_at_start
+            # ]
+            # old_var.extract_code_at_start.extend(new_extract)
+            # old_var.need_guard_check |= self.need_guard_check
         else:
             table.add_by_id(self.sub_var, self.sub_id)
             self.sub_var.add_subvars_to_table(table)

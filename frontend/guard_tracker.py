@@ -1769,16 +1769,14 @@ class GuardTracker:
 
         if inst.argval in obj_var.modified_attrs:
             return
-        if isinstance(obj, torch.Tensor) and inst.argval == 'data':
-            node: Optional[torch.fx.Node] = obj_var.as_fx_node()
-        else:
-            node = None
         need_guard_check = obj_var.need_guard_check
         if config.get_config('dynshape') and isinstance(
                 obj, torch.Tensor) and inst.argval == 'shape':
             node = self.state.fx_graph.create_node("call_method", "size",
                                                    (obj_var.as_fx_node(),), {})
             need_guard_check = False
+        elif isinstance(obj, torch.Tensor) and inst.argval == 'data':
+            node: Optional[torch.fx.Node] = obj_var.as_fx_node()
         else:
             node = None
         partial: list[Optional[PartialVar]] = [

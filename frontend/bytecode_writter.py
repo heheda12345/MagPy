@@ -472,33 +472,44 @@ def rewrite_branch(original_instructions: list[Instruction],
     create_func_insts = []
     new_local_names = []
     local_fn_names = []
-    need_deref_names = []
+    need_deref_names: dict[str, str] = {}  # original name -> __local__xxxx
     for i, branch in enumerate(branches):
         binsts = list(instructions[x] for x in branch if x != end_pc)
         for inst in binsts:
             if inst.target is not None and inst.opname not in jump_only_opnames:
                 raise NotImplementedError
-        non_local_vars: set[str] = set()
+        non_local_vars: dict[str, str] = {}
         local_vars: set[str] = set()
         for inst in binsts:
             if inst.opname == "LOAD_FAST" and inst.argval not in local_vars:
-                non_local_vars.add(inst.argval)
+                if inst.argval not in non_local_vars:
+                    if inst.argval not in need_deref_names:
+                        need_deref_names[inst.argval] = new_name('__local__' +
+                                                                 inst.argval)
+                    non_local_vars[inst.argval] = need_deref_names[inst.argval]
             if inst.opname == "STORE_FAST":
                 if inst.argval in live_vars:
-                    non_local_vars.add(inst.argval)
+                    if inst.argval not in non_local_vars:
+                        if inst.argval not in need_deref_names:
+                            need_deref_names[inst.argval] = new_name(
+                                '__local__' + inst.argval)
+                        non_local_vars[inst.argval] = need_deref_names[
+                            inst.argval]
                 else:
                     local_vars.add(inst.argval)
         local_list = tuple(local_vars)
-        non_local_list = tuple(non_local_vars)
-        need_deref_names.extend(non_local_list)
+        non_local_list = tuple(non_local_vars.values())
+        # need_deref_names.update(non_local_vars)
         for inst in binsts:
             if inst.opname == "LOAD_FAST" and inst.argval in non_local_vars:
                 inst.opname = "LOAD_DEREF"
                 inst.opcode = dis.opmap["LOAD_DEREF"]
+                inst.argval = non_local_vars[inst.argval]
                 inst.arg = non_local_list.index(inst.argval)
             if inst.opname == "STORE_FAST" and inst.argval in non_local_vars:
                 inst.opname = "STORE_DEREF"
                 inst.opcode = dis.opmap["STORE_DEREF"]
+                inst.argval = non_local_vars[inst.argval]
                 inst.arg = non_local_list.index(inst.argval)
         if binsts[-1].opname in jump_only_opnames and binsts[
                 -1].target == instructions[end_pc]:
@@ -571,27 +582,26 @@ def rewrite_branch(original_instructions: list[Instruction],
     instructions = [instructions[i] for i in live_pcs]
     keys = get_code_keys()
     code_options = {k: getattr(original_code, k) for k in keys}
-    make_cell_arg_insts = []
-    for name in need_deref_names:
-        argnames = code_options["co_varnames"][:code_options["co_argcount"]]
-        if name in argnames:
-            idx = code_options["co_varnames"].index(name)
-            new_local_name = new_name("__local__" + name)
-            code_options["co_varnames"] = code_options["co_varnames"][:idx] + (
-                new_local_name,) + code_options["co_varnames"][idx + 1:]
-            make_cell_arg_insts.extend(
-                [ci("LOAD_FAST", new_local_name),
-                 ci("STORE_DEREF", name)])
-    instructions = make_cell_arg_insts + instructions
     for inst in instructions:
         if inst.opname == "LOAD_FAST" and inst.argval in need_deref_names:
             inst.opname = "LOAD_DEREF"
             inst.opcode = dis.opmap["LOAD_DEREF"]
+            inst.argval = need_deref_names[inst.argval]
         elif inst.opname == "STORE_FAST" and inst.argval in need_deref_names:
             inst.opname = "STORE_DEREF"
             inst.opcode = dis.opmap["STORE_DEREF"]
-            # TODO: inst.arg
+            inst.argval = need_deref_names[inst.argval]
+    make_cell_arg_insts = []
+    for name_old in code_options["co_varnames"][:code_options["co_argcount"]]:
+        if name_old in need_deref_names:
+            name_new = need_deref_names[name_old]
+            make_cell_arg_insts.extend(
+                [ci("LOAD_FAST", name_old),
+                 ci("STORE_DEREF", name_new)])
+
+    instructions = make_cell_arg_insts + instructions
     fix_instructions_for_assemble(instructions, code_options)
+    # exit(0)
     return instructions, code_options
 
 
@@ -603,23 +613,9 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int,
     if need_branch_rewrite(frame_id):
         original_instructions, code_options = rewrite_branch(
             original_instructions, code, get_branch_rewrite_pcs(frame_id))
-        instructions = copy.deepcopy(original_instructions)
-        virtualize_jumps(instructions)
-        for original_inst, inst in zip(original_instructions, instructions):
-            inst.original_inst = original_inst
-        instructions[0].is_start = True
-        in_trace_insts = []
-        next_original_pc: list[tuple[Instruction, Instruction]] = []
-        print("guarded code")
-        print(format_insts(instructions))
-        print("code_options")
-        for k, v in code_options.items():
-            print(k, v)
-        code_map = generate_code_map(original_instructions, instructions,
-                                     in_trace_insts, next_original_pc)
-        new_code = assemble_instructions(instructions, code_options)[1]
-        return new_code, code_map
-
+    else:
+        keys = get_code_keys()
+        code_options = {k: getattr(code, k) for k in keys}
     instructions = copy.deepcopy(original_instructions)
     virtualize_jumps(instructions)
     for original_inst, inst in zip(original_instructions, instructions):
@@ -684,8 +680,6 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int,
         in_trace_insts.extend(disable_trace_at_start[:-1])
         instructions = disable_trace_at_start + instructions
     instructions.extend(final_insts)
-    keys = get_code_keys()
-    code_options = {k: getattr(code, k) for k in keys}
     fix_instructions_for_assemble(instructions, code_options)
     # print("guarded code")
     # print(format_insts(instructions))
