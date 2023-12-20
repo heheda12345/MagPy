@@ -1,4 +1,6 @@
 #pragma once
+#include <map>
+#include <string>
 #include <vector>
 
 struct _object;
@@ -28,9 +30,12 @@ struct Cache {
     PyObject *check_fn;
     PyObject *graph_fn;
     Cache *next;
+    bool move_to_start;
 };
 
-typedef std::vector<Cache *> FrameCache;
+typedef std::pair<std::vector<Cache *>,
+                  std::map<std::string, std::vector<std::string>>>
+    FrameCache;
 typedef std::vector<FrameCache> ProgramCache;
 
 // When not understanding an opcode, mark it as {-1, 0, stack_effect}

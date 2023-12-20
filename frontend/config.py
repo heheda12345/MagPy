@@ -3,6 +3,7 @@ from typing import Callable, Any, Union
 CONFIG = {
     "backend": "inductor",  # Union[str, Callable[..., Any]]
     "debug": True,
+    "miss_threshold": 3,
 }
 
 

@@ -31,6 +31,8 @@ def guard_match(frame_id: int, callsite_id: int,
                 locals: Dict[str, Any]) -> Optional[Callable[..., Any]]:
     pass
 
+def get_miss_locals(frame_id: int) -> list[str]:
+    pass
 
 def finalize() -> None:
     pass

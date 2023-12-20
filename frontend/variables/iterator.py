@@ -68,9 +68,9 @@ class RangeIterVar(Variable):
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
         codegen.add_import("frontend.c_api")
-        codegen.add_check(
-            f"frontend.c_api.parse_rangeiterobject({pos}) == ({self.index}, {self.start}, {self.step}, {self.len})"
-        )
+        codegen.add_check((
+            f"frontend.c_api.parse_rangeiterobject({pos}) == ({self.index}, {self.start}, {self.step}, {self.len})",
+            pos))
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,

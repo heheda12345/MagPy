@@ -31,15 +31,17 @@ class ScalarVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_check(f"isinstance({pos}, {type(self.obj).__name__})")
+        codegen.add_check(
+            (f"isinstance({pos}, {type(self.obj).__name__})", pos))
         if self.value_fix:
             if type(self.obj) == float:
-                codegen.add_check(f"{pos} == {get_float_string(self.obj)}")
+                codegen.add_check(
+                    (f"{pos} == {get_float_string(self.obj)}", pos))
                 codegen.add_import("struct")
             elif isinstance(self.obj, str):
-                codegen.add_check(f"{pos} == '{self.obj}'")
+                codegen.add_check((f"{pos} == '{self.obj}'", pos))
             else:
-                codegen.add_check(f"{pos} == {self.obj}")
+                codegen.add_check((f"{pos} == {self.obj}", pos))
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
@@ -117,16 +119,17 @@ class NumpyScalarVar(Variable):
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
         codegen.add_check(
-            f"isinstance({pos}.item(), {type(self.obj).__name__})")
+            (f"isinstance({pos}.item(), {type(self.obj).__name__})", pos))
         if self.value_fix:
             item = self.obj.item()
             if type(item) == float:
-                codegen.add_check(f"{pos}.item() == {get_float_string(item)}")
+                codegen.add_check(
+                    (f"{pos}.item() == {get_float_string(item)}", pos))
                 codegen.add_import("struct")
             elif isinstance(item, str):
-                codegen.add_check(f"{pos}.item() == '{item}'")
+                codegen.add_check((f"{pos}.item() == '{item}'", pos))
             else:
-                codegen.add_check(f"{pos}.item() == {item}")
+                codegen.add_check((f"{pos}.item() == {item}", pos))
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
