@@ -322,7 +322,7 @@ class FxGraph:
                     source == symbol_to_source[expr][0]):
                 continue
             sexpr = ShapeGuardPrinter(symbol_to_source).doprint(expr)
-            codegen.add_check(f"{source} == {sexpr}")
+            codegen.add_check((f"{source} == {sexpr}", source))
 
         for g, tb in self.fake_mode.shape_env.guards:
             print("guard", g)
@@ -341,8 +341,8 @@ class FxGraph:
 
         for sources in symbol_to_source.values():
             assert sources
-            codegen.add_check(f"{sources[0]} != 0")
-            codegen.add_check(f"{sources[0]} != 1")
+            codegen.add_check((f"{sources[0]} != 0", sources[0]))
+            codegen.add_check((f"{sources[0]} != 1", sources[0]))
 
 
 frame_root: dict[int, torch.nn.Module] = {}

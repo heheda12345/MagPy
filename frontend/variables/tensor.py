@@ -120,9 +120,10 @@ class TensorVar(Variable):
         name_in_codegen = codegen.add_obj(self)
         if config.get_config("dynshape"):
             codegen.add_check(
-                f"{name_in_codegen}.tensor_guard_check_dyn({pos})")
+                (f"{name_in_codegen}.tensor_guard_check_dyn({pos})", pos))
         else:
-            codegen.add_check((f"{name_in_codegen}.tensor_guard_check({pos})", pos))
+            codegen.add_check(
+                (f"{name_in_codegen}.tensor_guard_check({pos})", pos))
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,

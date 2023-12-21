@@ -141,7 +141,7 @@ class EllipsisVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_id_check(f"id({pos}) == {id(self.obj)}", self.obj)
+        codegen.add_id_check((f"id({pos}) == {id(self.obj)}", pos), self.obj)
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
