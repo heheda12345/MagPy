@@ -368,9 +368,10 @@ def test_guard_attr(caplog):
 
 
 class parent_func_call(torch.nn.Sequential):
-    
+
     def forward(self):
         return self.parameters()
+
 
 def test_parent_func_call(caplog):
     reset()

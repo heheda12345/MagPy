@@ -17,7 +17,7 @@ class FnCodegen:
     imports: set[str]
     key: int
     objs: dict[str, Any]  # name -> obj
-    statements: list[str]
+    statements: set[str]
 
     def __init__(self, key: int) -> None:
         self.key = key
@@ -52,7 +52,7 @@ class FnCodegen:
 
     def add_stmt(self, stmt: str) -> None:
         self.writer.wl(stmt)
-    
+
     def add_statements(self, stmt: str) -> None:
         self.statements.add(stmt)
 

@@ -5,7 +5,7 @@ import numpy as np
 from collections import OrderedDict
 from .base import Variable, HelperFunctions
 from .scalar import ScalarVar, NumpyScalarVar
-from .tensor import TensorVar, TorchParamVar, TorchSizeVar, TorchDtypeVar, TorchDeviceVar
+from .tensor import TensorVar, TorchParamVar, TorchSizeVar, TorchDtypeVar, TorchDeviceVar, TorchLayoutVar
 from .torch_module import TorchModuleVar, TorchSequentialVar, TorchModuleListVar
 from .any_ import AnyVar
 from .const import NullVar, NoneVar, SliceVar, ModuleVar, FunctionVar, RangeVar, CodeVar, EllipsisVar
@@ -35,6 +35,7 @@ ty2var: dict[type[Any], type[Variable]] = {
     torch.Size: TorchSizeVar,
     torch.dtype: TorchDtypeVar,
     torch.device: TorchDeviceVar,
+    torch.layout: TorchLayoutVar,
     dict: DictVar,
     CodeType: CodeVar,
     OrderedDict: OrderedDictVar,

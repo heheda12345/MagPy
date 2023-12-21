@@ -126,16 +126,18 @@ torch_inplace_funcs = {
 
 
 def get_root_module(func: Callable[..., Any]) -> str:
+    import numpy as np
     if hasattr(func, '__objclass__'):
         if func.__objclass__ == torch._C._TensorBase:
             return 'torch'
         elif func.__objclass__ in (list, tuple, set, dict, str):
             return 'builtins'
+        elif func.__objclass__ == np.ndarray:
+            return 'numpy'
 
     if hasattr(func, '__self__') and isinstance(func.__self__, torch.Tensor):
         return 'torch'
 
-    import numpy as np
     if hasattr(func, '__class__') and func.__class__ == np.ufunc:
         return 'numpy'
 
@@ -170,8 +172,10 @@ def get_method_defined_class(cls: type[Any],
 
 def is_user_defined_func(func: Callable[..., Any]) -> bool:
     # print([(x, getattr(func, x)) for x in dir(func)])
+    import numpy
     if hasattr(func, '__objclass__') and func.__objclass__ in (
-            torch._C._TensorBase, dict, str, collections.OrderedDict):
+            torch._C._TensorBase, dict, str, collections.OrderedDict,
+            numpy.ndarray):
         return False
 
     # NOTE: random should be called as a UDF, not handled
@@ -183,11 +187,13 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
         elif isinstance(func.__self__, torch.nn.Sequential):
             return True
 
-    if hasattr(func, '__name__') and func.__name__ == '<genexpr>':
+    if hasattr(func, '__name__') and func.__name__ in ('<genexpr>', 'numel'):
         return False
     if hasattr(func, '__name__') and func.__name__ == '_conv_forward':
         return True
 
+    if hasattr(func, '__name__') and func.__name__ == 'forward':
+        return True
     if hasattr(func, '__name__') and func.__name__ == 'apply':
         assert hasattr(func, '__self__')
         return is_user_defined_func(func.__self__)

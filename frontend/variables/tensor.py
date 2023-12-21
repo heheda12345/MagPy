@@ -137,7 +137,8 @@ class TorchParamVar(Variable):
     def __init__(self, param: torch.nn.Parameter, need_guard_check: bool,
                  extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, param, extract_code_at_start)
-        assert len(extract_code_at_start) > 0
+        if need_guard_check:
+            assert len(extract_code_at_start) > 0
 
     @classmethod
     def from_value(
@@ -241,3 +242,37 @@ class TorchDeviceVar(Variable):
 
     def as_fx_node(self) -> "NodeArgs":
         return self.device
+
+
+class TorchLayoutVar(Variable):
+    layout: torch.layout
+
+    def __init__(self,
+                 layout: torch.layout,
+                 need_guard_check: bool,
+                 extract_code_at_start: list[StorePos] = []) -> None:
+        super().__init__(need_guard_check, layout, extract_code_at_start)
+        self.layout = layout
+
+    @classmethod
+    def from_value(
+            cls,
+            value: torch.layout,
+            need_guard_check: bool,
+            _helper_functions: HelperFunctions,
+            _fx_graph: Optional[FxGraph] = None,
+            extract_code_at_start: list[StorePos] = []) -> "TorchLayoutVar":
+        return cls(value, need_guard_check, extract_code_at_start)
+
+    def make_guard_inner(self, codegen: "GuardFnCodegen",
+                         pos: StorePos) -> None:
+        codegen.add_check(f"{pos} == torch.layout('{self.layout}')")
+
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: "GraphFnCodegen", in_return: bool,
+                          idx: int) -> None:
+        codegen.output(name_in_graph_fn, store_pos, f"{self.layout}", in_return,
+                       idx)
+
+    def as_fx_node(self) -> "NodeArgs":
+        return self.layout
