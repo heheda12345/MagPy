@@ -2,8 +2,13 @@ from dataclasses import dataclass
 from abc import abstractmethod
 from typing import Any, TYPE_CHECKING, Optional, Tuple, Iterable, Callable
 from copy import copy
+
+from frontend.utils import add_force_graph_break
+
+from ..c_api import get_miss_locals
 from ..fx_graph import FxGraph
 from ..store_pos import StorePos, StoreInAttr
+
 if TYPE_CHECKING:
     import torch.fx
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -30,6 +35,13 @@ class Variable:
 
     def __init__(self, need_guard_check: bool, obj: Any,
                  extract_code_at_start: list[StorePos]) -> None:
+        from ..guard_tracker import trackers
+        for i in get_miss_locals(trackers[-1].frame_id):
+            for j in extract_code_at_start:
+                if (i == f"{j}"):
+                    print(i)
+                    print("--------warning--------")
+
         self.need_guard_check = need_guard_check
         self.obj = obj
         self.extract_code_at_start = extract_code_at_start
@@ -114,6 +126,12 @@ class Variable:
         self.extract_code_hashs = set()
 
     def add_extract_code_at_start(self, pos: StorePos) -> None:
+        from ..guard_tracker import trackers
+        for i in get_miss_locals(trackers[-1].frame_id):
+            if i == f"{pos}":
+                print(i)
+                print("--------warning--------")
+
         hash_value = str(pos).__hash__()
         if hash_value not in self.extract_code_hashs:
             self.extract_code_at_start.append(pos)

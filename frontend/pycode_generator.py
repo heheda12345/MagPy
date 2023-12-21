@@ -124,7 +124,7 @@ class GraphFnCodegen(FnCodegen):
 
 
 class GuardFnCodegen(FnCodegen):
-    checks: set[str]
+    checks: set[tuple[str, StorePos]]
     imports: set[str]
     object_refs: list[Any]  # the reference to objects for id check
 
@@ -134,10 +134,10 @@ class GuardFnCodegen(FnCodegen):
         self.imports = set()
         self.object_refs = []
 
-    def add_check(self, check: str) -> None:
+    def add_check(self, check: tuple[str, StorePos]) -> None:
         self.checks.add(check)
 
-    def add_id_check(self, check: str, obj: Any) -> None:
+    def add_id_check(self, check: tuple[str, StorePos], obj: Any) -> None:
         self.add_check(check)
         self.object_refs.append(obj)
 
@@ -157,8 +157,14 @@ class GuardFnCodegen(FnCodegen):
         if len(self.checks) == 0:
             writer.wl(f"ok = True")
         else:
-            writer.wl(
-                f"ok = {' and '.join(map(lambda x: f'({x})', self.checks))}")
+            writer.wl(f"ok = True")
+            writer.wl(f"missed_check = []")
+            for x in self.checks:
+                writer.wl(f"if not ({x[0]}):")
+                writer.block_start()
+                writer.wl(f'''missed_check.append((r"{x[1]}", r"{x[0]}"))''')
+                writer.wl(f"ok = False")
+                writer.block_end()
         if get_config('debug'):
             writer.wl(f"print('ok = ', ok)")
         writer.block_end()
@@ -167,9 +173,9 @@ class GuardFnCodegen(FnCodegen):
         writer.wl(f"print('exception in guard_fn:', e, type(e))")
         writer.wl(f'import traceback')
         writer.wl(f"print(traceback.format_exc())")
-        writer.wl(f"return False")
+        writer.wl(f"return (missed_check, False)")
         writer.block_end()
-        writer.wl(f"return ok")
+        writer.wl(f"return (missed_check, ok)")
         writer.block_end()
         writer.wl(f"return fn")
         writer.block_end()

@@ -44,8 +44,8 @@ class DictVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_check(f"isinstance({pos}, dict)")
-        codegen.add_check(f"len({pos}) == {self.length}")
+        codegen.add_check((f"isinstance({pos}, dict)", pos))
+        codegen.add_check((f"len({pos}) == {self.length}", pos))
         for key, obj in zip(self.value.keys(), self.vars):
             if not isinstance(obj, TensorVar):
                 if isinstance(key, str):
@@ -144,8 +144,8 @@ class OrderedDictVar(DictVar):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_check(f"isinstance({pos}, dict)")
-        codegen.add_check(f"len({pos}) == {self.length}")
+        codegen.add_check((f"isinstance({pos}, dict)", pos))
+        codegen.add_check((f"len({pos}) == {self.length}", pos))
         for key, var in zip(self.value.keys(), self.vars):
             if not isinstance(var, TensorVar):
                 if isinstance(key, str):
