@@ -69,6 +69,10 @@ def set_null_object(obj: Any) -> None:
     pass
 
 
+def set_miss_threshold(obj: Any) -> None:
+    pass
+
+
 def get_next_frame_id() -> int:
     pass
 

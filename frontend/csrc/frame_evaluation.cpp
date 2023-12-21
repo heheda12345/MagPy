@@ -48,6 +48,7 @@ static void ignored(void *obj) {}
 
 frontend_csrc::ProgramCache program_cache;
 static int frame_count = 0;
+static int miss_threshold = 0;
 
 bool need_postprocess = false;
 static std::map<size_t, PyObject *> frame_id_to_code_map;
@@ -166,7 +167,7 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     if (frame_id >= program_cache.size()) {
         CHECK(frame_id == program_cache.size());
         frontend_csrc::FrameCache empty;
-        empty.first.push_back(nullptr);
+        empty.caches.push_back(nullptr);
         program_cache.push_back(empty);
         frame_id_to_need_postprocess_map[frame_id] = false;
     }
@@ -301,6 +302,18 @@ static PyObject *set_null_object(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
+static PyObject *set_miss_threshold(PyObject *self, PyObject *args) {
+    PyObject *obj;
+    if (!PyArg_ParseTuple(args, "O", &obj)) {
+        PRINT_PYERR
+        PyErr_SetString(PyExc_TypeError,
+                        "invalid parameter in set_miss_threshold");
+    }
+    miss_threshold = PyLong_AsLong(obj);
+    Py_INCREF(obj);
+    Py_RETURN_NONE;
+}
+
 static PyObject *get_value_stack_from_top(PyObject *self, PyObject *args) {
     PyFrameObject *frame = NULL;
     int index = 0;
@@ -354,16 +367,16 @@ static PyObject *add_to_cache(PyObject *self, PyObject *args) {
         PyErr_SetString(PyExc_TypeError, "invalid parameter in add_to_cache");
         return NULL;
     }
-    if (callsite_id >= program_cache[frame_id].first.size()) {
-        CHECK(callsite_id == program_cache[frame_id].first.size());
-        program_cache[frame_id].first.push_back(nullptr);
+    if (callsite_id >= program_cache[frame_id].caches.size()) {
+        CHECK(callsite_id == program_cache[frame_id].caches.size());
+        program_cache[frame_id].caches.push_back(nullptr);
     }
     Py_INCREF(check_fn);
     Py_INCREF(graph_fn);
     frontend_csrc::Cache *entry = new frontend_csrc::Cache{
         check_fn, PyTuple_Pack(2, PyLong_FromLong(id_in_callsite), graph_fn),
-        program_cache[frame_id].first[callsite_id], false};
-    program_cache[frame_id].first[callsite_id] = entry;
+        program_cache[frame_id].caches[callsite_id], false};
+    program_cache[frame_id].caches[callsite_id] = entry;
     frame_id_to_need_postprocess_map[frame_id] = true;
     Py_RETURN_NONE;
 }
@@ -381,7 +394,7 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
     int hit_index = 0;
     frontend_csrc::Cache *pre_list = NULL;
     for (frontend_csrc::Cache *entry =
-             program_cache[frame_id].first[callsite_id];
+             program_cache[frame_id].caches[callsite_id];
          entry != NULL; entry = entry->next) {
         PyObject *valid = PyObject_CallOneArg(entry->check_fn, locals);
         PyObject *missed_checks = PyTuple_GetItem(valid, 0);
@@ -391,7 +404,7 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
             tmp_miss.clear();
             if (hit_index > 4) {
                 frontend_csrc::Cache *list_3 = program_cache[frame_id]
-                                                   .first[callsite_id]
+                                                   .caches[callsite_id]
                                                    ->next->next->next;
                 pre_list->next = entry->next;
                 entry->next = list_3->next;
@@ -399,8 +412,8 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
             } else if (hit_index > 0) {
                 if (entry->move_to_start) {
                     pre_list->next = entry->next;
-                    entry->next = program_cache[frame_id].first[callsite_id];
-                    program_cache[frame_id].first[callsite_id] = entry;
+                    entry->next = program_cache[frame_id].caches[callsite_id];
+                    program_cache[frame_id].caches[callsite_id] = entry;
                 }
                 entry->move_to_start = !entry->move_to_start;
             }
@@ -414,7 +427,7 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
             pylog(ss.str());
 #endif
             Py_INCREF(entry->graph_fn);
-            for (auto i : program_cache[frame_id].second) {
+            for (auto i : program_cache[frame_id].miss_locals) {
                 for (auto j : i.second) {
                     std::cout << "local: " << i.first << ", check: " << j
                               << std::endl;
@@ -444,13 +457,13 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
         Py_DECREF(valid);
     }
     for (auto i : tmp_miss) {
-        if (program_cache[frame_id].second.find(i.first) ==
-            program_cache[frame_id].second.end()) {
-            program_cache[frame_id].second.insert({i.first, i.second});
+        if (program_cache[frame_id].miss_locals.find(i.first) ==
+            program_cache[frame_id].miss_locals.end()) {
+            program_cache[frame_id].miss_locals.insert({i.first, i.second});
         } else {
-            program_cache[frame_id].second[i.first].insert(
-                program_cache[frame_id].second[i.first].end(), i.second.begin(),
-                i.second.end());
+            program_cache[frame_id].miss_locals[i.first].insert(
+                program_cache[frame_id].miss_locals[i.first].end(),
+                i.second.begin(), i.second.end());
         }
     }
     tmp_miss.clear();
@@ -460,7 +473,7 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
        << callsite_id << "\033[0m";
     pylog(ss.str());
 #endif
-    for (auto i : program_cache[frame_id].second) {
+    for (auto i : program_cache[frame_id].miss_locals) {
         for (auto j : i.second) {
             std::cout << "local: " << i.first << ", check: " << j << std::endl;
         }
@@ -476,47 +489,9 @@ static PyObject *get_miss_locals(PyObject *self, PyObject *args) {
                         "invalid parameter in get_missed_locals");
         return NULL;
     }
-    std::filesystem::path source_file_path =
-        std::filesystem::absolute(__FILE__);
-    std::filesystem::path directory_path =
-        source_file_path.parent_path().parent_path();
-    int miss_threshold = 0;
-    std::string modulePath = directory_path.string();
-    wchar_t *wchar_modulePath = Py_DecodeLocale(modulePath.c_str(), NULL);
-    PySys_SetPath(wchar_modulePath);
-
-    // get the threshold
-    PyObject *pModule = PyImport_ImportModule("config");
-    if (pModule) {
-        PyObject *pFunc = PyObject_GetAttrString(pModule, "get_config");
-
-        if (pFunc && PyCallable_Check(pFunc)) {
-            std::string argValue = "miss_threshold";
-            PyObject *pArg = PyUnicode_FromString(argValue.c_str());
-            if (pArg != NULL) {
-                PyObject *pValue = PyObject_CallFunction(pFunc, "O", pArg);
-                if (pValue != NULL) {
-                    miss_threshold = PyLong_AsLong(pValue);
-                    Py_DECREF(pValue);
-                } else {
-                    printf("Call failed\n");
-                }
-            } else {
-                printf("Failed to convert argument\n");
-            }
-            Py_DECREF(pArg);
-        } else {
-            printf("Function not found or not callable\n");
-        }
-        Py_DECREF(pFunc);
-    } else {
-        printf("Module not found\n");
-    }
-    Py_XDECREF(pModule);
-    PyMem_RawFree(wchar_modulePath);
 
     std::vector<std::string> missed_locals;
-    for (auto i : program_cache[frame_id].second) {
+    for (auto i : program_cache[frame_id].miss_locals) {
         if (i.second.size() >= miss_threshold) {
             missed_locals.push_back(i.first);
         }
@@ -538,7 +513,7 @@ static PyObject *reset(PyObject *self, PyObject *args) {
     // as we cannot recover the frame_id assigned by _PyCode_GetExtra, we only
     // clear the cache of each frame, and keeps the program_cache vector
     for (frontend_csrc::FrameCache &frame_cache : program_cache) {
-        for (frontend_csrc::Cache *entry : frame_cache.first) {
+        for (frontend_csrc::Cache *entry : frame_cache.caches) {
             if (entry == nullptr) {
                 continue;
             }
@@ -546,9 +521,9 @@ static PyObject *reset(PyObject *self, PyObject *args) {
             Py_DECREF(entry->graph_fn);
             delete entry;
         }
-        frame_cache.first.clear();
-        frame_cache.second.clear();
-        frame_cache.first.push_back(nullptr);
+        frame_cache.caches.clear();
+        frame_cache.miss_locals.clear();
+        frame_cache.caches.push_back(nullptr);
     }
     for (auto frame_id : frame_id_to_need_postprocess_map) {
         frame_id_to_need_postprocess_map[frame_id.first] = false;
@@ -654,6 +629,7 @@ static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame, METH_VARARGS, NULL},
     {"set_skip_files", set_skip_files, METH_VARARGS, NULL},
     {"set_null_object", set_null_object, METH_VARARGS, NULL},
+    {"set_miss_threshold", set_miss_threshold, METH_VARARGS, NULL},
     {"get_value_stack_from_top", get_value_stack_from_top, METH_VARARGS, NULL},
     {"set_value_stack_from_top", set_value_stack_from_top, METH_VARARGS, NULL},
     {"get_value_stack_size", get_value_stack_size, METH_VARARGS, NULL},

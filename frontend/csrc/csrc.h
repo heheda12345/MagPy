@@ -33,9 +33,11 @@ struct Cache {
     bool move_to_start;
 };
 
-typedef std::pair<std::vector<Cache *>,
-                  std::map<std::string, std::vector<std::string>>>
-    FrameCache;
+struct FrameCache {
+    std::vector<Cache *> caches;
+    std::map<std::string, std::vector<std::string>> miss_locals;
+};
+
 typedef std::vector<FrameCache> ProgramCache;
 
 // When not understanding an opcode, mark it as {-1, 0, stack_effect}
