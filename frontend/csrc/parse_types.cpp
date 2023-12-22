@@ -97,4 +97,17 @@ PyObject *parse_cell(PyObject *self, PyObject *args) {
     return cobj->ob_ref;
 }
 
+PyObject *set_cell(PyObject *self, PyObject *args) {
+    PyObject *cell, *value;
+    if (!PyArg_ParseTuple(args, "OO", &cell, &value)) {
+        return NULL;
+    }
+    if (Py_TYPE(cell) != &PyCell_Type) {
+        PyErr_SetString(PyExc_TypeError, "Expected cell");
+        return NULL;
+    }
+    PyCell_SET(cell, value);
+    return Py_None;
+}
+
 } // namespace frontend_csrc

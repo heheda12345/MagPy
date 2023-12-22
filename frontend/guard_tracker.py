@@ -16,7 +16,7 @@ import torch.fx.immutable_collections as fx_immutable
 import numpy as np
 from . import config
 from .code import ProcessedCode
-from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method, get_from_freevars, set_value_stack_from_top, parse_cell
+from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method, get_from_freevars, set_value_stack_from_top, parse_cell, set_local
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
 from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromNew, UnknownPosInCaller
@@ -30,7 +30,7 @@ from .fx_graph import FxGraph, get_frame_root, is_leaf_module, NodeArgs
 from .bytecode_analysis import livevars_analysis, end_of_control_flow
 from .variables.tuple_ import TupleVar
 from .variables.base import Variable
-from .control_flow import ControlFlowInfo, LoopModule, ForLoopInfo, LoopPosMap
+from .control_flow import ControlFlowInfo, LoopModule, ForLoopInfo, LoopPosMap, if_stmt, IfStmtInfo
 from types import ModuleType
 
 MAKE_VAR_FN_TYPE = Callable[[
@@ -86,6 +86,7 @@ class State:
     can_guard: bool
     gen_by_caller: Callable[[Any], bool]
     frame_id: int
+    frame_cf_info: Optional[ControlFlowInfo]
 
     def __init__(self, root: torch.nn.Module,
                  gen_by_caller: Callable[[Any], bool]) -> None:
@@ -119,6 +120,7 @@ class State:
         self.can_guard = True
         self.frame_id = -1
         self.callee_returns = None
+        self.frame_cf_info = None
 
     def update_subpath(self, module: torch.nn.Module, prefix: str) -> None:
 
@@ -315,8 +317,9 @@ class State:
 
     @classmethod
     def from_frame(cls, frame: FrameType, frame_id: int, read_stack: bool,
-                   frame_root: torch.nn.Module,
-                   gen_by_caller: Callable[[Any], bool]) -> 'State':
+                   frame_root: torch.nn.Module, gen_by_caller: Callable[[Any],
+                                                                        bool],
+                   frame_cf_info: Optional[ControlFlowInfo]) -> 'State':
         state = cls(frame_root, gen_by_caller)
         if read_stack:
             state.start_stack_size = get_value_stack_size(frame)
@@ -332,6 +335,7 @@ class State:
             state.initial_args.append(frame.f_locals[var_name])
         state.written = False
         state.frame_id = frame_id
+        state.frame_cf_info = frame_cf_info
         return state
 
     def add_object(self, var: vs.Variable, value: Any) -> None:
@@ -593,7 +597,8 @@ class State:
                             fx_graph,
                             extract_code_at_start,
                         )
-                    callee_var = state.objects.get(obj)
+                    callee_var = state.objects.get(obj,
+                                                   allow_unexist_const=True)
                     for attr_name in callee_var.modified_attrs.keys():
                         attr_obj = getattr(obj, attr_name)
                         attr_var = self.objects.get(attr_obj, False)
@@ -660,6 +665,10 @@ class State:
         merge_call_guard()
         merge_fx_graph()
         merge_output()
+        if isinstance(self.frame_cf_info, IfStmtInfo):
+            if not (hasattr(self.calling_func, '__name__') and
+                    self.calling_func.__name__ == 'recover'):
+                self.frame_cf_info.mark_end(state.stored_locals)
         self.object_refs.extend(state.object_refs)
         if calling_func is not None:
             assert len(stack_objs) == 1
@@ -716,17 +725,38 @@ class GuardTracker:
         self.frame_id = frame_id
         self.frame_root = get_frame_root(frame_id)
         self.caller = caller
-        self.init_state(
-            read_stack=read_stack
-        )  # stack pointer is not initialized at the creation of a stack frame
+        if self.caller is not None and self.caller.state.calling_func == if_stmt:
+            assert cf_info is None
+            cond_as_bool = bool(frame.f_locals['cond'])
+            if_true = frame.f_locals['if_true']
+            if_false = frame.f_locals['if_false']
+            cf_info = IfStmtInfo(0,
+                                 len(self.code.original_insts) - 1, if_true,
+                                 if_false, cond_as_bool)
+            f_locals = self.frame.f_locals
+            if_other_id = self.frame.f_code.co_varnames.index('if_other_branch')
+            if_run_id = self.frame.f_code.co_varnames.index('if_run_branch')
+            # TODO: check the type of cond
+            if cond_as_bool:
+                set_local(self.frame, if_other_id, f_locals['if_false'])
+                set_local(self.frame, if_run_id, f_locals['if_true'])
+            else:
+                set_local(self.frame, if_other_id, f_locals['if_true'])
+                set_local(self.frame, if_run_id, f_locals['if_false'])
         self.cf_info = cf_info
+        self.init_state(
+            read_stack=read_stack, frame_cf_info=cf_info
+        )  # stack pointer is not initialized at the creation of a stack frame
         self.num_breaks = 0
 
-    def init_state(self, read_stack: bool = True) -> None:
+    def init_state(self,
+                   read_stack: bool = True,
+                   frame_cf_info: Optional[ControlFlowInfo] = None) -> None:
         if hasattr(self, "state"):
             self.state.written = False
         self.state = State.from_frame(self.frame, self.frame_id, read_stack,
-                                      self.frame_root, self.gen_by_caller)
+                                      self.frame_root, self.gen_by_caller,
+                                      frame_cf_info)
         self.have_error = False
 
     def record(
@@ -756,7 +786,7 @@ class GuardTracker:
         # call init_state after is_inject_code check to avoid frequent init_state
         if self.have_error:
             try:
-                self.init_state()
+                self.init_state(frame_cf_info=self.cf_info)
             except Exception as e:
                 self.restart(f"Exception during init: {e}")
                 print(traceback.format_exc())
@@ -1383,6 +1413,11 @@ class GuardTracker:
         is_high_order_udf = is_high_order_func_with_udf(func, args, kwargs)
         if is_user_defined_func(func) or isinstance(
                 func, nn.Sequential) or is_high_order_udf:
+            if isinstance(self.cf_info, IfStmtInfo):
+                if hasattr(func, '__name__') and func.__name__ == 'recover':
+                    self.cf_info.recover()
+                else:
+                    self.cf_info.mark_start()
             if inspect.isclass(func) and not is_high_order_udf:
                 class_define_new = get_method_defined_class(func, '__new__')
                 if class_define_new not in (object, torch._C._FunctionBase):

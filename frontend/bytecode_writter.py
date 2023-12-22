@@ -605,6 +605,20 @@ def rewrite_branch(original_instructions: list[Instruction],
     return instructions, code_options
 
 
+def rewrite_if_stmt(
+        original_instructions: list[Instruction], original_code: types.CodeType
+) -> tuple[list[Instruction], dict[str, Any]]:
+    instructions = copy.deepcopy(original_instructions)
+    for inst in instructions:
+        if inst.opname == 'LOAD_GLOBAL' and (inst.argval == 'if_other_branch' or
+                                             inst.argval == 'if_run_branch'):
+            inst.opcode = dis.opmap['LOAD_FAST']
+            inst.opname = 'LOAD_FAST'
+    keys = get_code_keys()
+    code_options = {k: getattr(original_code, k) for k in keys}
+    return instructions, code_options
+
+
 def rewrite_bytecode(code: types.CodeType, frame_id: int,
                      is_callee: bool) -> tuple[types.CodeType, ProcessedCode]:
     if SHOULD_NOT_CALL_REWRITE:
@@ -613,6 +627,10 @@ def rewrite_bytecode(code: types.CodeType, frame_id: int,
     if need_branch_rewrite(frame_id):
         original_instructions, code_options = rewrite_branch(
             original_instructions, code, get_branch_rewrite_pcs(frame_id))
+    elif code.co_filename.endswith(
+            "control_flow.py") and code.co_name == 'if_stmt':
+        original_instructions, code_options = rewrite_if_stmt(
+            original_instructions, code)
     else:
         keys = get_code_keys()
         code_options = {k: getattr(code, k) for k in keys}

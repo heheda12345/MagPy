@@ -519,6 +519,21 @@ static PyObject *get_from_freevars(PyObject *self, PyObject *args) {
     return value;
 }
 
+static PyObject *set_local(PyObject *self, PyObject *args) {
+    PyObject *frame;
+    int index;
+    PyObject *value;
+    if (!PyArg_ParseTuple(args, "OiO", &frame, &index, &value)) {
+        PRINT_PYERR;
+        PyErr_SetString(PyExc_TypeError, "invalid parameter in set_local");
+        return NULL;
+    }
+    PyFrameObject *f = (PyFrameObject *)frame;
+    f->f_localsplus[index] = value;
+    Py_INCREF(value);
+    Py_RETURN_NONE;
+}
+
 static PyObject *mark_need_postprocess(PyObject *self, PyObject *args) {
     int frame_id;
     if (!PyArg_ParseTuple(args, "i", &frame_id)) {
@@ -558,6 +573,7 @@ static PyMethodDef _methods[] = {
     {"get_code_map", get_code_map, METH_VARARGS, NULL},
     {"is_bound_method", is_bound_method, METH_VARARGS, NULL},
     {"get_from_freevars", get_from_freevars, METH_VARARGS, NULL},
+    {"set_local", set_local, METH_VARARGS, NULL},
     {"parse_rangeiterobject", frontend_csrc::parse_rangeiterobject,
      METH_VARARGS, NULL},
     {"parse_mapproxyobject", frontend_csrc::parse_mapproxyobject, METH_VARARGS,
@@ -566,6 +582,7 @@ static PyMethodDef _methods[] = {
      NULL},
     {"parse_mapobject", frontend_csrc::parse_mapobject, METH_VARARGS, NULL},
     {"parse_cell", frontend_csrc::parse_cell, METH_VARARGS, NULL},
+    {"set_cell", frontend_csrc::set_cell, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL},
 };
 

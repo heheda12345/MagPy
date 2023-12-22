@@ -50,5 +50,6 @@ PyObject *make_rangeiterobject(PyObject *self, PyObject *args);
 PyObject *parse_mapproxyobject(PyObject *self, PyObject *args);
 PyObject *parse_mapobject(PyObject *self, PyObject *args);
 PyObject *parse_cell(PyObject *self, PyObject *args);
+PyObject *set_cell(PyObject *self, PyObject *args);
 
 } // namespace frontend_csrc

@@ -100,3 +100,9 @@ def parse_mapobject(obj: Any) -> Tuple[Iterable[Any], Callable[..., Any]]:
 
 def parse_cell(cell: CellType) -> Any:
     pass
+
+def set_cell(cell: CellType, value: Any) -> None:
+    pass
+
+def set_local(frame: FrameType, idx: int, value: Any) -> None:
+    pass
