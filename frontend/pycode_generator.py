@@ -162,6 +162,10 @@ class GuardFnCodegen(FnCodegen):
             for x in self.checks:
                 writer.wl(f"if not ({x[0]}):")
                 writer.block_start()
+                if not hasattr(x[1], '_init_'):
+                    for check in self.checks:
+                        if str(check[1]) in x[0] and len(str(check[1])) > 0:
+                            x = (x[0], check[1])
                 writer.wl(f'''missed_check.append((r"{x[1]}", r"{x[0]}"))''')
                 writer.wl(f"ok = False")
                 writer.block_end()

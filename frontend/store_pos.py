@@ -256,3 +256,7 @@ class UnknownPosInCaller(StorePos):
 
     def __repr__(self) -> str:
         return "@__unknown_pos_in_caller__"
+
+
+class voidpos(StorePos):
+    pass

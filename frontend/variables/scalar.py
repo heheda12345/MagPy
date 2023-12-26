@@ -124,7 +124,7 @@ class NumpyScalarVar(Variable):
                          pos: StorePos) -> None:
         codegen.add_import("numpy")
         codegen.add_check(
-            (f"isinstance({pos}.item(), numpy.{type(self.obj).__name__})", pos))
+            (f"isinstance({pos}, numpy.{type(self.obj).__name__})", pos))
         if self.value_fix:
             item = self.obj.item()
             if type(item) == float:

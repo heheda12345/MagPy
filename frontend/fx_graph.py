@@ -18,7 +18,7 @@ from .no_preload import NO_LD_PRELOAD_CTX
 from . import config
 from .utils import ScalarType
 from .pycode_generator import GuardFnCodegen
-from .store_pos import StorePos, StoreNegate, StoreInAttr, StoreInIndex
+from .store_pos import StorePos, StoreNegate, StoreInAttr, StoreInIndex, voidpos
 from . import variables as vs
 
 BaseArgumentTypes = Union[
@@ -322,8 +322,7 @@ class FxGraph:
                     source == symbol_to_source[expr][0]):
                 continue
             sexpr = ShapeGuardPrinter(symbol_to_source).doprint(expr)
-            codegen.add_check((f"{source} == {sexpr}", source))
-
+            codegen.add_check((f"{source} == {sexpr}", voidpos()))
         for g, tb in self.fake_mode.shape_env.guards:
             print("guard", g)
             if self.fake_mode.shape_env._maybe_evaluate_static(g) is not None:
@@ -334,15 +333,15 @@ class FxGraph:
             print("after simplify", g)
             try:
                 codegen.add_check(
-                    ShapeGuardPrinter(symbol_to_source).doprint(g))
+                    (ShapeGuardPrinter(symbol_to_source).doprint(g), voidpos()))
             except Exception:
                 print(f"Failing guard allocated at: \n{tb}")
                 raise
 
         for sources in symbol_to_source.values():
             assert sources
-            codegen.add_check((f"{sources[0]} != 0", sources[0]))
-            codegen.add_check((f"{sources[0]} != 1", sources[0]))
+            codegen.add_check((f"{sources[0]} != 0", voidpos()))
+            codegen.add_check((f"{sources[0]} != 1", voidpos()))
 
 
 frame_root: dict[int, torch.nn.Module] = {}
