@@ -34,8 +34,8 @@ class ListVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_check(f"isinstance({pos}, list)")
-        codegen.add_check(f"len({pos}) == {self.length}")
+        codegen.add_check((f"isinstance({pos}, list)", pos))
+        codegen.add_check((f"len({pos}) == {self.length}", pos))
         for i, obj in enumerate(self.vars):
             obj.make_guard_inner(codegen, StoreInIndex(pos, id(obj), i))
 
@@ -113,8 +113,8 @@ class NdarrayVar(Variable):
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
         codegen.add_import("numpy")
-        codegen.add_check(f"isinstance({pos}, numpy.ndarray)")
-        codegen.add_check(f"len({pos}) == {self.length}")
+        codegen.add_check((f"isinstance({pos}, numpy.ndarray)", pos))
+        codegen.add_check((f"len({pos}) == {self.length}", pos))
         for i, obj in enumerate(self.vars):
             obj.make_guard_inner(codegen, StoreInIndex(pos, id(obj), i))
 
