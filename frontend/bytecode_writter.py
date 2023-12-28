@@ -453,9 +453,9 @@ def add_name(instructions: list[Instruction], code_options: Dict[str,
 SHOULD_NOT_CALL_REWRITE: bool = False  # for testing
 
 
-def rewrite_branch(original_instructions: list[Instruction],
-                   original_code: types.CodeType,
-                   dynamic_pcs: list[int]) -> list[Instruction]:
+def rewrite_branch(
+        original_instructions: list[Instruction], original_code: types.CodeType,
+        dynamic_pcs: list[int]) -> tuple[list[Instruction], dict[str, Any]]:
     instructions = copy.deepcopy(original_instructions)
     virtualize_jumps(instructions)
     if len(dynamic_pcs) != 1:

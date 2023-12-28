@@ -450,7 +450,7 @@ class State:
                             if self_pos is None:
                                 print(
                                     "\033[34m[warning] cannot find store pos in caller, skip guard check\033[0m",
-                                    var)
+                                    type(var), var.extract_code_at_start)
                                 new_var.need_guard_check = False
                             else:
                                 new_var.extract_code_at_start.append(self_pos)
@@ -666,9 +666,21 @@ class State:
         merge_fx_graph()
         merge_output()
         if isinstance(self.frame_cf_info, IfStmtInfo):
-            if not (hasattr(self.calling_func, '__name__') and
+            cond_obj = self.frame_cf_info.cond_obj
+            if not self.objects.contains(cond_obj):
+                self.fx_graph.result_graph.inserting_before()
+                self.objects.add(
+                    vs.make_var_from_value(cond_obj, False,
+                                           self.objects.helper_functions,
+                                           self.fx_graph,
+                                           [StoreInLocal('cond')]), cond_obj)
+                self.fx_graph.result_graph.inserting_after()
+            if not (self.calling_func is not None and
+                    hasattr(self.calling_func, '__name__') and
                     self.calling_func.__name__ == 'recover'):
-                self.frame_cf_info.mark_end(state.stored_locals)
+                self.frame_cf_info.mark_end(state.stored_locals,
+                                            self.fx_graph.result_graph,
+                                            self.objects.get)
         self.object_refs.extend(state.object_refs)
         if calling_func is not None:
             assert len(stack_objs) == 1
@@ -727,12 +739,14 @@ class GuardTracker:
         self.caller = caller
         if self.caller is not None and self.caller.state.calling_func == if_stmt:
             assert cf_info is None
-            cond_as_bool = bool(frame.f_locals['cond'])
+            cond_obj = frame.f_locals['cond']
+            cond_as_bool = bool(cond_obj)
             if_true = frame.f_locals['if_true']
             if_false = frame.f_locals['if_false']
             cf_info = IfStmtInfo(0,
                                  len(self.code.original_insts) - 1, if_true,
-                                 if_false, cond_as_bool)
+                                 if_false, cond_obj, cond_as_bool,
+                                 self.frame_root)
             f_locals = self.frame.f_locals
             if_other_id = self.frame.f_code.co_varnames.index('if_other_branch')
             if_run_id = self.frame.f_code.co_varnames.index('if_run_branch')
@@ -1807,11 +1821,11 @@ class GuardTracker:
         need_guard_check = obj_var.need_guard_check
         if config.get_config('dynshape') and isinstance(
                 obj, torch.Tensor) and inst.argval == 'shape':
-            node = self.state.fx_graph.create_node("call_method", "size",
-                                                   (obj_var.as_fx_node(),), {})
+            node: Optional[torch.fx.Node] = self.state.fx_graph.create_node(
+                "call_method", "size", (obj_var.as_fx_node(),), {})
             need_guard_check = False
         elif isinstance(obj, torch.Tensor) and inst.argval == 'data':
-            node: Optional[torch.fx.Node] = obj_var.as_fx_node()
+            node = obj_var.as_fx_node()
         else:
             node = None
         partial: list[Optional[PartialVar]] = [

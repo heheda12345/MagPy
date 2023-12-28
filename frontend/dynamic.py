@@ -19,7 +19,7 @@ class DynamicControlFlow(Dynamic):
 dynamic_vars = {}
 dynamic_refs = {}
 dynamic_pcs = {}
-dynamic_need_branch_rewrite = {}
+dynamic_need_branch_rewrite: dict[int, list[int]] = {}
 
 
 def mark_dynamic(obj: Any, dyn: Dynamic) -> None:
