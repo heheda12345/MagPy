@@ -6,14 +6,14 @@ from typing import Any, Tuple, Callable, cast
 import logging
 import inspect
 import torch
-
-from frontend.config import get_config
-from . import tracer, utils
-from .c_api import set_eval_frame, set_miss_threshold, set_skip_files, guard_match, c_reset, set_null_object
+from . import tracer, utils, guard_tracker
+from .config import get_config
+from .c_api import set_eval_frame, set_skip_files, guard_match, c_reset, set_null_object, set_miss_threshold
 from .tracer import enable_trace, disable_trace, get_trace_func, get_process_frame
 from .cache import enable_cache
 from .utils import null_object
 from .fx_graph import set_frame_root
+from .control_flow import if_stmt
 
 logging.basicConfig(
     format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s',
@@ -54,6 +54,8 @@ def compile(f: Callable[..., Any]) -> Callable[..., Any]:
                 utils.__file__,
                 torch.autograd.function.__file__,
                 torch._functorch.utils.__file__,
+            }), set({
+                guard_tracker.__file__,
             }))
         set_null_object(null_object)
         set_miss_threshold(get_config("miss_threshold"))
@@ -62,6 +64,7 @@ def compile(f: Callable[..., Any]) -> Callable[..., Any]:
         setattr(builtins, "guard_match", guard_match)
         setattr(builtins, "enable_trace", enable_trace)
         setattr(builtins, "disable_trace", disable_trace)
+        setattr(builtins, "_frontend_compile_if_stmt", if_stmt)
 
     def _fn(*args: Any, **kwargs: Any) -> Any:
         pre, post = get_process_frame(f, False)

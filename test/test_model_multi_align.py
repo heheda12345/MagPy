@@ -1,3 +1,4 @@
+import pytest
 from frontend.compile import compile, reset
 from common.checker import (
     assert_equal,
@@ -1830,6 +1831,7 @@ def get_input(batch_size):
     return inputs, {}
 
 
+@pytest.mark.model
 def test_model_align(caplog):
     reset()
     torch.manual_seed(66666)

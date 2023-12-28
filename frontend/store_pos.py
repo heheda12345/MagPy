@@ -113,6 +113,9 @@ class StoreInAttr(StorePos):
         return getattr(self.self_pos.get_value_from_frame(frame),
                        self.attr_name)
 
+    def add_name_to_fn(self, codegen: 'FnCodegen') -> None:
+        self.self_pos.add_name_to_fn(codegen)
+
 
 class StoreInIndex(StorePos):
     self_pos: StorePos
@@ -143,6 +146,9 @@ class StoreInIndex(StorePos):
             return list(
                 self.self_pos.get_value_from_frame(frame))[self.self_index]
 
+    def add_name_to_fn(self, codegen: 'FnCodegen') -> None:
+        self.self_pos.add_name_to_fn(codegen)
+
 
 class StoreNegate(StorePos):
     pos: StorePos
@@ -156,6 +162,9 @@ class StoreNegate(StorePos):
 
     def get_value_from_frame(self, frame: FrameType) -> Any:
         return -self.pos.get_value_from_frame(frame)
+
+    def add_name_to_fn(self, codegen: 'FnCodegen') -> None:
+        self.pos.add_name_to_fn(codegen)
 
 
 class ExtractFromMethod(StorePos):
@@ -175,6 +184,9 @@ class ExtractFromMethod(StorePos):
     def get_value_from_frame(self, frame: FrameType) -> Any:
         return getattr(self.self_pos.get_value_from_frame(frame),
                        self.method_name)()
+
+    def add_name_to_fn(self, codegen: 'FnCodegen') -> None:
+        self.self_pos.add_name_to_fn(codegen)
 
 
 class ExtractFromFunction(StorePos):

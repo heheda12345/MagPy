@@ -1,5 +1,5 @@
-from typing import Any, Callable, Dict, Optional, Tuple, TYPE_CHECKING
-from types import FrameType
+from typing import Any, Callable, Dict, Optional, Tuple, TYPE_CHECKING, Iterable
+from types import FrameType, CellType
 
 if TYPE_CHECKING:
     from .code import ProcessedCode
@@ -11,7 +11,7 @@ def set_eval_frame(
     pass
 
 
-def set_skip_files(skip_file: set[str]) -> None:
+def set_skip_files(skip_file: set[str], end_file: set[str]) -> None:
     pass
 
 
@@ -98,4 +98,17 @@ def make_rangeiterobject(start: int, stop: int, step: int) -> Any:
 
 
 def get_from_freevars(frame: FrameType, idx: int) -> Any:
+    pass
+
+
+def parse_mapobject(obj: Any) -> Tuple[Iterable[Any], Callable[..., Any]]:
+    pass
+
+def parse_cell(cell: CellType) -> Any:
+    pass
+
+def set_cell(cell: CellType, value: Any) -> None:
+    pass
+
+def set_local(frame: FrameType, idx: int, value: Any) -> None:
     pass

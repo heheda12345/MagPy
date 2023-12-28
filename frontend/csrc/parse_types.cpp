@@ -57,4 +57,57 @@ PyObject *parse_mapproxyobject(PyObject *self, PyObject *args) {
     Py_INCREF(mobj->mapping);
     return mobj->mapping;
 }
+
+typedef struct {
+    PyObject_HEAD PyObject *iters;
+    PyObject *func;
+} mapobject;
+
+PyObject *parse_mapobject(PyObject *self, PyObject *args) {
+    PyObject *obj;
+    if (!PyArg_ParseTuple(args, "O", &obj)) {
+        return NULL;
+    }
+    if (Py_TYPE(obj) != &PyMap_Type) {
+        PyErr_SetString(PyExc_TypeError, "Expected mapobject");
+        return NULL;
+    }
+    mapobject *mobj = (mapobject *)obj;
+    Py_INCREF(mobj->iters);
+    Py_INCREF(mobj->func);
+    return PyTuple_Pack(2, mobj->iters, mobj->func);
+}
+
+PyObject *parse_cell(PyObject *self, PyObject *args) {
+    PyObject *cell;
+    if (!PyArg_ParseTuple(args, "O", &cell)) {
+        return NULL;
+    }
+    if (Py_TYPE(cell) != &PyCell_Type) {
+        PyErr_SetString(PyExc_TypeError, "Expected cell");
+        return NULL;
+    }
+    PyCellObject *cobj = (PyCellObject *)cell;
+    if (cobj->ob_ref == NULL) {
+        PyObject *null_obj = NullObjectSingleton::getInstance().getNullObject();
+        Py_INCREF(null_obj);
+        return null_obj;
+    }
+    Py_INCREF(cobj->ob_ref);
+    return cobj->ob_ref;
+}
+
+PyObject *set_cell(PyObject *self, PyObject *args) {
+    PyObject *cell, *value;
+    if (!PyArg_ParseTuple(args, "OO", &cell, &value)) {
+        return NULL;
+    }
+    if (Py_TYPE(cell) != &PyCell_Type) {
+        PyErr_SetString(PyExc_TypeError, "Expected cell");
+        return NULL;
+    }
+    PyCell_SET(cell, value);
+    return Py_None;
+}
+
 } // namespace frontend_csrc

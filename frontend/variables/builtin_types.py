@@ -3,7 +3,7 @@ from types import CellType
 from .base import Variable, HelperFunctions
 from ..fx_graph import NodeArgs, FxGraph
 from ..store_pos import StorePos, StoreInAttr, StoreInFreeVar
-from ..c_api import parse_mapproxyobject
+from ..c_api import parse_mapproxyobject, parse_cell
 import torch
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -19,7 +19,7 @@ class CellVar(Variable):
                  extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, value, extract_code_at_start)
         assert len(extract_code_at_start) > 0
-        sub_obj = value.cell_contents
+        sub_obj = parse_cell(value)
         new_extract: list[StorePos] = [
             StoreInAttr(pos, id(value), "cell_contents")
             for pos in self.extract_code_at_start
@@ -66,12 +66,13 @@ class CellVar(Variable):
     def add_subvars_to_table(self, table: 'ObjectTable') -> None:
         old_var = table.get_or_none_by_id(self.sub_id)
         if old_var is not None:
-            new_extract: list[StorePos] = [
-                StoreInAttr(pos, self.sub_id, "cell_contents")
-                for pos in self.extract_code_at_start
-            ]
-            old_var.extract_code_at_start.extend(new_extract)
-            old_var.need_guard_check |= self.need_guard_check
+            pass
+            # new_extract: list[StorePos] = [
+            #     StoreInAttr(pos, self.sub_id, "cell_contents")
+            #     for pos in self.extract_code_at_start
+            # ]
+            # old_var.extract_code_at_start.extend(new_extract)
+            # old_var.need_guard_check |= self.need_guard_check
         else:
             table.add_by_id(self.sub_var, self.sub_id)
             self.sub_var.add_subvars_to_table(table)

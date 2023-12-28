@@ -2,7 +2,7 @@ import dataclasses
 import dis
 import sys
 import functools
-from typing import Union, List
+from typing import Union, List, Union
 from collections import deque
 from .instruction import Instruction
 
@@ -25,6 +25,13 @@ MUST_JUMP_OPCODES = {
 }
 HASLOCAL = set(dis.haslocal)
 HASFREE = set(dis.hasfree)
+jump_only_opnames = ['JUMP_FORWARD', 'JUMP_ABSOLUTE']
+jump_or_next_opnames = [
+    'POP_JUMP_IF_TRUE', 'POP_JUMP_IF_FALSE', 'JUMP_IF_NOT_EXC_MATCH',
+    'JUMP_IF_TRUE_OR_POP', 'JUMP_IF_FALSE_OR_POP', 'FOR_ITER'
+]
+jump_only_opcodes = [dis.opmap[opname] for opname in jump_only_opnames]
+jump_or_next_opcodes = [dis.opmap[opname] for opname in jump_or_next_opnames]
 
 
 def get_indexof(insts: List[Instruction]) -> dict[Instruction, int]:
@@ -203,15 +210,6 @@ def end_of_control_flow(instructions: List[Instruction], start_pc: int) -> int:
     assert instructions[start_pc].opcode in JUMP_OPCODES
     assert instructions[start_pc].target is not None
     indexof = get_indexof(instructions)
-    jump_only_opnames = ['JUMP_FORWARD', 'JUMP_ABSOLUTE']
-    jump_or_next_opnames = [
-        'POP_JUMP_IF_TRUE', 'POP_JUMP_IF_FALSE', 'JUMP_IF_NOT_EXC_MATCH',
-        'JUMP_IF_TRUE_OR_POP', 'JUMP_IF_FALSE_OR_POP', 'FOR_ITER'
-    ]
-    jump_only_opcodes = [dis.opmap[opname] for opname in jump_only_opnames]
-    jump_or_next_opcodes = [
-        dis.opmap[opname] for opname in jump_or_next_opnames
-    ]
     return_value_opcode = dis.opmap['RETURN_VALUE']
     possible_end_pcs = set()
     for end_pc, inst in enumerate(instructions):
@@ -277,3 +275,52 @@ def end_of_control_flow(instructions: List[Instruction], start_pc: int) -> int:
         if dist[end_pc] == min_dist:
             return end_pc
     return -1
+
+
+def eliminate_dead_code(
+        instructions: list[Instruction],
+        start_pc: Union[Instruction, int] = -1,
+        end_pcs: list[Union[Instruction, int]] = []) -> list[int]:
+    """
+    Eliminate dead code in the given instruction list.
+    """
+    if start_pc == -1:
+        start_pc = 0
+    if len(end_pcs) == 0:
+        return_value_opcode = dis.opmap['RETURN_VALUE']
+        end_pcs = [
+            i for i, inst in enumerate(instructions)
+            if inst.opcode == return_value_opcode
+        ]
+    indexof = get_indexof(instructions)
+    for i, inst_or_pc in enumerate(end_pcs):
+        if isinstance(inst_or_pc, Instruction):
+            end_pcs[i] = indexof[inst_or_pc]
+    if isinstance(start_pc, Instruction):
+        start_pc = indexof[start_pc]
+    visited = set()
+    queue = deque([start_pc])
+    visited.add(start_pc)
+    while queue:
+        pc = queue.popleft()
+        inst = instructions[pc]
+        if pc in end_pcs:
+            continue
+        targets = []
+        if inst.target is not None:
+            if inst.opcode in jump_only_opcodes:
+                targets = [indexof[inst.target]]
+            elif inst.opcode in jump_or_next_opcodes:
+                targets = [indexof[inst.target], pc + 1]
+            else:
+                raise NotImplementedError(f"unhandled {inst.opname}")
+        else:
+            targets = [pc + 1]
+        for target in targets:
+            if target in visited:
+                continue
+            visited.add(target)
+            queue.append(target)
+    visited_list = list(visited)
+    visited_list.sort()
+    return visited_list

@@ -314,6 +314,7 @@ def resnet101() -> ResNet:
     return _resnet(Bottleneck, [3, 8, 36, 3])
 
 
+@pytest.mark.model
 def test_resnet(caplog):
     reset()
     with torch.no_grad():
@@ -325,6 +326,7 @@ def test_resnet(caplog):
         run_and_check(compiled_model, [HIT], 1, caplog, result, inp)
 
 
+@pytest.mark.model
 def test_resnet_dynamic(caplog):
     reset()
     with enable_dyn_shape():

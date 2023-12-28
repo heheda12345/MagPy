@@ -1,3 +1,4 @@
+import pytest
 from frontend.compile import compile, reset
 from frontend.utils import enable_dyn_shape
 from common.checker import assert_equal, run_and_check_cache, run_and_check, HIT, MISS, ALL_MISS
@@ -1177,6 +1178,7 @@ def get_input(batch_size):
     return (input_ids, attention_mask, token_type_ids), {}
 
 
+@pytest.mark.model
 def test_model_deberta(caplog):
     reset()
     # NOTE: functions with torch.jit.script are inverted to eager mode
@@ -1191,6 +1193,7 @@ def test_model_deberta(caplog):
                       **input_kwargs)
 
 
+@pytest.mark.model
 def test_model_deberta_dyn(caplog):
     reset()
     with enable_dyn_shape():

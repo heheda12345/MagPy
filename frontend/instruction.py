@@ -47,11 +47,18 @@ def convert_instruction(i: dis.Instruction) -> Instruction:
     )
 
 
-def format_insts(insts: list[Instruction]) -> str:
+def format_insts(insts: list[Instruction],
+                 allow_unknown_target: bool = False) -> str:
     ret = ""
     for i, inst in enumerate(insts):
         if inst.target is not None:
-            target_idx = insts.index(inst.target)
+            try:
+                target_idx = insts.index(inst.target)
+            except ValueError:
+                if allow_unknown_target:
+                    target_idx = -1
+                else:
+                    raise
             ret += f"{i}: {inst} -> inst {target_idx}\n"
         else:
             ret += f"{i}: {inst}\n"

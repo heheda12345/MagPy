@@ -37,6 +37,7 @@
     }
 
 static PyObject *skip_files = Py_None;
+static PyObject *end_files = Py_None;
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 static int active_working_threads = 0;
 static PyObject *(*previous_eval_frame)(PyThreadState *tstate,
@@ -112,19 +113,18 @@ inline static PyObject *eval_custom_code(PyThreadState *tstate,
                                          PyCodeObject *code, PyObject *code_map,
                                          int throw_flag, bool trace_bytecode,
                                          PyObject *trace_func) {
-    Py_ssize_t ncells = 0;
-    Py_ssize_t nfrees = 0;
     Py_ssize_t nlocals_new = code->co_nlocals;
     Py_ssize_t nlocals_old = frame->f_code->co_nlocals;
 
-    ncells = PyTuple_GET_SIZE(code->co_cellvars);
-    nfrees = PyTuple_GET_SIZE(code->co_freevars);
+    Py_ssize_t ncells_new = PyTuple_GET_SIZE(code->co_cellvars);
+    Py_ssize_t ncells_old = PyTuple_GET_SIZE(frame->f_code->co_cellvars);
+    Py_ssize_t nfrees = PyTuple_GET_SIZE(code->co_freevars);
 
     NULL_CHECK(tstate);
     NULL_CHECK(frame);
     NULL_CHECK(code);
-    CHECK(nlocals_new >= nlocals_old);
-    CHECK(ncells == PyTuple_GET_SIZE(frame->f_code->co_cellvars));
+    // CHECK(nlocals_new >= nlocals_old);
+    CHECK(ncells_new >= ncells_old);
     CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
 
     PyFrameObject *shadow = PyFrame_New(tstate, code, frame->f_globals, NULL);
@@ -139,14 +139,24 @@ inline static PyObject *eval_custom_code(PyThreadState *tstate,
     PyObject **fastlocals_old = frame->f_localsplus;
     PyObject **fastlocals_new = shadow->f_localsplus;
 
-    for (Py_ssize_t i = 0; i < nlocals_old; i++) {
+    for (Py_ssize_t i = 0; i < std::min(nlocals_old, nlocals_new); i++) {
         Py_XINCREF(fastlocals_old[i]);
         fastlocals_new[i] = fastlocals_old[i];
     }
 
-    for (Py_ssize_t i = 0; i < ncells + nfrees; i++) {
+    for (Py_ssize_t i = 0; i < ncells_old; i++) {
         Py_XINCREF(fastlocals_old[nlocals_old + i]);
         fastlocals_new[nlocals_new + i] = fastlocals_old[nlocals_old + i];
+    }
+
+    for (Py_ssize_t i = ncells_old; i < ncells_new; i++) {
+        fastlocals_new[nlocals_new + i] = PyCell_New(NULL);
+    }
+
+    for (Py_ssize_t i = 0; i < nfrees; i++) {
+        Py_XINCREF(fastlocals_old[nlocals_old + ncells_old + i]);
+        fastlocals_new[nlocals_new + ncells_new + i] =
+            fastlocals_old[nlocals_old + ncells_old + i];
     }
 
     frame_id_to_code_map[(size_t)shadow] = code_map;
@@ -196,7 +206,7 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     Py_DECREF(postprocess);
     Py_DECREF(trace_func);
 
-    // set_eval_frame_callback(callback);
+    set_eval_frame_callback(callback);
     return result;
 }
 
@@ -210,6 +220,9 @@ static PyObject *custom_eval_frame_shim(PyThreadState *tstate,
     }
     assert(PyObject_IsInstance(skip_files, (PyObject *)&PySet_Type));
     if (PySet_Contains(skip_files, frame->f_code->co_filename)) {
+        return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
+    } else if (PySet_Contains(end_files, frame->f_code->co_filename)) {
+        set_eval_frame_callback(Py_None);
         return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
     }
     PyObject *result = _custom_eval_frame(tstate, frame, throw_flag, callback);
@@ -282,11 +295,15 @@ static PyObject *set_skip_files(PyObject *self, PyObject *args) {
     if (skip_files != Py_None) {
         Py_DECREF(skip_files);
     }
-    if (!PyArg_ParseTuple(args, "O", &skip_files)) {
+    if (end_files != Py_None) {
+        Py_DECREF(end_files);
+    }
+    if (!PyArg_ParseTuple(args, "OO", &skip_files, &end_files)) {
         PRINT_PYERR
         PyErr_SetString(PyExc_TypeError, "invalid parameter in set_skip_files");
     }
     Py_INCREF(skip_files);
+    Py_INCREF(end_files);
     Py_RETURN_NONE;
 }
 
@@ -613,6 +630,21 @@ static PyObject *get_from_freevars(PyObject *self, PyObject *args) {
     return value;
 }
 
+static PyObject *set_local(PyObject *self, PyObject *args) {
+    PyObject *frame;
+    int index;
+    PyObject *value;
+    if (!PyArg_ParseTuple(args, "OiO", &frame, &index, &value)) {
+        PRINT_PYERR;
+        PyErr_SetString(PyExc_TypeError, "invalid parameter in set_local");
+        return NULL;
+    }
+    PyFrameObject *f = (PyFrameObject *)frame;
+    f->f_localsplus[index] = value;
+    Py_INCREF(value);
+    Py_RETURN_NONE;
+}
+
 static PyObject *mark_need_postprocess(PyObject *self, PyObject *args) {
     int frame_id;
     if (!PyArg_ParseTuple(args, "i", &frame_id)) {
@@ -654,13 +686,18 @@ static PyMethodDef _methods[] = {
     {"get_code_map", get_code_map, METH_VARARGS, NULL},
     {"is_bound_method", is_bound_method, METH_VARARGS, NULL},
     {"get_from_freevars", get_from_freevars, METH_VARARGS, NULL},
+    {"set_local", set_local, METH_VARARGS, NULL},
     {"parse_rangeiterobject", frontend_csrc::parse_rangeiterobject,
      METH_VARARGS, NULL},
     {"parse_mapproxyobject", frontend_csrc::parse_mapproxyobject, METH_VARARGS,
      NULL},
     {"make_rangeiterobject", frontend_csrc::make_rangeiterobject, METH_VARARGS,
      NULL},
-    {NULL, NULL, 0, NULL}};
+    {"parse_mapobject", frontend_csrc::parse_mapobject, METH_VARARGS, NULL},
+    {"parse_cell", frontend_csrc::parse_cell, METH_VARARGS, NULL},
+    {"set_cell", frontend_csrc::set_cell, METH_VARARGS, NULL},
+    {NULL, NULL, 0, NULL},
+};
 
 static struct PyModuleDef _module = {
     PyModuleDef_HEAD_INIT, "frontend.c_api",

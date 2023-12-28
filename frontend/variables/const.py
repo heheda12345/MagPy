@@ -9,6 +9,7 @@ from ..pycode_writer import get_float_string
 from ..fx_graph import NodeArgs, FxGraph
 from ..utils import NullObject, null_object
 from ..store_pos import StorePos, StoreInFreeVar, StoreInAttr
+from ..c_api import parse_cell
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
     from ..object_table import ObjectTable
@@ -194,7 +195,7 @@ class FunctionVar(Variable):
     obj_ids: list[int]
 
     def __init__(self, func: Callable[..., Any], need_guard_check: bool,
-                 helper_functions: HelperFunctions,
+                 helper_functions: HelperFunctions, fx_graph: Optional[FxGraph],
                  extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, func, extract_code_at_start)
         self.closure_vars = []
@@ -203,9 +204,9 @@ class FunctionVar(Variable):
             if func.__closure__ is not None:
                 assert len(func.__code__.co_freevars) == len(func.__closure__)
                 for i, x in enumerate(func.__closure__):
-                    if x.cell_contents != func:
+                    if parse_cell(x) != func:
                         cell_var = helper_functions.get_or_make_var(
-                            x, need_guard_check, None, [StoreInFreeVar(i)])
+                            x, need_guard_check, fx_graph, [StoreInFreeVar(i)])
                         self.closure_vars.append(cell_var)
                         self.obj_ids.append(id(x))
 
@@ -227,10 +228,10 @@ class FunctionVar(Variable):
 
     @classmethod
     def from_value(cls, value: Callable[..., Any], need_guard_check: bool,
-                   _helper_functions: HelperFunctions,
-                   _fx_graph: Optional[FxGraph],
+                   helper_functions: HelperFunctions,
+                   fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "FunctionVar":
-        return cls(value, need_guard_check, _helper_functions,
+        return cls(value, need_guard_check, helper_functions, fx_graph,
                    extract_code_at_start)
 
     def add_subvars_to_table(self, table: 'ObjectTable') -> None:
