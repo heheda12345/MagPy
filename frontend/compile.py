@@ -7,7 +7,8 @@ import logging
 import inspect
 import torch
 from . import tracer, utils, guard_tracker
-from .c_api import set_eval_frame, set_skip_files, guard_match, c_reset, set_null_object
+from .config import get_config
+from .c_api import set_eval_frame, set_skip_files, guard_match, c_reset, set_null_object, set_miss_threshold
 from .tracer import enable_trace, disable_trace, get_trace_func, get_process_frame
 from .cache import enable_cache
 from .utils import null_object
@@ -57,6 +58,7 @@ def compile(f: Callable[..., Any]) -> Callable[..., Any]:
                 guard_tracker.__file__,
             }))
         set_null_object(null_object)
+        set_miss_threshold(get_config("miss_threshold"))
         init = True
         import builtins
         setattr(builtins, "guard_match", guard_match)

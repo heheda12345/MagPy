@@ -32,7 +32,7 @@ class CellVar(Variable):
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
         codegen.add_import_from("types", "CellType")
-        codegen.add_check(f"isinstance({pos}, CellType)")
+        codegen.add_check((f"isinstance({pos}, CellType)", pos))
         self.sub_var.make_guard_inner(
             codegen, StoreInAttr(pos, self.sub_id, "cell_contents"))
 

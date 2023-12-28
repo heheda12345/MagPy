@@ -120,9 +120,10 @@ class TensorVar(Variable):
         name_in_codegen = codegen.add_obj(self)
         if config.get_config("dynshape"):
             codegen.add_check(
-                f"{name_in_codegen}.tensor_guard_check_dyn({pos})")
+                (f"{name_in_codegen}.tensor_guard_check_dyn({pos})", pos))
         else:
-            codegen.add_check(f"{name_in_codegen}.tensor_guard_check({pos})")
+            codegen.add_check(
+                (f"{name_in_codegen}.tensor_guard_check({pos})", pos))
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
@@ -152,7 +153,7 @@ class TorchParamVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_id_check(f"id({pos}) == {id(self.obj)}", self.obj)
+        codegen.add_id_check((f"id({pos}) == {id(self.obj)}", pos), self.obj)
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
@@ -192,7 +193,7 @@ class TorchDtypeVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_check(f"{pos} == {self.dtype}")
+        codegen.add_check((f"{pos} == {self.dtype}", pos))
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
@@ -228,10 +229,10 @@ class TorchDeviceVar(Variable):
                          pos: StorePos) -> None:
         # if 'cuda' in str(self.device):
         #     codegen.add_check(
-        #         f"{pos} == torch.device('{self.device}')"
+        #         (f"{pos} == torch.device('{self.device}')", pos)
         #     )
         # else:
-        codegen.add_check(f"{pos} == torch.device('{self.device}')")
+        codegen.add_check((f"{pos} == torch.device('{self.device}')", pos))
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,

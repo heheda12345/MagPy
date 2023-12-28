@@ -33,8 +33,8 @@ class SetVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_check(f'isinstance({pos}, set)')
-        codegen.add_check(f"len({pos}) == {self.length}")
+        codegen.add_check((f'isinstance({pos}, set)', pos))
+        codegen.add_check((f"len({pos}) == {self.length}", pos))
         for i, (var, obj) in enumerate(zip(self.vars, self.obj_ids)):
             var.make_guard_inner(codegen, StoreInIndex(pos, obj, i, False))
 
