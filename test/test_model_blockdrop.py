@@ -263,7 +263,11 @@ def test_blockdrop_full(caplog):
         run_and_check(compiled, [HIT], 1, caplog, expect_result, inp)
 
 
-@pytest.mark.model
+import os
+
+
+@pytest.mark.skipif(os.getenv('FORCE_RUN_SKIPPED_TEST') != '1',
+                    reason="will affect other tests, run it solo")
 def test_blockdrop_dyn(caplog):
     reset()
     with torch.no_grad():
