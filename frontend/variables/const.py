@@ -194,7 +194,7 @@ class FunctionVar(Variable):
     obj_ids: list[int]
 
     def __init__(self, func: Callable[..., Any], need_guard_check: bool,
-                 helper_functions: HelperFunctions,
+                 helper_functions: HelperFunctions, fx_graph: Optional[FxGraph],
                  extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, func, extract_code_at_start)
         self.closure_vars = []
@@ -205,7 +205,7 @@ class FunctionVar(Variable):
                 for i, x in enumerate(func.__closure__):
                     if x.cell_contents != func:
                         cell_var = helper_functions.get_or_make_var(
-                            x, need_guard_check, None, [StoreInFreeVar(i)])
+                            x, need_guard_check, fx_graph, [StoreInFreeVar(i)])
                         self.closure_vars.append(cell_var)
                         self.obj_ids.append(id(x))
 
@@ -229,7 +229,7 @@ class FunctionVar(Variable):
                    _helper_functions: HelperFunctions,
                    _fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "FunctionVar":
-        return cls(value, need_guard_check, _helper_functions,
+        return cls(value, need_guard_check, _helper_functions, _fx_graph,
                    extract_code_at_start)
 
     def add_subvars_to_table(self, table: 'ObjectTable') -> None:
@@ -281,3 +281,66 @@ class RangeVar(Variable):
 
     def as_fx_node(self) -> NodeArgs:
         return range(self.start, self.stop, self.step)
+
+
+class ClsByNamedTupleVar(Variable):
+    cls_name: str
+    cls_attr: list[str]
+    obj: Any
+    obj_class: Any
+    attr_value: list[Any]
+    attr_vars: list[Variable]
+    helper_functions: HelperFunctions
+
+    def __init__(self, name: str, attrs: list[str], need_guard_check: bool,
+                 obj: Any, extract_code_at_start: list[StorePos],
+                 helper_functions: HelperFunctions) -> None:
+        super().__init__(need_guard_check, obj, extract_code_at_start)
+        self.cls_name = name
+        self.cls_attr = []
+        for attr in attrs:
+            self.cls_attr.append(attr)
+        self.obj = None
+        self.obj_class = None
+        self.attr_value = []
+        self.helper_functions = helper_functions
+
+    @classmethod
+    def from_value(
+            cls, value: Any, need_guard_check: bool,
+            _helper_functions: HelperFunctions, _fx_graph: Optional[FxGraph],
+            extract_code_at_start: list[StorePos]) -> 'ClsByNamedTupleVar':
+        return cls(value.name, value.attrs, need_guard_check, value,
+                   extract_code_at_start, _helper_functions)
+
+    def make_guard_inner(self, codegen: "GuardFnCodegen",
+                         pos: StorePos) -> None:
+        pass
+
+    def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
+                          codegen: "GraphFnCodegen", in_return: bool,
+                          idx: int) -> None:
+        assert self.attr_value is not None and self.obj is not None and len(
+            self.attr_value) == len(self.cls_attr)
+        for i, value in enumerate(self.attr_value):
+            var = self.helper_functions.get_or_make_var(value,
+                                                        self.need_guard_check,
+                                                        None, [])
+            var.make_output(f"{name_in_graph_fn}_{i}", store_pos, codegen,
+                            False, id(value))
+        codegen.add_import_from("collections", "namedtuple")
+        name = f"'{self.cls_name}'"
+        temps = []
+        for j in self.cls_attr:
+            temp = f"'{j}'"
+            temps.append(temp)
+        attrs = f"[{','.join(f'{j}' for j in temps)},]" if len(
+            self.cls_attr) > 0 else "[]"
+        codegen.add_statements(f'funcs = namedtuple({name}, {attrs})')
+        paras = f"({','.join(f'{name_in_graph_fn}_{j}' for j in range(len(self.cls_attr)))},)" if len(
+            self.cls_attr) > 0 else "()"
+        codegen.output(name_in_graph_fn, store_pos, f"funcs{paras}", in_return,
+                       idx)
+
+    def as_fx_node(self) -> NodeArgs:
+        return ValueError("cannot covert a user defined class to node")

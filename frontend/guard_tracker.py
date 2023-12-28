@@ -28,7 +28,7 @@ from .pycode_writer import new_name
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
 from .fx_graph import FxGraph, get_frame_root, is_leaf_module, NodeArgs
 from .bytecode_analysis import livevars_analysis, end_of_control_flow
-from .variables.tuple_ import TupleVar
+from .variables.const import ClsByNamedTupleVar
 from .variables.base import Variable
 from .control_flow import ControlFlowInfo, LoopModule, ForLoopInfo, LoopPosMap
 from types import ModuleType
@@ -46,6 +46,8 @@ class PartialVar:
     inplace_ref: Any = None  # None if not inplace
     make_var_fn: Optional[MAKE_VAR_FN_TYPE] = None
     force_new_value: bool = False
+    named_class: bool = False
+    named_func: bool = False
 
 
 @dataclasses.dataclass
@@ -85,6 +87,7 @@ class State:
     can_guard: bool
     gen_by_caller: Callable[[Any], bool]
     frame_id: int
+    named_funcs: list[ClsByNamedTupleVar]
 
     def __init__(self, root: torch.nn.Module,
                  gen_by_caller: Callable[[Any], bool]) -> None:
@@ -118,6 +121,7 @@ class State:
         self.can_guard = True
         self.frame_id = -1
         self.callee_returns = None
+        self.named_funcs = []
 
     def update_subpath(self, module: torch.nn.Module, prefix: str) -> None:
 
@@ -187,6 +191,11 @@ class State:
                 else:
                     # TODO: record all operation in SymInt or SymFloat
                     pass
+            if isinstance(var, vs.FunctionVar):
+                if hasattr(var.obj, '__name__') and hasattr(
+                        var.obj, "__module__"):
+                    assert var.obj.__module__ == 'torch'
+                    return f'{var.obj.__module__}.{var.obj.__name__}'
             return var.as_fx_node()
 
         for arg in itertools.chain(args, kwargs.values()):
@@ -1188,6 +1197,19 @@ class GuardTracker:
                 continue
             value = get_value_stack_from_top(self.frame, i)
             node = partial.node
+            if partial.named_class:
+                for j in self.state.named_funcs:
+                    if j.cls_name == value.__name__:
+                        j.obj_class = value
+                        break
+                continue
+            if partial.named_func:
+                for j in self.state.named_funcs:
+                    if isinstance(value, j.obj_class):
+                        j.obj = value
+                        self.state.objects.add(j, value)
+                        break
+                continue
             if partial.force_new_value and self.state.objects.contains(value):
                 if isinstance(value, (float, int)):
                     new_value = -(-value)
@@ -1341,7 +1363,7 @@ class GuardTracker:
 
     def is_builtin_func(self, func: Callable[..., Any]) -> bool:
         return func in (dict, tuple, set, list, hasattr, slice, range, len,
-                        super, type, all, str.join)
+                        super, type, all, str.join, reversed, zip)
 
     def get_live_objs(self, pc: int = -1) -> list[tuple[str, Any]]:
         if pc == -1:
@@ -1398,6 +1420,18 @@ class GuardTracker:
             return
         if is_user_defined_func(func) or isinstance(func, nn.Sequential):
             if inspect.isclass(func):
+                for i in self.state.named_funcs:
+                    if func == i.obj_class:
+                        i.attr_value = args
+                        self.state.set_partial_var({
+                            -1: [
+                                PartialVar(node=None,
+                                           need_guard_check=False,
+                                           extract_code_at_start=[],
+                                           named_func=True)
+                            ]
+                        })
+                        return
                 class_define_new = get_method_defined_class(func, '__new__')
                 if class_define_new not in (object, torch._C._FunctionBase,
                                             dict):
@@ -1530,6 +1564,20 @@ class GuardTracker:
                 args, kwargs,
             (set, list, dict, collections.OrderedDict,
              MappingProxyType)) and get_root_module(func) != 'torch':
+            if hasattr(func, "__name__") and func.__name__ == 'namedtuple':
+                assert len(args) == 2
+                cls_by_define = ClsByNamedTupleVar(
+                    args[0], args[1], False, None, [],
+                    self.state.objects.helper_functions)
+                self.state.named_funcs.append(cls_by_define)
+                self.state.set_partial_var({
+                    -1: [
+                        PartialVar(node=None,
+                                   need_guard_check=False,
+                                   extract_code_at_start=[],
+                                   named_class=True)
+                    ]
+                })
             set_if_inplace_return()
             return
         elif self.has_arg_of_type(args, kwargs, np.generic):
@@ -1824,14 +1872,22 @@ class GuardTracker:
             return
 
         need_guard_check = obj_var.need_guard_check
-        if isinstance(obj, torch.Tensor) and inst.argval == 'data':
+        node1 = None
+        if isinstance(obj, torch.Tensor) and isinstance(attr, torch.Tensor):
             if isinstance(obj_var, vs.TorchParamVar):
                 if obj not in self.state.subparam_paths:
                     self.state.add_subparam(obj)
                 node: Optional[torch.fx.Node] = self.state.fx_graph.create_node(
                     "get_attr", self.state.subparam_paths[obj], (), {})
-            else:
+                if inst.argval != 'data':
+                    node1 = self.state.fx_graph.create_node(
+                        "call_function", getattr, (node, inst.argval), {})
+            elif inst.argval == 'data':
                 node = obj_var.as_fx_node()
+            else:
+                node = self.state.fx_graph.create_node(
+                    "call_function", getattr,
+                    (obj_var.as_fx_node(), inst.argval), {})
         elif config.get_config('dynshape') and isinstance(
                 obj, torch.Tensor) and inst.argval == 'shape':
             node = self.state.fx_graph.create_node("call_method", "size",
@@ -1839,6 +1895,8 @@ class GuardTracker:
             need_guard_check = False
         else:
             node = None
+        if node1 is not None:
+            node = node1
         partial: list[Optional[PartialVar]] = [
             PartialVar(node=node,
                        need_guard_check=need_guard_check,
@@ -2066,6 +2124,17 @@ class GuardTracker:
                     ]
                 })
         else:
+            # unpack generator object
+            # self.state.set_partial_var({
+            #     -1: [
+            #         PartialVar(node=None,
+            #                     need_guard_check=False,
+            #                     extract_code_at_start=[],
+            #                     make_var_fn=vs.make_var_from_value)
+            #         for _ in seq
+            #     ]
+            # })
+            # pass
             raise NotImplementedError
 
     def UNPACK_EX(self, inst: Instruction) -> None:
@@ -2151,6 +2220,21 @@ class GuardTracker:
             ExtractFromMethod(pos, id(obj), '__iter__')
             for pos in obj_var.extract_code_at_start
         ]
+
+        # iter is a tensor?
+        # if isinstance(obj, torch.Tensor):
+        #     func = torch.Tensor.__iter__
+        #     print("run into user defined function", func)
+        #     stack_objs = get_all_objects_in_stack(self.frame)
+        #     self.state.mark_calling_func(func)
+        #     self.state.mark_defer_restart(
+        #         DeferRestartState(stack_objs, self.get_live_objs(),
+        #                           self.frame.f_lasti, f"call_function"))
+        #     from .tracer import get_process_frame
+        #     preprocess_frame, post_process_frame = get_process_frame(func, True)
+        #     prior = set_eval_frame((preprocess_frame, post_process_frame))
+        #     assert prior is None
+        #     assert self.state.written == False
 
         def make_iterable_fn(
                 value: Any, need_guard_check: bool,

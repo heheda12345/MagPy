@@ -1,6 +1,7 @@
 from frontend.compile import compile, reset
 from common.checker import run_and_check, HIT, MISS, assert_equal
 import torch
+from collections import namedtuple
 
 
 def without_tensor_0(a):
@@ -23,6 +24,12 @@ def without_tensor_4(a, b):
     return a + b
 
 
+def named_tuple(a, b):
+    funcs = namedtuple('output', ['relu', 'relu1'])
+    out = funcs(a, b)
+    return out
+
+
 def test_without_tensor(caplog):
     reset()
     compiled_no_tensor0 = compile(without_tensor_0)
@@ -30,6 +37,7 @@ def test_without_tensor(caplog):
     compiled_no_tensor2 = compile(without_tensor_2)
     compiled_no_tensor3 = compile(without_tensor_3)
     compiled_no_tensor4 = compile(without_tensor_4)
+    compiled_no_tensor5 = compile(named_tuple)
     a = (1, 2.5)
     b = (2, 4)
     result = without_tensor_0(a)
@@ -55,6 +63,11 @@ def test_without_tensor(caplog):
     result = without_tensor_4(a, b)
     run_and_check(compiled_no_tensor4, [MISS], 7, caplog, result, a, b)
     run_and_check(compiled_no_tensor4, [HIT], 7, caplog, result, a, b)
+    # a = 2.2
+    # b = 3.3
+    # result = named_tuple(a, b)
+    # run_and_check(compiled_no_tensor5, [MISS], 8, caplog, result, a, b)
+    # run_and_check(compiled_no_tensor5, [HIT], 8, caplog, result, a, b)
 
 
 def tensor_0(tuple_a, tuple_b):

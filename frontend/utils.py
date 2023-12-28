@@ -145,8 +145,7 @@ def get_root_module(func: Callable[..., Any]) -> str:
     module_str = ""
     if module is not None:
         module_str = str(module).split('\'')[1]
-    if module is None or module_str in ('torch.distributions.bernoulli',
-                                        'torch.distributions.distribution'):
+    if module is None or 'torch.distributions' in module_str:
         return ""
     root_module = module_str.split('.')[0]
     return root_module

@@ -65,6 +65,9 @@ class ObjectTable:
             fx_graph: Optional[FxGraph] = None) -> Variable:
         if id(value) in self.objs:
             return self.objs[id(value)]
+        elif value is None:
+            return make_var_from_value(value, False, self.helper_functions,
+                                       fx_graph)
         elif allow_unexist_const:
             if isinstance(value, get_args(CONST_TYPES)) or isinstance(
                     value, (list, tuple, set, dict, range, CodeType,
