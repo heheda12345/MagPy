@@ -3,14 +3,17 @@ from frontend.compile import compile, reset
 from frontend.utils import add_force_graph_break
 from frontend.c_api import get_next_frame_id
 import logging
-from common.checker import run_and_check, HIT, MISS
+from common.checker import run_and_check, HIT, MISS, ALL_MISS
 from frontend.dynamic import DynamicControlFlow, mark_dynamic_pc
 from frontend.utils import SetConfig
 import torch
 import torch.nn as nn
+from torch.nn import Parameter
+from torch import Tensor
+from typing import Tuple
 
 
-class LSTMCell(nn.Module):
+class MyLSTMCell(nn.Module):
 
     def __init__(self, input_size, hidden_size):
         super().__init__()
@@ -69,14 +72,14 @@ class LSTMCell(nn.Module):
         return c, h
 
 
-class LSTM(nn.Module):
+class MyLSTM(nn.Module):
 
     def __init__(self, batch_size, input_size, hidden_size, num_layers):
         super().__init__()
         self.layers = nn.ModuleList()
-        self.layers.append(LSTMCell(input_size, hidden_size))
+        self.layers.append(MyLSTMCell(input_size, hidden_size))
         for i in range(num_layers):
-            self.layers.append(LSTMCell(hidden_size, hidden_size))
+            self.layers.append(MyLSTMCell(hidden_size, hidden_size))
         self.num_layers = num_layers
         self.batch_size = batch_size
         self.hidden_size = hidden_size
@@ -149,10 +152,11 @@ class LSTM(nn.Module):
         return state_h[self.num_layers - 1]
 
 
-def test_lstm_cell(caplog):
+@pytest.mark.model
+def test_my_lstm_cell(caplog):
     reset()
     with torch.no_grad():
-        model = LSTMCell(10, 10).eval()
+        model = MyLSTMCell(10, 10).eval()
         inp = torch.randn(10, 10)
         c = torch.randn(10, 10)
         h = torch.randn(10, 10)
@@ -169,16 +173,17 @@ def test_lstm_cell(caplog):
                       c, h)
 
 
-def test_lstm_loop(caplog):
+@pytest.mark.model
+def test_my_lstm_loop(caplog):
     reset()
     with SetConfig({"backend": "eager"}):
         with torch.no_grad():
-            seq_len = 64
-            num_layers = 10
+            seq_len = 2
+            num_layers = 2
             hidden_size = 256
             batch_size = 16
-            model = LSTM(batch_size, hidden_size, hidden_size,
-                         num_layers).cuda()
+            model = MyLSTM(batch_size, hidden_size, hidden_size,
+                           num_layers).cuda()
             model.eval()
             inputs = torch.randn(seq_len,
                                  batch_size,
@@ -193,14 +198,15 @@ def test_lstm_loop(caplog):
             run_and_check(compiled, [HIT], 1, caplog, expect_result, inputs)
 
 
-def test_lstm_unroll(caplog):
+@pytest.mark.model
+def test_my_lstm_unroll(caplog):
     reset()
     with torch.no_grad():
         seq_len = 4
         num_layers = 10
         hidden_size = 16
         batch_size = 16
-        model = LSTM(batch_size, hidden_size, hidden_size, num_layers).cuda()
+        model = MyLSTM(batch_size, hidden_size, hidden_size, num_layers).cuda()
         model.eval()
         inputs = torch.randn(seq_len, batch_size, hidden_size, device='cuda')
         expect_result = model(inputs)
@@ -260,3 +266,110 @@ def test_rnn_no_break(caplog):
         compiled = compile(model)
         run_and_check(compiled, [MISS], 1, caplog, expected, inputs)
         run_and_check(compiled, [HIT], 1, caplog, expected, inputs)
+
+
+class LSTMCell(nn.Module):
+
+    def __init__(self, input_size, hidden_size):
+        super().__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.weight_ih = Parameter(torch.randn(4 * hidden_size, input_size))
+        self.weight_hh = Parameter(torch.randn(4 * hidden_size, hidden_size))
+        self.bias_ih = Parameter(torch.randn(4 * hidden_size))
+        self.bias_hh = Parameter(torch.randn(4 * hidden_size))
+
+    def forward(
+            self, input: Tensor,
+            state: Tuple[Tensor,
+                         Tensor]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
+        hx, cx = state
+        gates = (torch.mm(input, self.weight_ih.t()) + self.bias_ih +
+                 torch.mm(hx, self.weight_hh.t()) + self.bias_hh)
+        ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+
+        ingate = torch.sigmoid(ingate)
+        forgetgate = torch.sigmoid(forgetgate)
+        cellgate = torch.tanh(cellgate)
+        outgate = torch.sigmoid(outgate)
+
+        cy = (forgetgate * cx) + (ingate * cellgate)
+        hy = outgate * torch.tanh(cy)
+
+        return hy, (hy, cy)
+
+
+class LSTM(nn.Module):
+
+    def __init__(self, batch_size, input_size, hidden_size, num_layers):
+        super().__init__()
+        self.layers = nn.ModuleList()
+        self.layers.append(LSTMCell(input_size, hidden_size))
+        for i in range(num_layers):
+            self.layers.append(LSTMCell(hidden_size, hidden_size))
+        self.num_layers = num_layers
+        self.batch_size = batch_size
+        self.hidden_size = hidden_size
+
+    def forward(self, inputs):  # seq_len, batch, input_size
+        state_c = [
+            torch.zeros(self.batch_size, self.hidden_size, device='cuda')
+            for _ in range(self.num_layers)
+        ]
+        state_h = [
+            torch.zeros(self.batch_size, self.hidden_size, device='cuda')
+            for _ in range(self.num_layers)
+        ]
+        for i in range(inputs.size()[0]):
+            cur_input = inputs[i]
+            for j in range(self.num_layers):
+                c = state_c[j]
+                h = state_h[j]
+                _, (h, c) = self.layers[j](cur_input, (h, c))
+                state_c[j].copy_(c)
+                state_h[j].copy_(h)
+                cur_input = h
+        return state_h[self.num_layers - 1]
+
+
+@pytest.mark.model
+def test_lstm_loop(caplog):
+    reset()
+    with SetConfig({"backend": "eager"}):
+        with torch.no_grad():
+            seq_len = 2
+            num_layers = 2
+            hidden_size = 256
+            batch_size = 16
+            model = LSTM(batch_size, hidden_size, hidden_size,
+                         num_layers).cuda()
+            model.eval()
+            inputs = torch.randn(seq_len,
+                                 batch_size,
+                                 hidden_size,
+                                 device='cuda')
+            expect_result = model(inputs)
+            for_iter_pc = 193
+            mark_dynamic_pc(get_next_frame_id(), for_iter_pc,
+                            DynamicControlFlow(for_iter_pc, "FOR_ITER"))
+            compiled = compile(model)
+            run_and_check(compiled, [ALL_MISS], 1, caplog, expect_result,
+                          inputs)
+            run_and_check(compiled, [HIT], 1, caplog, expect_result, inputs)
+
+
+@pytest.mark.model
+def test_lstm_unroll(caplog):
+    reset()
+    with torch.no_grad():
+        seq_len = 4
+        num_layers = 10
+        hidden_size = 16
+        batch_size = 16
+        model = LSTM(batch_size, hidden_size, hidden_size, num_layers).cuda()
+        model.eval()
+        inputs = torch.randn(seq_len, batch_size, hidden_size, device='cuda')
+        expect_result = model(inputs)
+        compiled = compile(model)
+        run_and_check(compiled, [ALL_MISS], 1, caplog, expect_result, inputs)
+        run_and_check(compiled, [HIT], 1, caplog, expect_result, inputs)

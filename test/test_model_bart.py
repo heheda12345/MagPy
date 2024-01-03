@@ -1,3 +1,4 @@
+import pytest
 from frontend.compile import compile, reset
 from common.checker import assert_equal, run_and_check_cache, run_and_check, HIT, MISS, ALL_MISS
 
@@ -1390,6 +1391,7 @@ def get_input(batch_size):
     return (input_ids, attention_mask), {}
 
 
+@pytest.mark.model
 def test_model_bart(caplog):
     reset()
     with torch.no_grad():

@@ -2,7 +2,9 @@
 #include "csrc.h"
 #include <Python.h>
 #include <cellobject.h>
+#include <filesystem>
 #include <frameobject.h>
+#include <iostream>
 #include <map>
 #include <object.h>
 #include <pythread.h>
@@ -35,6 +37,7 @@
     }
 
 static PyObject *skip_files = Py_None;
+static PyObject *end_files = Py_None;
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 static int active_working_threads = 0;
 static PyObject *(*previous_eval_frame)(PyThreadState *tstate,
@@ -46,6 +49,7 @@ static void ignored(void *obj) {}
 
 frontend_csrc::ProgramCache program_cache;
 static int frame_count = 0;
+static int miss_threshold = 0;
 
 bool need_postprocess = false;
 static std::map<size_t, PyObject *> frame_id_to_code_map;
@@ -109,19 +113,18 @@ inline static PyObject *eval_custom_code(PyThreadState *tstate,
                                          PyCodeObject *code, PyObject *code_map,
                                          int throw_flag, bool trace_bytecode,
                                          PyObject *trace_func) {
-    Py_ssize_t ncells = 0;
-    Py_ssize_t nfrees = 0;
     Py_ssize_t nlocals_new = code->co_nlocals;
     Py_ssize_t nlocals_old = frame->f_code->co_nlocals;
 
-    ncells = PyTuple_GET_SIZE(code->co_cellvars);
-    nfrees = PyTuple_GET_SIZE(code->co_freevars);
+    Py_ssize_t ncells_new = PyTuple_GET_SIZE(code->co_cellvars);
+    Py_ssize_t ncells_old = PyTuple_GET_SIZE(frame->f_code->co_cellvars);
+    Py_ssize_t nfrees = PyTuple_GET_SIZE(code->co_freevars);
 
     NULL_CHECK(tstate);
     NULL_CHECK(frame);
     NULL_CHECK(code);
-    CHECK(nlocals_new >= nlocals_old);
-    CHECK(ncells == PyTuple_GET_SIZE(frame->f_code->co_cellvars));
+    // CHECK(nlocals_new >= nlocals_old);
+    CHECK(ncells_new >= ncells_old);
     CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
 
     PyFrameObject *shadow = PyFrame_New(tstate, code, frame->f_globals, NULL);
@@ -136,14 +139,24 @@ inline static PyObject *eval_custom_code(PyThreadState *tstate,
     PyObject **fastlocals_old = frame->f_localsplus;
     PyObject **fastlocals_new = shadow->f_localsplus;
 
-    for (Py_ssize_t i = 0; i < nlocals_old; i++) {
+    for (Py_ssize_t i = 0; i < std::min(nlocals_old, nlocals_new); i++) {
         Py_XINCREF(fastlocals_old[i]);
         fastlocals_new[i] = fastlocals_old[i];
     }
 
-    for (Py_ssize_t i = 0; i < ncells + nfrees; i++) {
+    for (Py_ssize_t i = 0; i < ncells_old; i++) {
         Py_XINCREF(fastlocals_old[nlocals_old + i]);
         fastlocals_new[nlocals_new + i] = fastlocals_old[nlocals_old + i];
+    }
+
+    for (Py_ssize_t i = ncells_old; i < ncells_new; i++) {
+        fastlocals_new[nlocals_new + i] = PyCell_New(NULL);
+    }
+
+    for (Py_ssize_t i = 0; i < nfrees; i++) {
+        Py_XINCREF(fastlocals_old[nlocals_old + ncells_old + i]);
+        fastlocals_new[nlocals_new + ncells_new + i] =
+            fastlocals_old[nlocals_old + ncells_old + i];
     }
 
     frame_id_to_code_map[(size_t)shadow] = code_map;
@@ -164,7 +177,7 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     if (frame_id >= program_cache.size()) {
         CHECK(frame_id == program_cache.size());
         frontend_csrc::FrameCache empty;
-        empty.push_back(nullptr);
+        empty.caches.push_back(nullptr);
         program_cache.push_back(empty);
         frame_id_to_need_postprocess_map[frame_id] = false;
     }
@@ -193,7 +206,7 @@ static PyObject *_custom_eval_frame(PyThreadState *tstate,
     Py_DECREF(postprocess);
     Py_DECREF(trace_func);
 
-    // set_eval_frame_callback(callback);
+    set_eval_frame_callback(callback);
     return result;
 }
 
@@ -207,6 +220,9 @@ static PyObject *custom_eval_frame_shim(PyThreadState *tstate,
     }
     assert(PyObject_IsInstance(skip_files, (PyObject *)&PySet_Type));
     if (PySet_Contains(skip_files, frame->f_code->co_filename)) {
+        return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
+    } else if (PySet_Contains(end_files, frame->f_code->co_filename)) {
+        set_eval_frame_callback(Py_None);
         return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
     }
     PyObject *result = _custom_eval_frame(tstate, frame, throw_flag, callback);
@@ -279,11 +295,15 @@ static PyObject *set_skip_files(PyObject *self, PyObject *args) {
     if (skip_files != Py_None) {
         Py_DECREF(skip_files);
     }
-    if (!PyArg_ParseTuple(args, "O", &skip_files)) {
+    if (end_files != Py_None) {
+        Py_DECREF(end_files);
+    }
+    if (!PyArg_ParseTuple(args, "OO", &skip_files, &end_files)) {
         PRINT_PYERR
         PyErr_SetString(PyExc_TypeError, "invalid parameter in set_skip_files");
     }
     Py_INCREF(skip_files);
+    Py_INCREF(end_files);
     Py_RETURN_NONE;
 }
 
@@ -296,6 +316,18 @@ static PyObject *set_null_object(PyObject *self, PyObject *args) {
     }
     Py_INCREF(obj);
     frontend_csrc::NullObjectSingleton::getInstance().setNullObject(obj);
+    Py_RETURN_NONE;
+}
+
+static PyObject *set_miss_threshold(PyObject *self, PyObject *args) {
+    PyObject *obj;
+    if (!PyArg_ParseTuple(args, "O", &obj)) {
+        PRINT_PYERR
+        PyErr_SetString(PyExc_TypeError,
+                        "invalid parameter in set_miss_threshold");
+    }
+    miss_threshold = PyLong_AsLong(obj);
+    Py_INCREF(obj);
     Py_RETURN_NONE;
 }
 
@@ -352,16 +384,16 @@ static PyObject *add_to_cache(PyObject *self, PyObject *args) {
         PyErr_SetString(PyExc_TypeError, "invalid parameter in add_to_cache");
         return NULL;
     }
-    if (callsite_id >= program_cache[frame_id].size()) {
-        CHECK(callsite_id == program_cache[frame_id].size());
-        program_cache[frame_id].push_back(nullptr);
+    if (callsite_id >= program_cache[frame_id].caches.size()) {
+        CHECK(callsite_id == program_cache[frame_id].caches.size());
+        program_cache[frame_id].caches.push_back(nullptr);
     }
     Py_INCREF(check_fn);
     Py_INCREF(graph_fn);
     frontend_csrc::Cache *entry = new frontend_csrc::Cache{
         check_fn, PyTuple_Pack(2, PyLong_FromLong(id_in_callsite), graph_fn),
-        program_cache[frame_id][callsite_id]};
-    program_cache[frame_id][callsite_id] = entry;
+        program_cache[frame_id].caches[callsite_id], false};
+    program_cache[frame_id].caches[callsite_id] = entry;
     frame_id_to_need_postprocess_map[frame_id] = true;
     Py_RETURN_NONE;
 }
@@ -374,10 +406,36 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
         PyErr_SetString(PyExc_TypeError, "invalid parameter in guard_match");
         return NULL;
     }
-    for (frontend_csrc::Cache *entry = program_cache[frame_id][callsite_id];
+
+    std::map<std::string, std::vector<std::string>> tmp_miss;
+    int hit_index = 0;
+    frontend_csrc::Cache *pre_list = NULL;
+    for (frontend_csrc::Cache *entry =
+             program_cache[frame_id].caches[callsite_id];
          entry != NULL; entry = entry->next) {
         PyObject *valid = PyObject_CallOneArg(entry->check_fn, locals);
-        if (valid == Py_True) {
+        PyObject *missed_checks = PyTuple_GetItem(valid, 0);
+        PyObject *ok = PyTuple_GetItem(valid, 1);
+
+        if (ok == Py_True) {
+            tmp_miss.clear();
+            if (hit_index > 4) {
+                frontend_csrc::Cache *list_3 = program_cache[frame_id]
+                                                   .caches[callsite_id]
+                                                   ->next->next->next;
+                pre_list->next = entry->next;
+                entry->next = list_3->next;
+                list_3->next = entry;
+            } else if (hit_index > 0) {
+                if (entry->move_to_start) {
+                    pre_list->next = entry->next;
+                    entry->next = program_cache[frame_id].caches[callsite_id];
+                    program_cache[frame_id].caches[callsite_id] = entry;
+                }
+                entry->move_to_start = !entry->move_to_start;
+            }
+            Py_DECREF(missed_checks);
+            Py_DECREF(ok);
             Py_DECREF(valid);
 #ifdef LOG_CACHE
             std::stringstream ss;
@@ -386,24 +444,93 @@ static PyObject *guard_match(PyObject *self, PyObject *args) {
             pylog(ss.str());
 #endif
             Py_INCREF(entry->graph_fn);
+            for (auto i : program_cache[frame_id].miss_locals) {
+                for (auto j : i.second) {
+                    std::cout << "local: " << i.first << ", check: " << j
+                              << std::endl;
+                }
+            }
             return entry->graph_fn;
+        } else {
+            Py_ssize_t list_size = PyList_Size(missed_checks);
+            for (Py_ssize_t i = 0; i < list_size; i++) {
+                PyObject *tuple = PyList_GetItem(missed_checks, i);
+                PyObject *local_name = PyTuple_GetItem(tuple, 0);
+                PyObject *check_name = PyTuple_GetItem(tuple, 1);
+                std::string local_name_str = PyUnicode_AsUTF8(local_name);
+                std::string check_name_str = PyUnicode_AsUTF8(check_name);
+                if (tmp_miss.find(local_name_str) == tmp_miss.end()) {
+                    tmp_miss.insert({local_name_str, std::vector<std::string>(
+                                                         1, check_name_str)});
+                } else {
+                    tmp_miss[local_name_str].push_back(check_name_str);
+                }
+            }
         }
+        hit_index++;
+        pre_list = entry;
+        Py_DECREF(missed_checks);
+        Py_DECREF(ok);
         Py_DECREF(valid);
     }
+    for (auto i : tmp_miss) {
+        if (program_cache[frame_id].miss_locals.find(i.first) ==
+            program_cache[frame_id].miss_locals.end()) {
+            program_cache[frame_id].miss_locals.insert({i.first, i.second});
+        } else {
+            program_cache[frame_id].miss_locals[i.first].insert(
+                program_cache[frame_id].miss_locals[i.first].end(),
+                i.second.begin(), i.second.end());
+        }
+    }
+    tmp_miss.clear();
 #ifdef LOG_CACHE
     std::stringstream ss;
     ss << "\033[31mguard cache miss: frame_id " << frame_id << " callsite_id "
        << callsite_id << "\033[0m";
     pylog(ss.str());
 #endif
+    for (auto i : program_cache[frame_id].miss_locals) {
+        for (auto j : i.second) {
+            std::cout << "local: " << i.first << ", check: " << j << std::endl;
+        }
+    }
     return PyTuple_Pack(2, PyLong_FromLong(-1), Py_None);
+}
+
+static PyObject *get_miss_locals(PyObject *self, PyObject *args) {
+    int frame_id;
+    if (!PyArg_ParseTuple(args, "i", &frame_id)) {
+        PRINT_PYERR;
+        PyErr_SetString(PyExc_TypeError,
+                        "invalid parameter in get_missed_locals");
+        return NULL;
+    }
+
+    std::vector<std::string> missed_locals;
+    for (auto i : program_cache[frame_id].miss_locals) {
+        if (i.second.size() >= miss_threshold) {
+            missed_locals.push_back(i.first);
+        }
+    }
+
+    PyObject *py_list = PyList_New(missed_locals.size());
+    for (size_t i = 0; i < missed_locals.size(); ++i) {
+        PyObject *py_str = PyUnicode_FromString(missed_locals[i].c_str());
+        if (!py_str) {
+            Py_DECREF(py_list);
+            return NULL;
+        }
+        PyList_SetItem(py_list, i, py_str);
+    }
+    return py_list;
 }
 
 static PyObject *reset(PyObject *self, PyObject *args) {
     // as we cannot recover the frame_id assigned by _PyCode_GetExtra, we only
     // clear the cache of each frame, and keeps the program_cache vector
     for (frontend_csrc::FrameCache &frame_cache : program_cache) {
-        for (frontend_csrc::Cache *entry : frame_cache) {
+        for (frontend_csrc::Cache *entry : frame_cache.caches) {
             if (entry == nullptr) {
                 continue;
             }
@@ -411,8 +538,9 @@ static PyObject *reset(PyObject *self, PyObject *args) {
             Py_DECREF(entry->graph_fn);
             delete entry;
         }
-        frame_cache.clear();
-        frame_cache.push_back(nullptr);
+        frame_cache.caches.clear();
+        frame_cache.miss_locals.clear();
+        frame_cache.caches.push_back(nullptr);
     }
     for (auto frame_id : frame_id_to_need_postprocess_map) {
         frame_id_to_need_postprocess_map[frame_id.first] = false;
@@ -502,6 +630,21 @@ static PyObject *get_from_freevars(PyObject *self, PyObject *args) {
     return value;
 }
 
+static PyObject *set_local(PyObject *self, PyObject *args) {
+    PyObject *frame;
+    int index;
+    PyObject *value;
+    if (!PyArg_ParseTuple(args, "OiO", &frame, &index, &value)) {
+        PRINT_PYERR;
+        PyErr_SetString(PyExc_TypeError, "invalid parameter in set_local");
+        return NULL;
+    }
+    PyFrameObject *f = (PyFrameObject *)frame;
+    f->f_localsplus[index] = value;
+    Py_INCREF(value);
+    Py_RETURN_NONE;
+}
+
 static PyObject *mark_need_postprocess(PyObject *self, PyObject *args) {
     int frame_id;
     if (!PyArg_ParseTuple(args, "i", &frame_id)) {
@@ -518,11 +661,13 @@ static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame, METH_VARARGS, NULL},
     {"set_skip_files", set_skip_files, METH_VARARGS, NULL},
     {"set_null_object", set_null_object, METH_VARARGS, NULL},
+    {"set_miss_threshold", set_miss_threshold, METH_VARARGS, NULL},
     {"get_value_stack_from_top", get_value_stack_from_top, METH_VARARGS, NULL},
     {"set_value_stack_from_top", set_value_stack_from_top, METH_VARARGS, NULL},
     {"get_value_stack_size", get_value_stack_size, METH_VARARGS, NULL},
     {"guard_match", guard_match, METH_VARARGS, NULL},
     {"add_to_cache", add_to_cache, METH_VARARGS, NULL},
+    {"get_miss_locals", get_miss_locals, METH_VARARGS, NULL},
     {"enter_nested_tracer", enter_nested_tracer, METH_VARARGS, NULL},
     {"exit_nested_tracer", exit_nested_tracer, METH_VARARGS, NULL},
     {"c_reset", reset, METH_VARARGS, NULL},
@@ -541,13 +686,18 @@ static PyMethodDef _methods[] = {
     {"get_code_map", get_code_map, METH_VARARGS, NULL},
     {"is_bound_method", is_bound_method, METH_VARARGS, NULL},
     {"get_from_freevars", get_from_freevars, METH_VARARGS, NULL},
+    {"set_local", set_local, METH_VARARGS, NULL},
     {"parse_rangeiterobject", frontend_csrc::parse_rangeiterobject,
      METH_VARARGS, NULL},
     {"parse_mapproxyobject", frontend_csrc::parse_mapproxyobject, METH_VARARGS,
      NULL},
     {"make_rangeiterobject", frontend_csrc::make_rangeiterobject, METH_VARARGS,
      NULL},
-    {NULL, NULL, 0, NULL}};
+    {"parse_mapobject", frontend_csrc::parse_mapobject, METH_VARARGS, NULL},
+    {"parse_cell", frontend_csrc::parse_cell, METH_VARARGS, NULL},
+    {"set_cell", frontend_csrc::set_cell, METH_VARARGS, NULL},
+    {NULL, NULL, 0, NULL},
+};
 
 static struct PyModuleDef _module = {
     PyModuleDef_HEAD_INIT, "frontend.c_api",

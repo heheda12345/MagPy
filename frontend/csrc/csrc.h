@@ -1,4 +1,6 @@
 #pragma once
+#include <map>
+#include <string>
 #include <vector>
 
 struct _object;
@@ -28,9 +30,14 @@ struct Cache {
     PyObject *check_fn;
     PyObject *graph_fn;
     Cache *next;
+    bool move_to_start;
 };
 
-typedef std::vector<Cache *> FrameCache;
+struct FrameCache {
+    std::vector<Cache *> caches;
+    std::map<std::string, std::vector<std::string>> miss_locals;
+};
+
 typedef std::vector<FrameCache> ProgramCache;
 
 // When not understanding an opcode, mark it as {-1, 0, stack_effect}
@@ -48,5 +55,8 @@ StackEffect stack_effect(int opcode, int oparg, int jump);
 PyObject *parse_rangeiterobject(PyObject *self, PyObject *args);
 PyObject *make_rangeiterobject(PyObject *self, PyObject *args);
 PyObject *parse_mapproxyobject(PyObject *self, PyObject *args);
+PyObject *parse_mapobject(PyObject *self, PyObject *args);
+PyObject *parse_cell(PyObject *self, PyObject *args);
+PyObject *set_cell(PyObject *self, PyObject *args);
 
 } // namespace frontend_csrc

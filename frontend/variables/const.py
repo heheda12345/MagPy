@@ -9,6 +9,7 @@ from ..pycode_writer import get_float_string
 from ..fx_graph import NodeArgs, FxGraph
 from ..utils import NullObject, null_object
 from ..store_pos import StorePos, StoreInFreeVar, StoreInAttr
+from ..c_api import parse_cell
 if TYPE_CHECKING:
     from ..pycode_generator import GraphFnCodegen, GuardFnCodegen
     from ..object_table import ObjectTable
@@ -23,7 +24,7 @@ class NoneVar(Variable):
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
         for pos in self.extract_code_at_start:
-            codegen.add_check(f"{pos} is None")
+            codegen.add_check((f"{pos} is None", pos))
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
@@ -77,7 +78,7 @@ class CodeVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_id_check(f"id({pos}) == {id(self.obj)}", self.obj)
+        codegen.add_id_check((f"id({pos}) == {id(self.obj)}", pos), self.obj)
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
@@ -112,7 +113,7 @@ class SliceVar(Variable):
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
         codegen.add_check(
-            f"{pos} == slice({self.start}, {self.stop}, {self.step})")
+            (f"{pos} == slice({self.start}, {self.stop}, {self.step})", pos))
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
@@ -141,7 +142,7 @@ class EllipsisVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_id_check(f"id({pos}) == {id(self.obj)}", self.obj)
+        codegen.add_id_check((f"id({pos}) == {id(self.obj)}", pos), self.obj)
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
@@ -171,7 +172,7 @@ class ModuleVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_id_check(f"id({pos}) == {id(self.obj)}", self.obj)
+        codegen.add_id_check((f"id({pos}) == {id(self.obj)}", pos), self.obj)
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
@@ -203,7 +204,7 @@ class FunctionVar(Variable):
             if func.__closure__ is not None:
                 assert len(func.__code__.co_freevars) == len(func.__closure__)
                 for i, x in enumerate(func.__closure__):
-                    if x.cell_contents != func:
+                    if parse_cell(x) != func:
                         cell_var = helper_functions.get_or_make_var(
                             x, need_guard_check, fx_graph, [StoreInFreeVar(i)])
                         self.closure_vars.append(cell_var)
@@ -215,7 +216,8 @@ class FunctionVar(Variable):
                                                         torch.Tensor):
             pass
         else:
-            codegen.add_id_check(f"id({pos}) == {id(self.obj)}", self.obj)
+            codegen.add_id_check((f"id({pos}) == {id(self.obj)}", pos),
+                                 self.obj)
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
@@ -226,10 +228,10 @@ class FunctionVar(Variable):
 
     @classmethod
     def from_value(cls, value: Callable[..., Any], need_guard_check: bool,
-                   _helper_functions: HelperFunctions,
-                   _fx_graph: Optional[FxGraph],
+                   helper_functions: HelperFunctions,
+                   fx_graph: Optional[FxGraph],
                    extract_code_at_start: list[StorePos]) -> "FunctionVar":
-        return cls(value, need_guard_check, _helper_functions, _fx_graph,
+        return cls(value, need_guard_check, helper_functions, fx_graph,
                    extract_code_at_start)
 
     def add_subvars_to_table(self, table: 'ObjectTable') -> None:
@@ -262,7 +264,7 @@ class RangeVar(Variable):
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
         codegen.add_check(
-            f"{pos} == range({self.start}, {self.stop}, {self.step})")
+            (f"{pos} == range({self.start}, {self.stop}, {self.step})", pos))
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,

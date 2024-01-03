@@ -1,3 +1,4 @@
+import pytest
 from frontend.compile import compile
 from frontend.utils import add_force_graph_break, enable_dyn_shape
 from frontend.c_api import get_next_frame_id
@@ -276,6 +277,7 @@ def test_bn_function_factory_break(caplog):
     assert_equal(out, expect)
 
 
+@pytest.mark.model
 def test_model_densenet(caplog):
     reset()
     model = get_model()
@@ -287,6 +289,7 @@ def test_model_densenet(caplog):
     run_and_check(compiled, [HIT], 1, caplog, expect, *inputs[0], **inputs[1])
 
 
+@pytest.mark.model
 def test_model_densenet_dyn(caplog):
     reset()
     with enable_dyn_shape():

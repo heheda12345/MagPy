@@ -1,15 +1,21 @@
+import os
+if 'LD_PRELOAD' in os.environ:
+    del os.environ['LD_PRELOAD']
 import pytest
 from frontend.compile import compile, reset
 from frontend.utils import add_force_graph_break
 from frontend.c_api import get_next_frame_id
 import logging
-from common.checker import run_and_check, HIT, MISS
+from common.checker import run_and_check, HIT, MISS, ALL_MISS
 
 import torch
 import torch.nn as nn
 import random
 import math
 import torch.nn.functional as F
+from frontend.dynamic import add_branch_rewrite_pc
+from frontend.control_flow import if_stmt
+from frontend.utils import SetConfig
 
 
 class Identity(nn.Module):
@@ -243,6 +249,7 @@ def get_input(batch_size):
                        32).cuda(), torch.randint(0, 2, (batch_size, 15)).cuda()
 
 
+@pytest.mark.model
 def test_blockdrop_full(caplog):
     reset()
     with torch.no_grad():
@@ -254,3 +261,26 @@ def test_blockdrop_full(caplog):
         compiled = compile(model.forward_full)
         run_and_check(compiled, [MISS] * 20, 1, caplog, expect_result, inp)
         run_and_check(compiled, [HIT], 1, caplog, expect_result, inp)
+
+
+import os
+
+
+@pytest.mark.skipif(os.getenv('FORCE_RUN_SKIPPED_TEST') != '1',
+                    reason="will affect other tests, run it solo")
+def test_blockdrop_dyn(caplog):
+    reset()
+    with torch.no_grad():
+        with SetConfig({"backend": "eager"}):
+            model = FlatResNet32(BasicBlock, [5, 5, 5]).cuda()
+            model.eval()
+            batch_size = 2
+            inp = torch.randn(batch_size, 3, 32, 32, device="cuda")
+            policy = torch.randint(0, 2, (batch_size, 15), device="cuda")
+            expect_result = model(inp, policy)
+            add_branch_rewrite_pc(get_next_frame_id(), 51)
+            compiled = compile(model)
+            run_and_check(compiled, [ALL_MISS], 1, caplog, expect_result, inp,
+                          policy)
+            run_and_check(compiled, [HIT], 1, caplog, expect_result, inp,
+                          policy)
