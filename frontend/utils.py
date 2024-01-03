@@ -174,7 +174,8 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
     # print([(x, getattr(func, x)) for x in dir(func)])
     import numpy
     if hasattr(func, '__objclass__') and func.__objclass__ in (
-            torch._C._TensorBase, dict, list, str, collections.OrderedDict, numpy.ndarray):
+            torch._C._TensorBase, dict, list, str, collections.OrderedDict,
+            numpy.ndarray):
         return False
     if hasattr(func, '__class__') and func.__class__ in (
             torch._C._TensorBase, dict, list, str, collections.OrderedDict,

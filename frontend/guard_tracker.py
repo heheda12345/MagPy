@@ -1950,8 +1950,8 @@ class GuardTracker:
                     (obj_var.as_fx_node(), inst.argval), {})
         elif config.get_config('dynshape') and isinstance(
                 obj, torch.Tensor) and inst.argval == 'shape':
-            node: Optional[torch.fx.Node] = self.state.fx_graph.create_node(
-                "call_method", "size", (obj_var.as_fx_node(),), {})
+            node = self.state.fx_graph.create_node("call_method", "size",
+                                                   (obj_var.as_fx_node(),), {})
             need_guard_check = False
         elif isinstance(obj, torch.Tensor) and inst.argval == 'data':
             node = obj_var.as_fx_node()

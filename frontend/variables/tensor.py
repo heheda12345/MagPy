@@ -267,7 +267,7 @@ class TorchLayoutVar(Variable):
 
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
-        codegen.add_check(f"{pos} == torch.layout('{self.layout}')")
+        codegen.add_check((f"{pos} == torch.layout('{self.layout}')", pos))
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
