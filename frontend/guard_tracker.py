@@ -194,7 +194,7 @@ class State:
             if isinstance(var, vs.FunctionVar):
                 if hasattr(var.obj, '__name__') and hasattr(
                         var.obj, "__module__"):
-                    assert var.obj.__module__ == 'torch'
+                    assert var.obj.__module__ in ('torch', 'numpy')
                     return f'{var.obj.__module__}.{var.obj.__name__}'
             return var.as_fx_node()
 
@@ -1135,8 +1135,8 @@ class GuardTracker:
         if isinstance(value, (tuple, list)):
             for i, sub_value in enumerate(value):
                 if isinstance(sub_value, torch.Tensor):
-                    if self.state.objects.contains(sub_value):
-                        raise NotImplementedError
+                    # if self.state.objects.contains(sub_value):
+                    #     raise NotImplementedError
                     fx_node = self.state.fx_graph.create_node(
                         "call_function", operator.getitem, (node, i), {})
                     sub_var = vs.TensorVar.from_tensor_and_node(
@@ -1586,13 +1586,6 @@ class GuardTracker:
             return
         elif self.is_builtin_func(func):
             # TODO: add map and set correct partial var
-            # self.state.set_partial_var({
-            #         -1: [
-            #             PartialVar(node=None,
-            #                     need_guard_check=False,
-            #                     extract_code_at_start=[])
-            #         ]
-            #     })
             return
         elif is_graph_func(func):
             return
@@ -2220,21 +2213,6 @@ class GuardTracker:
             ExtractFromMethod(pos, id(obj), '__iter__')
             for pos in obj_var.extract_code_at_start
         ]
-
-        # iter is a tensor?
-        # if isinstance(obj, torch.Tensor):
-        #     func = torch.Tensor.__iter__
-        #     print("run into user defined function", func)
-        #     stack_objs = get_all_objects_in_stack(self.frame)
-        #     self.state.mark_calling_func(func)
-        #     self.state.mark_defer_restart(
-        #         DeferRestartState(stack_objs, self.get_live_objs(),
-        #                           self.frame.f_lasti, f"call_function"))
-        #     from .tracer import get_process_frame
-        #     preprocess_frame, post_process_frame = get_process_frame(func, True)
-        #     prior = set_eval_frame((preprocess_frame, post_process_frame))
-        #     assert prior is None
-        #     assert self.state.written == False
 
         def make_iterable_fn(
                 value: Any, need_guard_check: bool,
