@@ -42,6 +42,30 @@ def backend_compile(gm: torch.fx.GraphModule,
     elif backend == 'eager':
         return gm
     elif backend == 'inductor':
+
+        def fetch_attr(gm, target: str) -> Any:
+            target_atoms = target.split('.')
+            attr_itr = gm
+            for i, atom in enumerate(target_atoms):
+                if not hasattr(attr_itr, atom):
+                    raise RuntimeError(
+                        f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}"
+                    )
+                attr_itr = getattr(attr_itr, atom)
+            return attr_itr
+
+        def eager_due_to_inductor_bug(node: torch.fx.Node) -> bool:
+
+            if node.op == 'call_module':
+                module = fetch_attr(gm, node.target)
+                if isinstance(module, torch.nn.RNNBase):
+                    return True
+            return False
+
+        for node in gm.graph.nodes:
+            if eager_due_to_inductor_bug(node):
+                print("fall back to eager due to", node)
+                return gm
         return torch._inductor.compile_fx.compile_fx(gm, example_inputs)
     elif backend == 'xla':
         return torch._dynamo.backends.torchxla.aot_torchxla_trace_once(

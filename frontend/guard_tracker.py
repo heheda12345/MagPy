@@ -1243,38 +1243,40 @@ class GuardTracker:
                     partial.extract_code_at_start,
                 )
             elif node is not None:
+
+                def make_sub_var(value: Any, fx_node: torch.fx.Node) -> None:
+                    if isinstance(value, torch.Tensor):
+                        if self.state.objects.contains(value):
+                            raise NotImplementedError
+                        new_var = vs.TensorVar.from_tensor_and_node(
+                            value, fx_node, partial.need_guard_check,
+                            partial.extract_code_at_start)
+                        self.state.objects.add(new_var, value)
+                    elif is_scalar(value):
+                        assert isinstance(value,
+                                          (int, float)), "not implemented"
+                        if self.state.objects.contains(value):
+                            if dyn.contains(value):
+                                return
+                            raise NotImplementedError
+                        new_scalar_var = vs.ScalarVar.from_value_and_node(
+                            value, fx_node, partial.need_guard_check,
+                            partial.extract_code_at_start)
+                        self.state.objects.add(new_scalar_var, value)
+                        dyn.mark_dynamic(value, dyn.ScalarWithUnknownValue())
+                    elif isinstance(value, tuple):
+                        for i, sub_value in enumerate(value):
+                            sub_node = self.state.fx_graph.create_node(
+                                "call_function", operator.getitem, (fx_node, i),
+                                {})
+                            make_sub_var(sub_value, sub_node)
+                    else:
+                        print("tuple inner unknown node", sub_value,
+                              type(sub_value))
+                        raise NotImplementedError(type(sub_value))
+
                 if isinstance(value, tuple):
-                    for i, sub_value in enumerate(value):
-                        if isinstance(sub_value, torch.Tensor):
-                            if self.state.objects.contains(sub_value):
-                                raise NotImplementedError
-                            fx_node = self.state.fx_graph.create_node(
-                                "call_function", operator.getitem, (node, i),
-                                {})
-                            sub_var = vs.TensorVar.from_tensor_and_node(
-                                sub_value, fx_node, partial.need_guard_check,
-                                partial.extract_code_at_start)
-                            self.state.objects.add(sub_var, sub_value)
-                        elif is_scalar(sub_value):
-                            assert isinstance(sub_value,
-                                              (int, float)), "not implemented"
-                            if self.state.objects.contains(sub_value):
-                                if dyn.contains(sub_value):
-                                    continue
-                                raise NotImplementedError
-                            fx_node = self.state.fx_graph.create_node(
-                                "call_function", operator.getitem, (node, i),
-                                {})
-                            sub_scalar_var = vs.ScalarVar.from_value_and_node(
-                                sub_value, fx_node, partial.need_guard_check,
-                                partial.extract_code_at_start)
-                            self.state.objects.add(sub_scalar_var, sub_value)
-                            dyn.mark_dynamic(sub_value,
-                                             dyn.ScalarWithUnknownValue())
-                        else:
-                            print("tuple inner unknown node", sub_value,
-                                  type(sub_value))
-                            raise NotImplementedError(type(sub_value))
+                    make_sub_var(value, node)
                 elif inspect.isclass(type(value)):
                     pass
                 else:

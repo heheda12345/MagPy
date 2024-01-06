@@ -373,3 +373,70 @@ def test_lstm_unroll(caplog):
         compiled = compile(model)
         run_and_check(compiled, [ALL_MISS], 1, caplog, expect_result, inputs)
         run_and_check(compiled, [HIT], 1, caplog, expect_result, inputs)
+
+
+# generated/test_BangLiu_QANet_PyTorch.py
+class RNN(nn.Module):
+    """
+    General Recurrent Neural Network module.
+    Input: tensor of shape (seq_len, batch, input_size)
+    Output: tensor of shape (seq_len, batch, hidden_size * num_directions)
+    """
+
+    def __init__(self,
+                 input_size,
+                 hidden_size,
+                 output_projection_size=None,
+                 num_layers=1,
+                 bidirectional=True,
+                 cell_type='lstm',
+                 dropout=0,
+                 pack=False,
+                 batch_first=False,
+                 init_method='default'):
+        super().__init__()
+        self.input_layer = nn.Linear(input_size, hidden_size)
+        if output_projection_size is not None:
+            self.output_layer = nn.Linear(
+                hidden_size * 2 if bidirectional else hidden_size,
+                output_projection_size)
+        self.pack = pack
+        network = self._get_rnn(cell_type)
+        self.network = network(input_size=input_size,
+                               hidden_size=hidden_size,
+                               num_layers=num_layers,
+                               bidirectional=bidirectional,
+                               dropout=dropout,
+                               batch_first=batch_first)
+
+    def forward(self, input_variable):
+        outputs, hidden = self.network(input_variable)
+        if self.pack:
+            padded_outputs, lengths = pad_packed_sequence(outputs)
+            if hasattr(self, 'output_layer'):
+                outputs = pack_padded_sequence(
+                    self.output_layer(padded_outputs), lengths)
+        elif hasattr(self, 'output_layer'):
+            outputs = self.output_layer(outputs)
+        return outputs, hidden
+
+    def _get_rnn(self, rnn_type):
+        rnn_type = rnn_type.lower()
+        if rnn_type == 'gru':
+            network = torch.nn.GRU
+        elif rnn_type == 'lstm':
+            network = torch.nn.LSTM
+        else:
+            raise ValueError('Invalid RNN type %s' % rnn_type)
+        return network
+
+
+def test_builtin_rnn(caplog):
+    reset()
+    with torch.no_grad():
+        model = RNN(4, 4)
+        x = torch.randn(4, 4)
+        expect_result = model(x)
+        compiled_model = compile(model)
+        run_and_check(compiled_model, [MISS], 1, caplog, expect_result, x)
+        run_and_check(compiled_model, [HIT], 1, caplog, expect_result, x)
