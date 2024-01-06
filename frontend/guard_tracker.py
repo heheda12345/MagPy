@@ -373,6 +373,20 @@ class State:
             if len(var.extract_code_at_start) == 0:
                 return None
             return var.extract_code_at_start[0]
+        elif hasattr(pos, "self_id"):
+            import _ctypes
+            obj = _ctypes.PyObj_FromPtr(pos.self_id)
+            if isinstance(obj, tuple):
+                for i in obj:
+                    if isinstance(i, torch.Tensor) and self.objects.contains(i):
+                        continue
+                    elif is_scalar(i):
+                        continue
+                    else:
+                        raise ValueError(f"unknow value in merged tuple: {i}")
+                tuple_var = vs.TupleVar.from_value(obj, False, self.objects.helper_functions, self.fx_graph, [])
+                self.objects.add(tuple_var, obj)
+                return None
         if isinstance(pos, StoreInLocal):
             raise ValueError("unknown local in callee", pos)
         elif isinstance(pos, StoreInStack):
@@ -1421,7 +1435,7 @@ class GuardTracker:
 
     def is_builtin_func(self, func: Callable[..., Any]) -> bool:
         return func in (dict, tuple, set, list, hasattr, slice, range, len,
-                        super, type, all, str.join, reversed, zip)
+                        super, type, all, str.join, reversed, zip, iter)
 
     def get_live_objs(self, pc: int = -1) -> list[tuple[str, Any]]:
         if pc == -1:
@@ -1574,8 +1588,12 @@ class GuardTracker:
                 })
 
         pc, inst = self.code.get_orig_inst(self.frame.f_lasti)
+        if len(args) == 1 and isinstance(args[0], (tuple, list)) and func != len:
+            has_tensor_flag = self.has_tensor_arg(args[0], kwargs)
+        else:
+            has_tensor_flag = self.has_tensor_arg(args, kwargs)
         if get_root_module(func) == 'torch' or (
-                self.has_tensor_arg(args, kwargs) and
+                has_tensor_flag and
             (is_graph_func(func) or is_math_func(func) or
              func in (float, int, min, max, len, list, abs, sum))):
             if hasattr(func, "__name__") and (
@@ -1596,7 +1614,7 @@ class GuardTracker:
             if hasattr(func,
                        "__name__") and func.__name__ in ("flatten_parameters",):
                 return
-            # print("record function in graph", func)
+            print("record function in graph", func)
             self.state.record_function(
                 func,
                 args,
@@ -1968,17 +1986,17 @@ class GuardTracker:
         self.state.set_partial_var({-1: partial})
 
     def LOAD_CLOSURE(self, inst: Instruction) -> None:
-        if inst.argval not in self.state.stored_locals:
-            obj = get_from_freevars(self.frame, inst.arg)
-            pos = StoreInFreeVar(inst.arg)
-            cell_obj = parse_cell(obj)
-            need_guard_check = not isinstance(
-                cell_obj,
-                NullObject) and not self.state.objects.contains(cell_obj)
-            var = vs.make_var_from_value(obj, need_guard_check,
-                                         self.state.objects.helper_functions,
-                                         self.state.fx_graph, [pos])
-            self.state.add_object(var, obj)
+        # if inst.argval not in self.state.stored_locals:
+        obj = get_from_freevars(self.frame, inst.arg)
+        pos = StoreInFreeVar(inst.arg)
+        cell_obj = parse_cell(obj)
+        need_guard_check = not isinstance(
+            cell_obj,
+            NullObject) and not self.state.objects.contains(cell_obj)
+        var = vs.make_var_from_value(obj, need_guard_check,
+                                        self.state.objects.helper_functions,
+                                        self.state.fx_graph, [pos])
+        self.state.add_object(var, obj)
 
     def CALL_FUNCTION(self, inst: Instruction) -> None:
         num_args = inst.argval
@@ -2110,7 +2128,12 @@ class GuardTracker:
         self.binary_operation(operator.is_)
 
     def BUILD_TUPLE(self, inst: Instruction) -> None:
-        pass
+        partial: list[Optional[PartialVar]] = [
+            PartialVar(node=None,
+                       need_guard_check=False,
+                       extract_code_at_start=[])
+        ]
+        self.state.set_partial_var({-1: partial})
 
     def BUILD_LIST(self, inst: Instruction) -> None:
         pass
