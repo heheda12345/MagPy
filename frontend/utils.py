@@ -418,6 +418,9 @@ def is_high_order_func_with_udf(func: Callable[..., Any], args: List[Any],
             args[1]
         )  # not check args[0] is udf because the function is not called during map() call
     elif func == list:
-        return call_user_defined_iterator(args[0])
+        if len(args) > 0:
+            return call_user_defined_iterator(args[0])
+        else:
+            return False
     else:
         raise NotImplementedError

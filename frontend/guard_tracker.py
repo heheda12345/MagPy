@@ -630,7 +630,10 @@ class State:
                         if isinstance(attr_obj, (int, float, str)):
                             attr_var = self.objects.get(attr_obj, True)
                         else:
-                            attr_var = self.objects.get(attr_obj, False)
+                            if self.objects.contains(attr_obj):
+                                attr_var = self.objects.get(attr_obj, False)
+                            else:
+                                attr_var = state.objects.get(attr_obj, False)
                         assert attr_var is not None
                         new_attr_extract: list[StorePos] = get_new_store_pos(
                             attr_var.extract_code_at_start, id(attr_obj))
@@ -1376,6 +1379,7 @@ class GuardTracker:
                 elif is_high_order_func(self.state.calling_func):  # zip / map
                     pass
                 else:
+                    print("aaaaaaa", self.state.calling_func)
                     raise NotImplementedError
 
         self.state.inplace_update_objs.clear()
@@ -2222,6 +2226,11 @@ class GuardTracker:
             #     ]
             # })
             # pass
+            print("check data", seq, type(seq))
+            if self.state.objects.contains(seq):
+                print("jjjjjj")
+            for i in seq:
+                print(i)
             raise NotImplementedError
 
     def UNPACK_EX(self, inst: Instruction) -> None:

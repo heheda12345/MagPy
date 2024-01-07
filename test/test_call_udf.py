@@ -484,3 +484,42 @@ def test_call_parameter(caplog):
     expect = call_with_tuple(input)
     run_and_check(compiled2, [ALL_MISS], 2, caplog, expect, input)
     run_and_check(compiled2, [HIT], 2, caplog, expect, input)
+
+
+class modifiedAttr(torch.nn.Module):
+
+    def __init__(self, kernel, factor=2):
+        super(modifiedAttr, self).__init__()
+        self.factor = factor
+        self.kernel = kernel
+
+    def forward(self, x):
+        self.kernel = x
+        self.factor = x + 1
+        out = self.kernel + x
+        return out
+
+
+class modifyAttr(torch.nn.Module):
+
+    def __init__(self, in_size, out_size, is_deconv, n_concat=2):
+        super(modifyAttr, self).__init__()
+        self.in_size = in_size
+        self.out_size = out_size
+        self.is_deconv = is_deconv
+        self.call = modifiedAttr(torch.rand([2, 2]))
+
+    def forward(self, high_feature):
+        out = self.call(high_feature)
+        return out
+
+
+def test_modify_attr(caplog):
+    reset()
+    with torch.no_grad():
+        model = modifyAttr(1, 2, True)
+        compiled = compile(model)
+        input = torch.randn([2, 2, 2])
+        expect = model(input)
+        run_and_check(compiled, [ALL_MISS], 1, caplog, expect, input)
+        run_and_check(compiled, [HIT], 1, caplog, expect, input)
