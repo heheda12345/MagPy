@@ -43,7 +43,7 @@ def backend_compile(gm: torch.fx.GraphModule,
         return gm
     elif backend == 'inductor':
 
-        def fetch_attr(gm, target: str) -> Any:
+        def fetch_attr(gm: torch.fx.GraphModule, target: str) -> Any:
             target_atoms = target.split('.')
             attr_itr = gm
             for i, atom in enumerate(target_atoms):
