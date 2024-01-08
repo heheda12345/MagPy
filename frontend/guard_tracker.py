@@ -1220,46 +1220,6 @@ class GuardTracker:
 
         self.state.is_empty = True
 
-    def process_last_container_var(self, value: Any,
-                                   partial: PartialVar) -> None:
-        node = partial.node
-        assert node is not None
-        import numpy
-        if isinstance(value, (tuple, list)):
-            for i, sub_value in enumerate(value):
-                if isinstance(sub_value, torch.Tensor):
-                    # if self.state.objects.contains(sub_value):
-                    #     raise NotImplementedError
-                    fx_node = self.state.fx_graph.create_node(
-                        "call_function", operator.getitem, (node, i), {})
-                    sub_var = vs.TensorVar.from_tensor_and_node(
-                        sub_value, fx_node, partial.need_guard_check,
-                        partial.extract_code_at_start)
-                    self.state.objects.add(sub_var, sub_value)
-                elif is_scalar(sub_value):
-                    assert isinstance(sub_value,
-                                      (int, float)), "not implemented"
-                    if self.state.objects.contains(sub_value):
-                        if dyn.contains(sub_value):
-                            continue
-                        # print("sub var", sub_value)
-                        # raise NotImplementedError
-                    fx_node = self.state.fx_graph.create_node(
-                        "call_function", operator.getitem, (node, i), {})
-                    sub_scalar_var = vs.ScalarVar.from_value_and_node(
-                        sub_value, fx_node, partial.need_guard_check,
-                        partial.extract_code_at_start)
-                    self.state.objects.add(sub_scalar_var, sub_value)
-                    dyn.mark_dynamic(sub_value, dyn.ScalarWithUnknownValue())
-                elif sub_value is None:
-                    pass
-                elif isinstance(sub_value, (tuple, list, numpy.ndarray)):
-                    self.process_last_container_var(sub_value, partial)
-                else:
-                    print("container inner unknown node", sub_value,
-                          type(sub_value))
-                    raise NotImplementedError(type(sub_value))
-
     def process_last_inst(self) -> None:
         if self.state.num_new_refs == -1:
             self.state.num_new_refs = get_value_stack_size(self.frame)
@@ -1358,8 +1318,39 @@ class GuardTracker:
                     partial.extract_code_at_start,
                 )
             elif node is not None:
+
+                def make_sub_var(value: Any, fx_node: torch.fx.Node) -> None:
+                    if isinstance(value, torch.Tensor):
+                        # if self.state.objects.contains(value):
+                        #     raise NotImplementedError
+                        new_var = vs.TensorVar.from_tensor_and_node(
+                            value, fx_node, partial.need_guard_check,
+                            partial.extract_code_at_start)
+                        self.state.objects.add(new_var, value)
+                    elif is_scalar(value):
+                        assert isinstance(value,
+                                          (int, float)), "not implemented"
+                        if self.state.objects.contains(value):
+                            if dyn.contains(value):
+                                return
+                            # raise NotImplementedError
+                        new_scalar_var = vs.ScalarVar.from_value_and_node(
+                            value, fx_node, partial.need_guard_check,
+                            partial.extract_code_at_start)
+                        self.state.objects.add(new_scalar_var, value)
+                        dyn.mark_dynamic(value, dyn.ScalarWithUnknownValue())
+                    elif isinstance(value, (tuple, list)):
+                        for i, sub_value in enumerate(value):
+                            sub_node = self.state.fx_graph.create_node(
+                                "call_function", operator.getitem, (fx_node, i),
+                                {})
+                            make_sub_var(sub_value, sub_node)
+                    else:
+                        print("tuple inner unknown node", value, type(value))
+                        raise NotImplementedError(type(value))
+
                 if isinstance(value, (tuple, list)):
-                    self.process_last_container_var(value, partial)
+                    make_sub_var(value, node)
                 elif inspect.isclass(type(value)):
                     pass
                 else:
@@ -1500,7 +1491,8 @@ class GuardTracker:
 
     def is_builtin_func(self, func: Callable[..., Any]) -> bool:
         return func in (dict, tuple, set, list, hasattr, slice, range, len,
-                        super, type, map, filter, enumerate, all, str.join, reversed, zip, iter)
+                        super, type, map, filter, enumerate, all, str.join,
+                        reversed, zip, iter)
 
     def get_live_objs(self, pc: int = -1) -> list[tuple[str, Any]]:
         if pc == -1:
@@ -1538,7 +1530,6 @@ class GuardTracker:
                                extract_code_at_start=new_store_pos)
                 ]
             })
-            return
         if func == super:
             obj = self.state.initial_args[0]
             name = self.frame.f_code.co_varnames[0]
