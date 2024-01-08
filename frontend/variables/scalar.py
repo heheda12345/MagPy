@@ -61,8 +61,10 @@ class ScalarVar(Variable):
                                in_return, idx)
         else:
             name_in_graph_output = codegen.add_graph_output(self.fx_node)
-            codegen.output(name_in_graph_fn, store_pos,
-                           name_in_graph_output + '.item()', in_return, idx)
+            codegen.output(
+                name_in_graph_fn, store_pos,
+                f'{name_in_graph_output}.item() if isinstance({name_in_graph_output}, torch.Tensor) else {name_in_graph_output}',
+                in_return, idx)
 
     @classmethod
     def from_value(cls, value: ScalarType, need_guard_check: bool,
@@ -154,8 +156,10 @@ class NumpyScalarVar(Variable):
                                in_return, idx)
         else:
             name_in_graph_output = codegen.add_graph_output(self.fx_node)
-            codegen.output(name_in_graph_fn, store_pos,
-                           name_in_graph_output + '.item()', in_return, idx)
+            codegen.output(
+                name_in_graph_fn, store_pos,
+                f'{name_in_graph_output}.item() if isinstance({name_in_graph_output}, torch.Tensor) else {name_in_graph_output}',
+                in_return, idx)
 
     @classmethod
     def from_value(cls, value: np.generic, need_guard_check: bool,

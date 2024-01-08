@@ -1,12 +1,13 @@
 import inspect
 import dis
-from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic, Optional, no_type_check, Iterator, Union, Dict, List
+from typing import Any, TYPE_CHECKING, Callable, TypeVar, Generic, Optional, no_type_check, Iterator, Union, Dict, List, Generator
 from types import FrameType
 import random
 import operator
 import os
 import contextlib
 import itertools
+import math
 import torch
 import torch._C
 import collections
@@ -106,6 +107,11 @@ fx_graph_functions: set[Callable[..., Any]] = {
     operator.contains,
 }
 fx_graph_functions = fx_graph_functions.union(fx_graph_inplace_functions)
+
+math2torch = {
+    math.log2: torch.log2,
+    math.ceil: torch.ceil,
+}
 
 torch_inplace_funcs = {
     "abs_", "acos_", "acosh_", "add_", "addcmul_", "addcdiv_", "asin_",
@@ -383,8 +389,11 @@ def enable_dyn_shape() -> Iterator[None]:
             yield
 
 
+high_order_func_list = (map, filter, zip, list, iter, enumerate, tuple)
+
+
 def is_high_order_func(func: Callable[..., Any]) -> bool:
-    return func in (map, filter, zip, list)
+    return func in high_order_func_list
 
 
 def is_high_order_func_with_udf(func: Callable[..., Any], args: List[Any],
@@ -401,6 +410,8 @@ def is_high_order_func_with_udf(func: Callable[..., Any], args: List[Any],
             from .c_api import parse_mapobject
             it, map_fn = parse_mapobject(x)
             return is_user_defined_func(map_fn)
+        if isinstance(x, Generator):
+            return True
         return False
 
     if func == zip:
@@ -408,10 +419,17 @@ def is_high_order_func_with_udf(func: Callable[..., Any], args: List[Any],
             is_user_defined_iter(x)
             for x in itertools.chain(args, kwargs.values()))
     elif func in (map, filter):
-        return is_user_defined_iter(
+        return len(args) >= 2 and is_user_defined_iter(
             args[1]
         )  # not check args[0] is udf because the function is not called during map() call
     elif func == list:
-        return call_user_defined_iterator(args[0])
+        return len(args) >= 1 and call_user_defined_iterator(args[0])
+    elif func == tuple:
+        return len(args) >= 1 and call_user_defined_iterator(
+            args[0]) and not isinstance(args[0], Generator)
+    elif func == iter:
+        return len(args) >= 1 and is_user_defined_iter(args[0])
+    elif func == enumerate:
+        return len(args) >= 1 and is_user_defined_iter(args[0])
     else:
         raise NotImplementedError

@@ -22,7 +22,7 @@ from .cache import CachedGraph, get_frame_cache
 from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromNew, UnknownPosInCaller
 from . import variables as vs
 from . import dynamic as dyn
-from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs, print_bytecode, get_method_defined_class, is_math_func, is_high_order_func_with_udf, is_high_order_func
+from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs, print_bytecode, get_method_defined_class, is_math_func, is_high_order_func_with_udf, is_high_order_func, math2torch
 from .object_table import ObjectTable
 from .pycode_writer import new_name
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
@@ -192,9 +192,25 @@ class State:
                     pass
             return var.as_fx_node()
 
+        if isinstance(args, torch.Tensor):
+            args_list = []
+            arg_fx_node = as_fx_node(args)
+
+            for i, arg in enumerate(args):
+                fx_node = self.fx_graph.create_node(
+                    "call_function",
+                    operator.getitem,
+                    (arg_fx_node, i),
+                    {},
+                )
+                var = vs.TensorVar.from_tensor_and_node(arg, fx_node, False, [])
+                self.objects.add(var, arg)
+                fx_node.meta["var"] = var
+                args_list.append(arg)
+            args = args_list
+
         for arg in itertools.chain(args, kwargs.values()):
             get_common_device(arg)
-
         node_args = tuple(as_fx_node(arg) for arg in args)
         node_kwargs = {key: as_fx_node(arg) for key, arg in kwargs.items()}
 
@@ -248,6 +264,8 @@ class State:
                 pargs = tuple(pargs_list)
                 func_dict = {min: torch.minimum, max: torch.maximum}
                 func = func_dict[func]
+        if func in math2torch:
+            func = math2torch[func]
 
         self.written = True
         scalar2tensor: dict[Callable[..., Any], Callable[..., Any]] = {
@@ -282,8 +300,12 @@ class State:
                   == torch._C._TensorBase) or func in scalar2tensor:
             if func in scalar2tensor:
                 func = scalar2tensor[func]
-            elif func == torch.Tensor.new and isinstance(args[1], torch.Size):
+            elif func == torch.Tensor.new and len(args) >= 2 and isinstance(
+                    args[1], torch.Size):
                 func = torch.Tensor.new_empty
+            elif func == torch.Tensor.item:
+                assert args[0].numel() == 1
+                func = torch.Tensor.clone
 
             fx_node = self.fx_graph.create_node("call_method", func.__name__,
                                                 pargs, pkwargs)
@@ -601,7 +623,7 @@ class State:
                                                    allow_unexist_const=True)
                     for attr_name in callee_var.modified_attrs.keys():
                         attr_obj = getattr(obj, attr_name)
-                        attr_var = self.objects.get(attr_obj, False)
+                        attr_var = self.objects.get(attr_obj, True)
                         assert attr_var is not None
                         new_attr_extract: list[StorePos] = get_new_store_pos(
                             attr_var.extract_code_at_start, id(attr_obj))
@@ -655,6 +677,7 @@ class State:
                     get_or_make_var(var.obj, False, self.fx_graph, new_extract)
             if calling_func is None or not is_high_order_func(calling_func):
                 for obj in stack_objs:
+                    state.fetch_function_parameters(obj)
                     var = state.objects.get(obj, allow_unexist_const=True)
                     new_extract = get_new_store_pos(var.extract_code_at_start,
                                                     id(var.obj))
@@ -713,6 +736,13 @@ class State:
 
     def mark_cannot_guard(self) -> None:
         self.can_guard = False
+
+    def fetch_function_parameters(self, obj: Any) -> None:
+        if not self.objects.contains(obj):
+            var = vs.make_var_from_value(obj, False,
+                                         self.objects.helper_functions,
+                                         self.fx_graph, [])
+            self.objects.add_by_id(var, id(obj))
 
 
 class GuardTracker:
@@ -1151,13 +1181,6 @@ class GuardTracker:
 
         self.state.is_empty = True
 
-    def fetch_function_parameters(self, obj: Any) -> None:
-        if not self.state.objects.contains(obj):
-            var = vs.make_var_from_value(obj, False,
-                                         self.state.objects.helper_functions,
-                                         self.state.fx_graph, [])
-            self.state.objects.add_by_id(var, id(obj))
-
     def process_last_inst(self) -> None:
         if self.state.num_new_refs == -1:
             self.state.num_new_refs = get_value_stack_size(self.frame)
@@ -1243,38 +1266,39 @@ class GuardTracker:
                     partial.extract_code_at_start,
                 )
             elif node is not None:
+
+                def make_sub_var(value: Any, fx_node: torch.fx.Node) -> None:
+                    if isinstance(value, torch.Tensor):
+                        if self.state.objects.contains(value):
+                            raise NotImplementedError
+                        new_var = vs.TensorVar.from_tensor_and_node(
+                            value, fx_node, partial.need_guard_check,
+                            partial.extract_code_at_start)
+                        self.state.objects.add(new_var, value)
+                    elif is_scalar(value):
+                        assert isinstance(value,
+                                          (int, float)), "not implemented"
+                        if self.state.objects.contains(value):
+                            if dyn.contains(value):
+                                return
+                            raise NotImplementedError
+                        new_scalar_var = vs.ScalarVar.from_value_and_node(
+                            value, fx_node, partial.need_guard_check,
+                            partial.extract_code_at_start)
+                        self.state.objects.add(new_scalar_var, value)
+                        dyn.mark_dynamic(value, dyn.ScalarWithUnknownValue())
+                    elif isinstance(value, (tuple, list)):
+                        for i, sub_value in enumerate(value):
+                            sub_node = self.state.fx_graph.create_node(
+                                "call_function", operator.getitem, (fx_node, i),
+                                {})
+                            make_sub_var(sub_value, sub_node)
+                    else:
+                        print("tuple inner unknown node", value, type(value))
+                        raise NotImplementedError(type(value))
+
                 if isinstance(value, tuple):
-                    for i, sub_value in enumerate(value):
-                        if isinstance(sub_value, torch.Tensor):
-                            if self.state.objects.contains(sub_value):
-                                raise NotImplementedError
-                            fx_node = self.state.fx_graph.create_node(
-                                "call_function", operator.getitem, (node, i),
-                                {})
-                            sub_var = vs.TensorVar.from_tensor_and_node(
-                                sub_value, fx_node, partial.need_guard_check,
-                                partial.extract_code_at_start)
-                            self.state.objects.add(sub_var, sub_value)
-                        elif is_scalar(sub_value):
-                            assert isinstance(sub_value,
-                                              (int, float)), "not implemented"
-                            if self.state.objects.contains(sub_value):
-                                if dyn.contains(sub_value):
-                                    continue
-                                raise NotImplementedError
-                            fx_node = self.state.fx_graph.create_node(
-                                "call_function", operator.getitem, (node, i),
-                                {})
-                            sub_scalar_var = vs.ScalarVar.from_value_and_node(
-                                sub_value, fx_node, partial.need_guard_check,
-                                partial.extract_code_at_start)
-                            self.state.objects.add(sub_scalar_var, sub_value)
-                            dyn.mark_dynamic(sub_value,
-                                             dyn.ScalarWithUnknownValue())
-                        else:
-                            print("tuple inner unknown node", sub_value,
-                                  type(sub_value))
-                            raise NotImplementedError(type(sub_value))
+                    make_sub_var(value, node)
                 elif inspect.isclass(type(value)):
                     pass
                 else:
@@ -1376,7 +1400,7 @@ class GuardTracker:
 
     def is_builtin_func(self, func: Callable[..., Any]) -> bool:
         return func in (dict, tuple, set, list, hasattr, slice, range, len,
-                        super, type)
+                        super, type, map, filter, enumerate)
 
     def get_live_objs(self, pc: int = -1) -> list[tuple[str, Any]]:
         if pc == -1:
@@ -1463,7 +1487,7 @@ class GuardTracker:
             preprocess_frame, post_process_frame = get_process_frame(func, True)
             prior = set_eval_frame((preprocess_frame, post_process_frame))
             assert prior is None
-            assert self.state.written == False
+            # assert self.state.written == False
             return
         if func in fx_graph_inplace_functions or (hasattr(
                 func, '__name__') and func.__name__ in torch_inplace_funcs):
@@ -1497,7 +1521,7 @@ class GuardTracker:
             if hasattr(func, "__name__") and (
                     func.__name__ in
                 ("named_children", "_are_functorch_transforms_active", "finfo",
-                 "dim", "save_for_backward", "_get_tracing_state") or
+                 "dim", "save_for_backward", "_get_tracing_state", "len") or
                 (func.__name__ == "type" and inst is not None and
                  inst.argval == 0) or (func.__name__ in ("size",) and
                                        not config.get_config("dynshape"))):
@@ -1785,7 +1809,7 @@ class GuardTracker:
 
     def LOAD_METHOD(self, inst: Instruction) -> None:
         self_obj = get_value_stack_from_top(self.frame, 0)
-        self.fetch_function_parameters(self_obj)
+        self.state.fetch_function_parameters(self_obj)
         self_var = self.state.objects.get(self_obj)
         is_bound = is_bound_method(self_obj, inst.argval)
         extract_code_at_start: list[StorePos] = [
@@ -1859,7 +1883,7 @@ class GuardTracker:
         func = get_value_stack_from_top(self.frame, num_args)
         # print(f"function: {func}, type: {type(func)},args:{args}, kwargs:{kwargs}")
         for i, obj in enumerate(itertools.chain(args, kwargs.values())):
-            self.fetch_function_parameters(obj)
+            self.state.fetch_function_parameters(obj)
         self.call_function(func, args, kwargs)
 
     def CALL_METHOD(self, inst: Instruction) -> None:
@@ -1870,7 +1894,7 @@ class GuardTracker:
         ]
         kwargs: dict[str, Any] = {}
         for i, obj in enumerate(itertools.chain(args, kwargs.values())):
-            self.fetch_function_parameters(obj)
+            self.state.fetch_function_parameters(obj)
         self_val = get_value_stack_from_top(self.frame, num_args)
         meth_val = get_value_stack_from_top(self.frame, num_args + 1)
         if isinstance(meth_val, NullObject):
@@ -1947,8 +1971,8 @@ class GuardTracker:
     def STORE_ATTR(self, inst: Instruction) -> None:
         value = get_value_stack_from_top(self.frame, 1)
         self_obj = get_value_stack_from_top(self.frame, 0)
-        self.fetch_function_parameters(self_obj)
-        self.fetch_function_parameters(value)
+        self.state.fetch_function_parameters(self_obj)
+        self.state.fetch_function_parameters(value)
         value_var = self.state.objects.get(value)
         new_self_var = vs.make_var_from_value(
             self_obj, False, self.state.objects.helper_functions,
@@ -2044,6 +2068,17 @@ class GuardTracker:
                     for _ in range(len(seq))
                 ]
             })
+        elif isinstance(seq, torch.Tensor):
+            self.state.set_partial_var({
+                -1: [
+                    PartialVar(node=None,
+                               need_guard_check=False,
+                               extract_code_at_start=[],
+                               make_var_fn=vs.make_var_from_value)
+                    for _ in range(len(seq))
+                ]
+            })
+            self.call_function(iter, [seq], {})
         else:
             raise ValueError("unknow type in unpack_ex", type(seq))
 
@@ -2094,7 +2129,7 @@ class GuardTracker:
 
     def GET_ITER(self, _inst: Instruction) -> None:
         obj = get_value_stack_from_top(self.frame, 0)
-        self.fetch_function_parameters(obj)
+        self.state.fetch_function_parameters(obj)
         obj_var = self.state.objects.get(obj)
         extract_code_at_start: list[StorePos] = [
             ExtractFromMethod(pos, id(obj), '__iter__')
@@ -2124,6 +2159,9 @@ class GuardTracker:
                            make_var_fn=make_var_fn)
             ]
         })
+
+        if isinstance(obj, torch.Tensor):
+            self.call_function(iter, [obj], {})
 
     def FOR_ITER(self, _original_inst: Instruction) -> None:
         original_pc, original_inst = self.code.get_orig_inst(self.frame.f_lasti)
@@ -2295,8 +2333,7 @@ def pop_tracker(frame_id: int) -> None:
 
 def record(frame: FrameType, frame_id: int) -> None:
     if id(frame) != id(trackers[-1].frame):
-        last_inst = trackers[-1].code.get_inst(trackers[-1].frame.f_lasti)
-        if is_call_bytecode(last_inst):
+        if trackers[-1].state.calling_func is not None:
             print("push tracker due to record")
             push_tracker(frame, frame_id)
     trackers[-1].record(frame, frame_id)

@@ -4,7 +4,7 @@ from frontend.utils import add_force_graph_break
 from frontend.c_api import get_next_frame_id
 import logging
 import torch
-from common.checker import run_and_check, HIT, MISS
+from common.checker import run_and_check, HIT, MISS, ALL_MISS
 
 
 class Model(torch.nn.Module):
@@ -102,6 +102,28 @@ def test_nn_module(caplog):
     x = torch.randn(1, 10)
     expect_result = nn_module(x)
     run_and_check(compiled, [MISS], 1, caplog, expect_result, x)
+    run_and_check(compiled, [HIT], 1, caplog, expect_result, x)
+
+
+class MapModule(torch.nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.linears = torch.nn.ModuleList(
+            [torch.nn.Linear(3, 3) for _ in range(3)])
+
+    def forward(self, x):
+        fmaps = tuple(map(lambda l: l(x), self.linears))
+        return torch.cat(fmaps, dim=1)
+
+
+def test_map_module(caplog):
+    reset()
+    model = MapModule()
+    compiled = compile(model)
+    x = torch.randn(3, 3)
+    expect_result = model(x)
+    run_and_check(compiled, [ALL_MISS], 1, caplog, expect_result, x)
     run_and_check(compiled, [HIT], 1, caplog, expect_result, x)
 
 

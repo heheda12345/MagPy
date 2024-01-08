@@ -35,5 +35,5 @@ jobs:
           spack load cuda@11.8.0 /jb4mlxg
           spack load python@3.9.12%gcc@=11.3.0
           source ~/venv/frontend-env/bin/activate
-          srun --exclusive ./scripts/pytest_with_preload.sh -vs test
-          FORCE_RUN_SKIPPED_TEST=1 srun --exclusive ./scripts/pytest_with_preload.sh -vs test/test_model_blockdrop.py -k test_blockdrop_dyn
+          srun --gres=gpu:1 --exclusive ./scripts/pytest_with_preload.sh -vs test
+          FORCE_RUN_SKIPPED_TEST=1 srun --gres=gpu:1 --exclusive ./scripts/pytest_with_preload.sh -vs test/test_model_blockdrop.py -k test_blockdrop_dyn

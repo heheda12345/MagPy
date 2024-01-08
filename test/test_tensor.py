@@ -2,6 +2,7 @@ from frontend.compile import compile, reset
 from frontend.utils import enable_dyn_shape
 from common.checker import run_and_check, HIT, MISS, ALL_MISS
 import torch
+import torch.utils.checkpoint
 
 
 def tensor_only(a, b, c):
@@ -260,3 +261,117 @@ def test_dyn_module(caplog):
             run_and_check(compiled, [ALL_MISS], 1, caplog, y1, inp1)
             run_and_check(compiled, [HIT], 1, caplog, y1, inp1)
             run_and_check(compiled, [HIT], 1, caplog, y2, inp2)
+
+
+def run_tensor_new(x):
+    mask = x.data.new().resize_as_(x.data).fill_(0)
+    return mask
+
+
+def test_tensor_new(caplog):
+    reset()
+    with torch.no_grad():
+        inp = torch.rand((3, 3))
+        expect = run_tensor_new(inp)
+        compiled = compile(run_tensor_new)
+        run_and_check(compiled, [MISS], 1, caplog, expect, inp)
+        run_and_check(compiled, [HIT], 1, caplog, expect, inp)
+
+
+def iter_f1(x):
+    s = x[0]
+    for y in x:
+        s = s + y
+    return s
+
+
+def iter_f2(x):
+    s = x[0]
+    for i, y in enumerate(x):
+        s = s + y + i
+    return s
+
+
+def test_tensor_iter(caplog):
+    reset()
+    with torch.no_grad():
+        inp = torch.rand((3, 3))
+        expect = iter_f1(inp)
+        compiled = compile(iter_f1)
+        run_and_check(compiled, [MISS, MISS], 1, caplog, expect, inp)
+        run_and_check(compiled, [HIT], 1, caplog, expect, inp)
+
+        expect = iter_f2(inp)
+        compiled = compile(iter_f2)
+        run_and_check(compiled, [MISS, MISS], 2, caplog, expect, inp)
+        run_and_check(compiled, [HIT], 2, caplog, expect, inp)
+
+
+def tensor_item(x):
+    return x.item() + 1
+
+
+def test_tensor_item(caplog):
+    reset()
+    inp = torch.rand((1,))
+    expect = tensor_item(inp)
+    compiled = compile(tensor_item)
+    run_and_check(compiled, [MISS], 1, caplog, expect, inp)
+    run_and_check(compiled, [HIT], 1, caplog, expect, inp)
+
+
+def ex_callee(x, y):
+    return x + y
+
+
+def ex_caller(x):
+    return ex_callee(*x)
+
+
+def test_tensor_call_ex(caplog):
+    reset()
+    with torch.no_grad():
+        inp = torch.rand((2, 3))
+        expect = ex_caller(inp)
+        compiled = compile(ex_caller)
+        run_and_check(compiled, [ALL_MISS], 1, caplog, expect, inp)
+        run_and_check(compiled, [HIT], 1, caplog, expect, inp)
+
+
+def run_get_device_states(x):
+    return torch.utils.checkpoint.get_device_states(*x)
+
+
+def test_get_device_states(caplog):
+    reset()
+    from frontend.utils import SetConfig
+    with torch.no_grad():
+        with SetConfig({"backend": "eager"}):
+            inp = torch.rand((2, 3)).cuda()
+            expect = run_get_device_states(inp)
+            compiled = compile(run_get_device_states)
+            run_and_check(compiled, [ALL_MISS], 1, caplog, expect, inp)
+            run_and_check(compiled, [HIT], 1, caplog, expect, inp)
+
+
+# not yet support due to yield
+# def tuple_view1(a):
+#     # out = tuple(i.view(4, 3) for i in a)
+#     out = tuple(i.view(4, 3) for i in a)
+#     return out[0]
+
+# def tuple_view2_callee(a):
+#     out = tuple(i.view(4, 3) for i in a)
+#     return out
+
+# def tuple_view2_caller(a):
+#     x, y = tuple_view2_callee(a)
+#     return x + y
+
+# def test_tuple_view(caplog):
+#     reset()
+#     a = (torch.randn([3, 4]),)
+#     expect = tuple_view1(a)
+#     compiled = compile(tuple_view1)
+#     run_and_check(compiled, [ALL_MISS], 1, caplog, expect, a)
+#     run_and_check(compiled, [HIT], 1, caplog, expect, a)
