@@ -162,11 +162,11 @@ class State:
                 for a in arg:
                     get_common_device(a)
             if isinstance(arg, torch.Tensor):
-                var = self.objects.get(arg, allow_unexist_const=True)
+                # var = self.objects.get(arg, allow_unexist_const=True)
                 nonlocal common_device
                 # assert common_device is None or common_device == var.obj.device or var.obj.dim(
                 # ) <= 1
-                common_device = var.obj.device
+                common_device = arg.device
 
         def as_fx_node(arg: Any) -> NodeArgs:
             if isinstance(arg, (tuple, list)):
@@ -375,7 +375,8 @@ class State:
             return var.extract_code_at_start[0]
         elif hasattr(pos, "self_id"):
             import _ctypes
-            obj = _ctypes.PyObj_FromPtr(pos.self_id)
+            if hasattr(_ctypes, "PyObj_FromPtr"):
+                obj = _ctypes.PyObj_FromPtr(pos.self_id)
             if isinstance(obj, tuple):
                 for i in obj:
                     if isinstance(i, torch.Tensor) and self.objects.contains(i):
@@ -384,7 +385,9 @@ class State:
                         continue
                     else:
                         raise ValueError(f"unknow value in merged tuple: {i}")
-                tuple_var = vs.TupleVar.from_value(obj, False, self.objects.helper_functions, self.fx_graph, [])
+                tuple_var = vs.tuple_.TupleVar.from_value(
+                    obj, False, self.objects.helper_functions, self.fx_graph,
+                    [])
                 self.objects.add(tuple_var, obj)
                 return None
         if isinstance(pos, StoreInLocal):
@@ -1378,8 +1381,39 @@ class GuardTracker:
                     self.state.add_object(stack_top_var, stack_top)
                 elif is_high_order_func(self.state.calling_func):  # zip / map
                     pass
+                elif isinstance(self.state.callee_returns,
+                                tuple) and isinstance(stack_top, tuple):
+                    flag = all(
+                        torch.equal(i, j) if isinstance(i, torch.Tensor
+                                                       ) else i == j
+                        for i, j in zip(self.state.callee_returns, stack_top))
+                    assert flag
+                    # handle sub values
+                    for callee, stack in zip(self.state.callee_returns,
+                                             stack_top):
+                        sub_var = self.state.objects.get(callee)
+                        if isinstance(callee, torch.Tensor):
+                            new_node = self.state.fx_graph.create_node(
+                                "call_function", torch.clone,
+                                (sub_var.as_fx_node(),), {})
+                            stack_sub_var: Variable = vs.TensorVar.from_tensor_and_node(
+                                stack, new_node, False, [])
+                        else:
+                            stack_sub_var = vs.make_var_from_value(
+                                stack, False,
+                                self.state.objects.helper_functions,
+                                self.state.fx_graph,
+                                sub_var.extract_code_at_start)
+                        self.state.add_object(stack_sub_var, stack)
+                    # handle tuple value
+                    returns_var = self.state.objects.get(
+                        self.state.callee_returns)
+                    top_var = vs.tuple_.TupleVar.from_value(
+                        stack_top, returns_var.need_guard_check,
+                        self.state.objects.helper_functions,
+                        self.state.fx_graph, returns_var.extract_code_at_start)
+                    self.state.add_object(top_var, stack_top)
                 else:
-                    print("aaaaaaa", self.state.calling_func)
                     raise NotImplementedError
 
         self.state.inplace_update_objs.clear()
@@ -1417,6 +1451,13 @@ class GuardTracker:
     def all_static_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
         return all(
             not dyn.contains(i) for i in itertools.chain(args, kwargs.values()))
+
+    @classmethod
+    def has_ndarray_arg(cls, args: List[Any], kwargs: Dict[str, Any]) -> bool:
+        import numpy
+        return any(
+            isinstance(i, numpy.ndarray)
+            for i in itertools.chain(args, kwargs.values()))
 
     @classmethod
     def has_arg_of_type(
@@ -1592,10 +1633,18 @@ class GuardTracker:
                 })
 
         pc, inst = self.code.get_orig_inst(self.frame.f_lasti)
-        if len(args) == 1 and isinstance(args[0], (tuple, list)) and func != len:
-            has_tensor_flag = self.has_tensor_arg(args[0], kwargs)
+        if is_graph_func(func):
+            has_ndarray_flag = self.has_ndarray_arg(args, kwargs)
+        else:
+            has_ndarray_flag = False
+        if len(args) == 1 and isinstance(args[0],
+                                         (tuple, list)) and func != len:
+            has_tensor_flag = self.has_tensor_arg(list(args[0]), kwargs)
         else:
             has_tensor_flag = self.has_tensor_arg(args, kwargs)
+        if len(args) > 0 and isinstance(
+                args[0], (tuple, list)) and func == operator.getitem:
+            has_tensor_flag = self.has_tensor_arg(list(args[0]), kwargs)
         if get_root_module(func) == 'torch' or (
                 has_tensor_flag and
             (is_graph_func(func) or is_math_func(func) or
@@ -1616,7 +1665,8 @@ class GuardTracker:
                 })
                 return
             if hasattr(func,
-                       "__name__") and func.__name__ in ("flatten_parameters",):
+                       "__name__") and func.__name__ in ("flatten_parameters",
+                                                         "numel"):
                 return
             print("record function in graph", func)
             self.state.record_function(
@@ -1639,7 +1689,7 @@ class GuardTracker:
                     ]
                 })
             return
-        elif get_root_module(func) == 'numpy':
+        elif get_root_module(func) == 'numpy' or has_ndarray_flag:
             print("record numpy function in graph", func)
             self.state.record_function(func,
                                        args,
@@ -1995,11 +2045,10 @@ class GuardTracker:
         pos = StoreInFreeVar(inst.arg)
         cell_obj = parse_cell(obj)
         need_guard_check = not isinstance(
-            cell_obj,
-            NullObject) and not self.state.objects.contains(cell_obj)
+            cell_obj, NullObject) and not self.state.objects.contains(cell_obj)
         var = vs.make_var_from_value(obj, need_guard_check,
-                                        self.state.objects.helper_functions,
-                                        self.state.fx_graph, [pos])
+                                     self.state.objects.helper_functions,
+                                     self.state.fx_graph, [pos])
         self.state.add_object(var, obj)
 
     def CALL_FUNCTION(self, inst: Instruction) -> None:
@@ -2140,7 +2189,12 @@ class GuardTracker:
         self.state.set_partial_var({-1: partial})
 
     def BUILD_LIST(self, inst: Instruction) -> None:
-        pass
+        partial: list[Optional[PartialVar]] = [
+            PartialVar(node=None,
+                       need_guard_check=False,
+                       extract_code_at_start=[])
+        ]
+        self.state.set_partial_var({-1: partial})
 
     def BUILD_SET(self, inst: Instruction) -> None:
         pass

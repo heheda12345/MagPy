@@ -455,6 +455,7 @@ def para_with_star(a, *b):
         out.append(i)
     return out
 
+
 def call_with_star(a):
     intput1 = 3
     b = a
@@ -468,10 +469,12 @@ def para_with_tuple(a, input2):
         out.append(i)
     return out
 
+
 def call_with_tuple(a):
     intput1 = 3
     out = para_with_tuple(intput1, (a, 5))
     return out
+
 
 def test_call_parameter(caplog):
     reset()
