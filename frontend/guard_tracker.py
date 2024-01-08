@@ -1220,13 +1220,6 @@ class GuardTracker:
 
         self.state.is_empty = True
 
-    def fetch_function_parameters(self, obj: Any) -> None:
-        if not self.state.objects.contains(obj):
-            var = vs.make_var_from_value(obj, False,
-                                         self.state.objects.helper_functions,
-                                         self.state.fx_graph, [])
-            self.state.objects.add_by_id(var, id(obj))
-
     def process_last_container_var(self, value: Any,
                                    partial: PartialVar) -> None:
         node = partial.node
@@ -2123,7 +2116,7 @@ class GuardTracker:
         kwargs: dict[str, Any] = {}
         for arg, kw_name in zip(args[-len(kw_names):], kw_names):
             kwargs[kw_name] = arg
-        self.fetch_function_parameters(kwargs)
+        self.state.fetch_function_parameters(kwargs)
         args = args[:-len(kw_names)]
         if hasattr(func,
                    '__self__') and func.__self__ is not None and not isinstance(
