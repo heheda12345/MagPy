@@ -27,6 +27,11 @@ def assert_equal(ref, out):
             print(torch.sum(~close))
             print("wrong answer !!!!!!!!!!!!!!!!!!!!!!!!!!")
             assert (False)
+    elif isinstance(ref, float):
+        assert torch.isclose(torch.tensor(ref),
+                             torch.tensor(out),
+                             atol=precision,
+                             rtol=precision)
     elif isinstance(ref, Iterable):
         assert (isinstance(out, Iterable))
         if isinstance(ref, set):

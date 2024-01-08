@@ -380,7 +380,7 @@ def map_caller3(x):
 def test_call_high_order(caplog):
     reset()
     for i, func in enumerate(
-        (list_zip1,)):  #, list_zip2, map_caller1, map_caller2, map_caller3)):
+        (list_zip1, list_zip2, map_caller1, map_caller2, map_caller3)):
         x = torch.rand((3, 3))
         expect = func(x)
         compiled = compile(func)

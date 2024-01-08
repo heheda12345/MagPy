@@ -13,6 +13,7 @@ def gen_imports(writer: PyCodeWriter, imports: set[str]) -> None:
 
 
 class FnCodegen:
+    prepare_var_writer: PyCodeWriter
     writer: PyCodeWriter
     imports: set[str]
     key: int
@@ -21,6 +22,7 @@ class FnCodegen:
 
     def __init__(self, key: int) -> None:
         self.key = key
+        self.prepare_var_writer = PyCodeWriter()
         self.writer = PyCodeWriter()
         self.imports = set()
         self.objs = {}
@@ -50,8 +52,11 @@ class FnCodegen:
     def add_import_from(self, module_name: str, name: str) -> None:
         self.imports.add(f"from {module_name} import {name}")
 
-    def add_stmt(self, stmt: str) -> None:
-        self.writer.wl(stmt)
+    def add_stmt(self, stmt: str, is_prepare: bool = False) -> None:
+        if is_prepare:
+            self.prepare_var_writer.wl(stmt)
+        else:
+            self.writer.wl(stmt)
 
     def add_statements(self, stmt: str) -> None:
         self.statements.add(stmt)
@@ -93,6 +98,7 @@ class GraphFnCodegen(FnCodegen):
         if get_config('debug'):
             writer.wl(
                 f"print('running graph_fn (key = {self.key})', locals.keys())")
+        writer.write(self.prepare_var_writer.get_code())
         # TODO: simplify
         graph_inputs = []
         for x, to_tensor in self.graph_inputs:
@@ -128,6 +134,7 @@ class GraphFnCodegen(FnCodegen):
         self.graph_inputs.append((extract_code, to_tensor))
         if to_tensor:
             self.add_import("torch")
+        extract_code.add_name_to_fn(self)
 
 
 class GuardFnCodegen(FnCodegen):
@@ -162,6 +169,7 @@ class GuardFnCodegen(FnCodegen):
         if get_config('debug'):
             writer.wl(
                 f"print('running guard_fn (key = {self.key})', locals.keys())")
+        writer.write(self.prepare_var_writer.get_code())
         writer.write(self.writer.get_code())
         if len(self.checks) == 0:
             writer.wl(f"ok = True")
