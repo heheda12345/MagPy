@@ -8,6 +8,7 @@ from .utils import NullObject, ReadOnlyObject
 from .store_pos import StorePos
 from .fx_graph import FxGraph
 import numpy as np
+import torch
 
 
 class ObjectTable:
@@ -70,8 +71,9 @@ class ObjectTable:
                                        fx_graph)
         elif allow_unexist_const:
             if isinstance(value, get_args(CONST_TYPES)) or isinstance(
-                    value, (list, tuple, set, dict, range, CodeType,
-                            type(Ellipsis), np.ndarray)):
+                    value,
+                (list, tuple, set, dict, range, CodeType, type(Ellipsis),
+                 np.ndarray, frozenset, torch.nn.Parameter)):
                 return make_var_from_value(value, False, self.helper_functions,
                                            fx_graph)
         raise RuntimeError(

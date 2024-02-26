@@ -440,6 +440,8 @@ class State:
                 parent_poses.append(new_pos)
             return ExtractFromFunction(parent_poses, pos.var_id, pos.func_name,
                                        pos.func_obj, pos.need_add_to_fn)
+        elif isinstance(pos, ExtractFromNew):
+            return None
         else:
             # print("pos", pos, idx, self.frame_id)
             raise NotImplementedError
@@ -1492,7 +1494,7 @@ class GuardTracker:
     def is_builtin_func(self, func: Callable[..., Any]) -> bool:
         return func in (dict, tuple, set, list, hasattr, slice, range, len,
                         super, type, map, filter, enumerate, all, str.join,
-                        reversed, zip, iter)
+                        reversed, zip, iter, id, next)
 
     def get_live_objs(self, pc: int = -1) -> list[tuple[str, Any]]:
         if pc == -1:
@@ -1702,11 +1704,18 @@ class GuardTracker:
             return
         elif get_root_module(func) == 'numpy' or has_ndarray_flag:
             print("record numpy function in graph", func)
-            self.state.record_function(func,
-                                       args,
-                                       kwargs,
-                                       inplace_ref=inplace_ref,
-                                       force_new_value=False)
+            # self.state.record_function(func,
+            #                            args,
+            #                            kwargs,
+            #                            inplace_ref=inplace_ref,
+            #                            force_new_value=False)
+            self.state.set_partial_var({
+                -1: [
+                    PartialVar(node=None,
+                               need_guard_check=False,
+                               extract_code_at_start=[])
+                ]
+            })
             return
         elif self.has_arg_of_type(args, kwargs, tuple):
             return
@@ -1924,6 +1933,12 @@ class GuardTracker:
 
     def SETUP_WITH(self, _inst: Instruction) -> None:
         pass
+
+    def JUMP_IF_NOT_EXC_MATCH(self, _inst: Instruction) -> None:
+        pass
+
+    # def YIELD_VALUE(self, _inst: Instruction) -> None:
+    #     pass
 
     # def WITH_EXCEPT_START(self, _inst: Instruction) -> None:
     #     pass
@@ -2254,7 +2269,9 @@ class GuardTracker:
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = get_value_stack_from_top(self.frame, 0)
-        if isinstance(seq, (tuple, list, torch.Size, torch.Tensor)):
+        if isinstance(
+                seq,
+            (tuple, list, torch.Size, torch.Tensor, torch.nn.ModuleList)):
             node = None
             if isinstance(seq, torch.Tensor):
                 partials: list[Optional[PartialVar]] = []
