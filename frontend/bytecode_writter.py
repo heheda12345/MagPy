@@ -234,7 +234,6 @@ def fix_constants(instructions: List[Instruction],
                 const_list.append(entry)
                 const_set.add(entry)
             inst.arg = const_list.index(entry)
-    print("const_list", const_list)
     code_options["co_consts"] = tuple((x[1] for x in const_list))
 
 

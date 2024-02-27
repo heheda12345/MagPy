@@ -70,6 +70,35 @@ def backend_compile(gm: torch.fx.GraphModule,
     elif backend == 'xla':
         return torch._dynamo.backends.torchxla.aot_torchxla_trace_once(
             gm, example_inputs)
+    elif backend == 'script':
+        import os, importlib, re, random
+        random_number = str(random.randint(0, 1000000))
+        os.makedirs('tmp/fx_module_' + random_number, exist_ok=True)
+        gm.to_folder('tmp/fx_module_' + random_number)
+
+        module = importlib.import_module('tmp.fx_module_' + random_number)
+        model = module.FxModule().cuda().eval()
+        real_inputs = []
+        for x in example_inputs:
+            if x.dtype == torch.float32:
+                real_inputs.append(
+                    torch.rand(*x.shape,
+                               dtype=x.dtype,
+                               layout=x.layout,
+                               device=x.device))
+            elif x.dtype == torch.int64:
+                real_inputs.append(
+                    torch.randint(0,
+                                  2,
+                                  size=x.shape,
+                                  dtype=x.dtype,
+                                  layout=x.layout,
+                                  device=x.device))
+            else:
+                raise NotImplementedError
+        with torch.no_grad():
+            script_model = torch.jit.trace(model, real_inputs)
+            return script_model
     else:
         raise RuntimeError(f"Unknown backend: {backend}")
 

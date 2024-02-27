@@ -1157,7 +1157,6 @@ def get_model():
     config.num_hidden_layers = 2
     config.return_dict = False
     model = DebertaModel(config).to(device)
-    print("model type", type(model))
     return model
 
 
