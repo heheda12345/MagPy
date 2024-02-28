@@ -57,3 +57,42 @@ def test_closure_call(caplog):
         expect_result = model(a)
         run_and_check(compiled, [ALL_MISS], 1, caplog, expect_result, a)
         run_and_check(compiled, [HIT], 1, caplog, expect_result, a)
+
+
+def inner_call_ex(a, b, **kwargs):
+    return torch.add(a, b, **kwargs)
+
+
+def outer_call_ex(a, b):
+    return inner_call_ex(a, b, alpha=1.0)
+
+
+def test_call_ex(caplog):
+    reset()
+    with torch.no_grad():
+        a = torch.rand((2, 2))
+        b = torch.rand((2, 2))
+        expect = outer_call_ex(a, b)
+        compiled = compile(outer_call_ex)
+        run_and_check(compiled, [ALL_MISS], 1, caplog, expect, a, b)
+        run_and_check(compiled, [HIT], 1, caplog, expect, a, b)
+
+
+def inner_call_ex_with_update(a, b, **kwargs):
+    kwargs.update(alpha=1.0)
+    return torch.add(a, b, **kwargs)
+
+
+def outer_call_ex_with_update(a, b):
+    return inner_call_ex_with_update(a, b, alpha=2.0)
+
+
+def test_call_ex_with_update(caplog):
+    reset()
+    with torch.no_grad():
+        a = torch.rand((2, 2))
+        b = torch.rand((2, 2))
+        expect = outer_call_ex_with_update(a, b)
+        compiled = compile(outer_call_ex_with_update)
+        run_and_check(compiled, [ALL_MISS], 1, caplog, expect, a, b)
+        run_and_check(compiled, [HIT], 1, caplog, expect, a, b)
