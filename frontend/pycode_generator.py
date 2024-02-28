@@ -164,6 +164,7 @@ class GuardFnCodegen(FnCodegen):
         writer.write(self.writer.get_code())
         if len(self.checks) == 0:
             writer.wl(f"ok = True")
+            writer.wl(f"missed_check = []")
         else:
             writer.wl(f"ok = True")
             writer.wl(f"missed_check = []")

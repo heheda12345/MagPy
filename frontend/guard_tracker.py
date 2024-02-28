@@ -1560,6 +1560,11 @@ class GuardTracker:
             (set, list, dict, collections.OrderedDict,
              MappingProxyType)) and get_root_module(func) != 'torch':
             set_if_inplace_return()
+            if len(args) > 0 and isinstance(
+                    args, list) and func in (list.append, list.extend,
+                                             list.clear, list.pop, list.remove,
+                                             list.reverse, list.sort):
+                self.state.add_inplace_update_obj(args[0])
             return
         elif self.has_arg_of_type(args, kwargs, np.generic):
             return

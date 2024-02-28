@@ -32,6 +32,7 @@ class Variable:
     obj: Any
     modified_attrs: dict[str, 'Variable']
     prev: Optional['Variable'] = None
+    succ: Optional['Variable'] = None
 
     def __init__(self, need_guard_check: bool, obj: Any,
                  extract_code_at_start: list[StorePos]) -> None:
@@ -79,6 +80,9 @@ class Variable:
     def make_output(self, name_in_graph_fn: str, store_pos: StorePos,
                     codegen: "GraphFnCodegen", in_return: bool,
                     idx: int) -> None:
+        if self.succ is not None:
+            return self.succ.make_output(name_in_graph_fn, store_pos, codegen,
+                                         in_return, idx)
         if idx in codegen.id2name:
             codegen.output(name_in_graph_fn, store_pos, codegen.id2name[idx],
                            in_return, 0)
@@ -108,6 +112,8 @@ class Variable:
 
     def set_prev(self, prev: Optional['Variable']) -> None:
         self.prev = prev
+        if prev is not None:
+            prev.succ = self
 
     def get_subvars_with_idx(self) -> Iterable[Tuple["Variable", int]]:
         return []
