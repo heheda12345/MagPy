@@ -87,8 +87,9 @@ def get_process_frame(
             frame_cache = get_frame_cache(frame_id)
             frame_cache.update_code(frame.f_code, frame_id, is_callee)
             new_code, code_map = frame_cache.get_new_code(is_callee)
-            print("bytecode to run:")
-            print(format_insts(code_map.guard_insts))
+            if is_debug:
+                print("bytecode to run:")
+                print(format_insts(code_map.guard_insts))
             trace_func = get_trace_func(frame_id)
 
         except Exception as e:
@@ -102,12 +103,14 @@ def get_process_frame(
             from .bytecode_writter import SHOULD_NOT_CALL_REWRITE
             if SHOULD_NOT_CALL_REWRITE:
                 raise ValueError("should not call postprocess")
-            print(f"postprocess frame {frame.f_code.co_filename}")
+            if is_debug:
+                print(f"postprocess frame {frame.f_code.co_filename}")
             set_frame_root(frame_id, f)
             frame_cache = get_frame_cache(frame_id)
             frame_cache.update_code(frame.f_code, frame_id, is_callee)
         except Exception as e:
-            print("exception in postprocess:", e, type(e))
+            if is_debug:
+                print("exception in postprocess:", e, type(e))
             print(traceback.format_exc())
             raise e
         return

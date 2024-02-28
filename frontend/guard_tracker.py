@@ -143,10 +143,9 @@ class State:
         # self.written = True # not mark as written as graph break may happen
 
     def add_subparam(self, param: torch.nn.Parameter) -> None:
-        new_param_name = "__external_param__" + str(len(self.subparam_paths))
+        new_param_name = "external_param__" + str(len(self.subparam_paths))
         self.root.register_parameter(new_param_name, param)
         self.subparam_paths[param] = new_param_name
-        # self.written = True # not mark as written as graph break may happen
 
     def as_node_args_kwargs(
         self, args: list[Any], kwargs: dict[str, Any]

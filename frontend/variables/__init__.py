@@ -92,7 +92,6 @@ def make_var_from_value(
                                       fx_graph, extract_code_at_start)
     else:
         # NOTE: use any instead of iteartor_var to represent iterator with unknown source due to the hardness of getting iterable and num_iters
-        print("generate any for", value, type(value), extract_code_at_start)
         return AnyVar.from_value(value, need_guard_check, helper_functions,
                                  fx_graph, extract_code_at_start)
 
