@@ -234,6 +234,19 @@ class State:
                         add_partial_var: bool = True,
                         inplace_ref: Any = None,
                         force_new_value: bool = False) -> None:
+        if hasattr(func, '__self__') and isinstance(
+                func.__self__, torch.autograd.grad_mode.no_grad):
+            if func.__name__ == '__enter__':
+                target_state = False
+            elif func.__name__ == '__exit__':
+                target_state = func.__self__.prev
+            else:
+                raise ValueError(func)
+            args = [
+                target_state,
+            ]
+            func = torch._C._set_grad_enabled
+            kwargs = {}
         pargs, pkwargs = self.as_node_args_kwargs(args, kwargs)
         if func in fx_graph_inplace_functions:
             scalar = None
@@ -1810,7 +1823,9 @@ class GuardTracker:
         pass
 
     def SETUP_WITH(self, _inst: Instruction) -> None:
-        pass
+        mgr = get_value_stack_from_top(self.frame, 0)
+        if type(mgr) == torch.autograd.grad_mode.no_grad:
+            self.call_function(mgr.__enter__, [], {})
 
     # def WITH_EXCEPT_START(self, _inst: Instruction) -> None:
     #     pass

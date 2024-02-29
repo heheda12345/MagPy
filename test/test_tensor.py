@@ -406,16 +406,17 @@ def test_run_type_tensor(caplog):
         run_and_check(compiled, [HIT], 1, caplog, expect, inp)
 
 
-# def run_no_grad(x):
-#     with torch.no_grad():
-#         y = x * 2
-#     return y
+def run_no_grad(x):
+    with torch.no_grad():
+        y = x * 2
+    return y
 
-# def test_no_grad(caplog):
-#     reset()
-#     with torch.no_grad():
-#         inp = torch.rand((2, 2))
-#         expect = run_no_grad(inp)
-#         compiled = compile(run_no_grad)
-#         run_and_check(compiled, [MISS], 1, caplog, expect, inp)
-#         run_and_check(compiled, [HIT], 1, caplog, expect, inp)
+
+def test_no_grad(caplog):
+    reset()
+    with torch.no_grad():
+        inp = torch.rand((2, 2))
+        expect = run_no_grad(inp)
+        compiled = compile(run_no_grad)
+        run_and_check(compiled, [MISS], 1, caplog, expect, inp)
+        run_and_check(compiled, [HIT], 1, caplog, expect, inp)
