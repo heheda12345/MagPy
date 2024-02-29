@@ -1,4 +1,4 @@
-from types import FrameType, MappingProxyType
+from types import FrameType, MappingProxyType, ModuleType
 from typing import Dict, Any, Callable, List, Optional, cast, Union
 import inspect
 import logging
@@ -31,7 +31,6 @@ from .bytecode_analysis import livevars_analysis, end_of_control_flow
 from .variables.tuple_ import TupleVar
 from .variables.base import Variable
 from .control_flow import ControlFlowInfo, LoopModule, ForLoopInfo, LoopPosMap, if_stmt, IfStmtInfo
-from types import ModuleType
 
 MAKE_VAR_FN_TYPE = Callable[[
     Any, bool, vs.HelperFunctions, Optional[FxGraph], Optional[list[StorePos]]
@@ -81,6 +80,8 @@ class State:
     inplace_update_objs: list[Any]
     guarded_pcs: list[int]
     initial_args: list[Any]
+    varargs: Optional[Any]
+    varkw: Optional[Any]
     calling_func: Optional[Callable[..., Any]]
     callee_returns: Any
     can_guard: bool
@@ -116,6 +117,8 @@ class State:
         self.inplace_update_objs = []
         self.guarded_pcs = []
         self.initial_args = []
+        self.varargs = None
+        self.varkw = None
         self.calling_func = None
         self.can_guard = True
         self.frame_id = -1
@@ -351,9 +354,22 @@ class State:
                                              state.fx_graph,
                                              [StoreInLocal(f"__stack__{i}")])
                 state.objects.add(var, value)
+        f_code = frame.f_code
         # state.written may be assigned inside make_var_from_value
-        for var_name in frame.f_code.co_varnames[:frame.f_code.co_argcount]:
+        nargs = f_code.co_argcount + f_code.co_kwonlyargcount
+        for var_name in frame.f_code.co_varnames[:nargs]:
             state.initial_args.append(frame.f_locals[var_name])
+        CO_VARARGS = 0x4
+        if f_code.co_flags & CO_VARARGS:
+            var_name = f_code.co_varnames[nargs]
+            nargs += 1
+            state.varargs = frame.f_locals[var_name]
+        CO_VARKEYWORDS = 0x8
+        if f_code.co_flags & CO_VARKEYWORDS:
+            var_name = f_code.co_varnames[nargs]
+            nargs += 1
+            state.varkw = frame.f_locals[var_name]
+
         state.written = False
         state.frame_id = frame_id
         state.frame_cf_info = frame_cf_info
@@ -1344,6 +1360,7 @@ class GuardTracker:
 
         self.state.inplace_update_objs.clear()
         self.state.partial_var.clear()
+        print("clear partial var")
         self.state.written = False
         self.state.unmark_calling_func()
         # print('process last instruction done')
@@ -1399,7 +1416,7 @@ class GuardTracker:
 
     def is_builtin_func(self, func: Callable[..., Any]) -> bool:
         return func in (dict, tuple, set, list, hasattr, slice, range, len,
-                        super, type, map, filter, enumerate)
+                        type)
 
     def get_live_objs(self, pc: int = -1) -> list[tuple[str, Any]]:
         if pc == -1:
@@ -1560,20 +1577,27 @@ class GuardTracker:
             (set, list, dict, collections.OrderedDict,
              MappingProxyType)) and get_root_module(func) != 'torch':
             set_if_inplace_return()
+            if len(args) > 0 and isinstance(
+                    args, list) and func in (list.append, list.extend,
+                                             list.clear, list.pop, list.remove,
+                                             list.reverse, list.sort):
+                self.state.add_inplace_update_obj(args[0])
             return
         elif self.has_arg_of_type(args, kwargs, np.generic):
             return
         elif self.is_genexpr_func(func):
             return
         elif self.is_builtin_func(func):
+            self.state.set_partial_var({
+                -1: [
+                    PartialVar(node=None,
+                               need_guard_check=False,
+                               extract_code_at_start=[])
+                ]
+            })
+            return
+        elif func in (super, map, filter, enumerate):
             # TODO: add map and set correct partial var
-            # self.state.set_partial_var({
-            #         -1: [
-            #             PartialVar(node=None,
-            #                     need_guard_check=False,
-            #                     extract_code_at_start=[])
-            #         ]
-            #     })
             return
         elif is_graph_func(func):
             return
@@ -1586,9 +1610,10 @@ class GuardTracker:
             raise NotImplementedError
         elif func == getattr:
             if get_method_defined_class(type(args[0]), '__getattr__') in (
-                    torch.nn.Module, object) and get_method_defined_class(
+                    torch.nn.Module, object, None) and get_method_defined_class(
                         type(args[0]),
-                        '__getattribute__') in (torch.nn.Module, object):
+                        '__getattribute__') in (torch.nn.Module, object,
+                                                ModuleType):
                 arg_obj = self.state.objects.get(args[0])
 
                 self.state.set_partial_var({
@@ -1752,7 +1777,13 @@ class GuardTracker:
         pass
 
     def LOAD_CONST(self, _inst: Instruction) -> None:
-        pass
+        self.state.set_partial_var({
+            -1: [
+                PartialVar(node=None,
+                           need_guard_check=False,
+                           extract_code_at_start=[])
+            ]
+        })
 
     def SETUP_FINALLY(self, _inst: Instruction) -> None:
         pass
@@ -1842,6 +1873,10 @@ class GuardTracker:
         if inst.argval in obj_var.modified_attrs:
             return
         need_guard_check = obj_var.need_guard_check
+        if obj == self.state.varargs and inst.argval in dir(tuple):
+            need_guard_check = False
+        if obj == self.state.varkw and inst.argval in dir(dict):
+            need_guard_check = False
         if config.get_config('dynshape') and isinstance(
                 obj, torch.Tensor) and inst.argval == 'shape':
             node: Optional[torch.fx.Node] = self.state.fx_graph.create_node(
