@@ -190,3 +190,17 @@ def test_list_comp_with_wrapper(caplog):
                   caplog, expect, a, b)
     run_and_check(compiled_list_comp_with_wrapper, [HIT], 1, caplog, expect, a,
                   b)
+
+
+def list_inplace():
+    a = [1]
+    a.append(2)
+    return (3, a)
+
+
+def test_list_inplace(caplog):
+    reset()
+    compiled = compile(list_inplace)
+    expect = list_inplace()
+    run_and_check(compiled, [MISS], 1, caplog, expect)
+    run_and_check(compiled, [HIT], 1, caplog, expect)

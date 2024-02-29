@@ -375,3 +375,18 @@ def test_get_device_states(caplog):
 #     compiled = compile(tuple_view1)
 #     run_and_check(compiled, [ALL_MISS], 1, caplog, expect, a)
 #     run_and_check(compiled, [HIT], 1, caplog, expect, a)
+
+
+def run_getattr_relu(x):
+    func = getattr(torch.nn.functional, 'relu')
+    return func(x)
+
+
+def test_run_getattr_relu(caplog):
+    reset()
+    with torch.no_grad():
+        inp = torch.rand((2, 2))
+        expect = run_getattr_relu(inp)
+        compiled = compile(run_getattr_relu)
+        run_and_check(compiled, [ALL_MISS], 1, caplog, expect, inp)
+        run_and_check(compiled, [HIT], 1, caplog, expect, inp)
