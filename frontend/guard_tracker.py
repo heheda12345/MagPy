@@ -1509,8 +1509,7 @@ class GuardTracker:
 
     def is_builtin_func(self, func: Callable[..., Any]) -> bool:
         return func in (dict, tuple, set, list, hasattr, slice, range, len,
-                        type, all, str.join,
-                        reversed, zip, iter, id, next)
+                        type, all, str.join, reversed, zip, iter, id, next)
 
     def get_live_objs(self, pc: int = -1) -> list[tuple[str, Any]]:
         if pc == -1:
