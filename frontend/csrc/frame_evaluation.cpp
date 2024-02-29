@@ -696,6 +696,7 @@ static PyMethodDef _methods[] = {
     {"parse_mapobject", frontend_csrc::parse_mapobject, METH_VARARGS, NULL},
     {"parse_cell", frontend_csrc::parse_cell, METH_VARARGS, NULL},
     {"set_cell", frontend_csrc::set_cell, METH_VARARGS, NULL},
+    {"parse_type_obj", frontend_csrc::parse_type_obj, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL},
 };
 

@@ -12,6 +12,7 @@ import torch
 import torch._C
 import collections
 from .config import get_config, set_config
+from .c_api import parse_type_obj
 
 if TYPE_CHECKING:
     from .instruction import Instruction
@@ -201,6 +202,12 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
     if hasattr(func, '__name__') and func.__name__ == 'apply':
         assert hasattr(func, '__self__')
         return is_user_defined_func(func.__self__)
+
+    if inspect.isclass(func):
+        tp_name = parse_type_obj(func)
+        module = tp_name.split(".")[0]
+        if module in ("itertools",):
+            return False
 
     if func is super:
         return False

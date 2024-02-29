@@ -30,3 +30,17 @@ def test_numpy_to_int(caplog):
     result = numpy_to_int(10)
     run_and_check(compiled_numpy_to_int, [MISS], 1, caplog, result, 10)
     run_and_check(compiled_numpy_to_int, [HIT], 1, caplog, result, 10)
+
+
+def numpy_to_torch(x):
+    y = np.floor((x - 1) / 2)
+    return torch.tensor(y)
+
+
+def test_numpy_to_torch(caplog):
+    reset()
+    compiled = compile(numpy_to_torch)
+    a = np.array([1, 2.0, 3.33])
+    result = numpy_to_torch(a)
+    run_and_check(compiled, [MISS], 1, caplog, result, a)
+    run_and_check(compiled, [HIT], 1, caplog, result, a)
