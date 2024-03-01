@@ -1993,7 +1993,8 @@ class GuardTracker:
                    '__self__') and func.__self__ is not None and not isinstance(
                        func.__self__, ModuleType):
             args = [func.__self__] + list(args)
-        # print(f"function kw: {func}, type: {type(func)},args:{args}, kwargs:{kwargs}")
+        for i, obj in enumerate(itertools.chain(args, kwargs.values())):
+            self.state.fetch_function_parameters(obj)
         self.call_function(func, args, kwargs)
 
     def CALL_FUNCTION_EX(self, inst: Instruction) -> None:
@@ -2009,6 +2010,9 @@ class GuardTracker:
                    '__self__') and func.__self__ is not None and not isinstance(
                        func.__self__, ModuleType):
             args = [func.__self__] + list(args)
+        if not isinstance(args, torch.Tensor):  # call(*x)
+            for i, obj in enumerate(itertools.chain(args, kwargs.values())):
+                self.state.fetch_function_parameters(obj)
         self.call_function(func, args, kwargs)
 
     def STORE_FAST(self, inst: Instruction) -> None:
@@ -2112,20 +2116,15 @@ class GuardTracker:
         pass
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
-        seq = get_value_stack_from_top(self.frame, 0)
-        if isinstance(seq, (tuple, list)):
-            self.state.set_partial_var({
-                -1: [
-                    PartialVar(node=None,
-                               need_guard_check=False,
-                               extract_code_at_start=[],
-                               make_var_fn=vs.make_var_from_value)
-                    for _ in range(len(seq))
-                ]
-            })
-        else:
-            print(type(seq))
-            raise NotImplementedError
+        self.state.set_partial_var({
+            -1: [
+                PartialVar(node=None,
+                           need_guard_check=False,
+                           extract_code_at_start=[],
+                           make_var_fn=vs.make_var_from_value)
+                for _ in range(inst.argval)
+            ]
+        })
 
     def UNPACK_EX(self, inst: Instruction) -> None:
         seq = get_value_stack_from_top(self.frame, 0)

@@ -400,7 +400,7 @@ high_order_func_list = (map, filter, zip, list, iter, enumerate, tuple)
 
 
 def is_high_order_func(func: Callable[..., Any]) -> bool:
-    return func in high_order_func_list
+    return func in high_order_func_list or isinstance(func, Generator)
 
 
 def is_high_order_func_with_udf(func: Callable[..., Any], args: List[Any],
@@ -438,5 +438,7 @@ def is_high_order_func_with_udf(func: Callable[..., Any], args: List[Any],
         return len(args) >= 1 and is_user_defined_iter(args[0])
     elif func == enumerate:
         return len(args) >= 1 and is_user_defined_iter(args[0])
+    elif isinstance(func, Generator):
+        return True
     else:
         raise NotImplementedError
