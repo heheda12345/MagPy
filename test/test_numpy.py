@@ -38,9 +38,11 @@ def numpy_to_torch(x):
 
 
 def test_numpy_to_torch(caplog):
-    reset()
-    compiled = compile(numpy_to_torch)
-    a = np.array([1, 2.0, 3.33])
-    result = numpy_to_torch(a)
-    run_and_check(compiled, [MISS], 1, caplog, result, a)
-    run_and_check(compiled, [HIT], 1, caplog, result, a)
+    from frontend.utils import SetConfig
+    with SetConfig({"backend": "eager"}):
+        reset()
+        compiled = compile(numpy_to_torch)
+        a = np.array([1, 2.0, 3.33])
+        result = numpy_to_torch(a)
+        run_and_check(compiled, [MISS], 1, caplog, result, a)
+        run_and_check(compiled, [HIT], 1, caplog, result, a)

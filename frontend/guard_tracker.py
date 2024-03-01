@@ -175,7 +175,7 @@ class State:
                              as_fx_node(arg.step))
             if isinstance(arg, np.ndarray):
                 param_name = self.add_subparam(
-                    torch.nn.Parameter(torch.tensor(arg)))
+                    torch.nn.Parameter(torch.tensor(arg), requires_grad=False))
                 return self.fx_graph.create_node("get_attr", param_name, (), {})
 
             var = self.objects.get(arg,
@@ -2124,6 +2124,7 @@ class GuardTracker:
                 ]
             })
         else:
+            print(type(seq))
             raise NotImplementedError
 
     def UNPACK_EX(self, inst: Instruction) -> None:
