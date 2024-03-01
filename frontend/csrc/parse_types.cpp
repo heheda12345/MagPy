@@ -110,4 +110,15 @@ PyObject *set_cell(PyObject *self, PyObject *args) {
     return Py_None;
 }
 
+PyObject *parse_type_obj(PyObject *self, PyObject *args) {
+    PyObject *obj;
+    if (!PyArg_ParseTuple(args, "O", &obj)) {
+        return NULL;
+    }
+    if (PyType_Check(obj)) {
+        return PyUnicode_FromString(((PyTypeObject *)obj)->tp_name);
+    }
+    PyErr_SetString(PyExc_TypeError, "Expected type object");
+    return NULL;
+}
 } // namespace frontend_csrc

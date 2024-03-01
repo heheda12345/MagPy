@@ -149,10 +149,11 @@ class State:
         self.update_subpath(module, new_module_name)
         # self.written = True # not mark as written as graph break may happen
 
-    def add_subparam(self, param: torch.nn.Parameter) -> None:
+    def add_subparam(self, param: torch.nn.Parameter) -> str:
         new_param_name = "external_param__" + str(len(self.subparam_paths))
         self.root.register_parameter(new_param_name, param)
         self.subparam_paths[param] = new_param_name
+        return new_param_name
 
     def as_node_args_kwargs(
         self, args: list[Any], kwargs: dict[str, Any]
@@ -176,6 +177,11 @@ class State:
             if isinstance(arg, slice):
                 return slice(as_fx_node(arg.start), as_fx_node(arg.stop),
                              as_fx_node(arg.step))
+            if isinstance(arg, np.ndarray):
+                param_name = self.add_subparam(
+                    torch.nn.Parameter(torch.tensor(arg), requires_grad=False))
+                return self.fx_graph.create_node("get_attr", param_name, (), {})
+
             var = self.objects.get(arg,
                                    allow_unexist_const=True,
                                    fx_graph=self.fx_graph)
@@ -201,6 +207,9 @@ class State:
                         var.obj, "__module__"):
                     assert var.obj.__module__ in ('torch', 'numpy')
                     return f'{var.obj.__module__}.{var.obj.__name__}'
+
+            if f"{type(arg).__module__}.{type(arg).__qualname__}" == "torch.tensortype":  # torch.LongTensor
+                return f"torch.{arg.__name__}"
             return var.as_fx_node()
 
         if isinstance(args, torch.Tensor):
@@ -234,6 +243,19 @@ class State:
                         add_partial_var: bool = True,
                         inplace_ref: Any = None,
                         force_new_value: bool = False) -> None:
+        if hasattr(func, '__self__') and isinstance(
+                func.__self__, torch.autograd.grad_mode.no_grad):
+            if func.__name__ == '__enter__':
+                target_state = False
+            elif func.__name__ == '__exit__':
+                target_state = func.__self__.prev
+            else:
+                raise ValueError(func)
+            args = [
+                target_state,
+            ]
+            func = torch._C._set_grad_enabled
+            kwargs = {}
         pargs, pkwargs = self.as_node_args_kwargs(args, kwargs)
         if func in fx_graph_inplace_functions:
             scalar = None
@@ -277,6 +299,8 @@ class State:
                 func = func_dict[func]
         if func in math2torch:
             func = math2torch[func]
+        if func == torch.from_numpy:
+            func = torch.tensor
 
         self.written = True
         scalar2tensor: dict[Callable[..., Any], Callable[..., Any]] = {
@@ -1446,7 +1470,6 @@ class GuardTracker:
 
         self.state.inplace_update_objs.clear()
         self.state.partial_var.clear()
-        print("clear partial var")
         self.state.written = False
         self.state.unmark_calling_func()
         # print('process last instruction done')
@@ -1510,6 +1533,15 @@ class GuardTracker:
     def is_builtin_func(self, func: Callable[..., Any]) -> bool:
         return func in (dict, tuple, set, list, hasattr, slice, range, len,
                         type, all, str.join, reversed, zip, iter, id, next)
+
+    def is_numpy_constant_func(self, func: Callable[..., Any]) -> bool:
+        print(dir(func))
+        if (hasattr(func, '__module__') and 'numpy' in func.__module__ and
+                'random' not in func.__module__):
+            return True
+        if type(func) == np.ufunc:
+            return True
+        return False
 
     def get_live_objs(self, pc: int = -1) -> list[tuple[str, Any]]:
         if pc == -1:
@@ -1779,6 +1811,8 @@ class GuardTracker:
             return
         elif len(args) > 0 and isinstance(args[0], torch.nn.ModuleList):
             return
+        elif self.is_numpy_constant_func(func):
+            return
         elif self.has_unknown_arg(args, kwargs):
             print(
                 f"func is {func}, {is_user_defined_func(func)}, args: {args}, kwargs:{kwargs}"
@@ -1968,7 +2002,9 @@ class GuardTracker:
         pass
 
     def SETUP_WITH(self, _inst: Instruction) -> None:
-        pass
+        mgr = get_value_stack_from_top(self.frame, 0)
+        if type(mgr) == torch.autograd.grad_mode.no_grad:
+            self.call_function(mgr.__enter__, [], {})
 
     def JUMP_IF_NOT_EXC_MATCH(self, _inst: Instruction) -> None:
         pass
@@ -2066,9 +2102,9 @@ class GuardTracker:
             return
 
         need_guard_check = obj_var.need_guard_check
-        if obj == self.state.varargs and inst.argval in dir(tuple):
+        if id(obj) == id(self.state.varargs) and inst.argval in dir(tuple):
             need_guard_check = False
-        if obj == self.state.varkw and inst.argval in dir(dict):
+        if id(obj) == id(self.state.varkw) and inst.argval in dir(dict):
             need_guard_check = False
         node1 = None
         if isinstance(obj, torch.Tensor) and isinstance(attr, torch.Tensor):
@@ -2168,7 +2204,8 @@ class GuardTracker:
                    '__self__') and func.__self__ is not None and not isinstance(
                        func.__self__, ModuleType):
             args = [func.__self__] + list(args)
-        # print(f"function kw: {func}, type: {type(func)},args:{args}, kwargs:{kwargs}")
+        for i, obj in enumerate(itertools.chain(args, kwargs.values())):
+            self.state.fetch_function_parameters(obj)
         self.call_function(func, args, kwargs)
 
     def CALL_FUNCTION_EX(self, inst: Instruction) -> None:
@@ -2184,6 +2221,9 @@ class GuardTracker:
                    '__self__') and func.__self__ is not None and not isinstance(
                        func.__self__, ModuleType):
             args = [func.__self__] + list(args)
+        if not isinstance(args, torch.Tensor):  # call(*x)
+            for i, obj in enumerate(itertools.chain(args, kwargs.values())):
+                self.state.fetch_function_parameters(obj)
         self.call_function(func, args, kwargs)
 
     def STORE_FAST(self, inst: Instruction) -> None:

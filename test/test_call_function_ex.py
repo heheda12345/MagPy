@@ -96,3 +96,22 @@ def test_call_ex_with_update(caplog):
         compiled = compile(outer_call_ex_with_update)
         run_and_check(compiled, [ALL_MISS], 1, caplog, expect, a, b)
         run_and_check(compiled, [HIT], 1, caplog, expect, a, b)
+
+
+def callee_kw(a, b):
+    return a[0] + b
+
+
+def caller_kw(a, b):
+    return callee_kw((a, 2), b=b)
+
+
+def test_caller_kw(caplog):
+    reset()
+    with torch.no_grad():
+        a = 1
+        b = 3
+        expect = caller_kw(a, b)
+        compiled = compile(caller_kw)
+        run_and_check(compiled, [ALL_MISS], 1, caplog, expect, a, b)
+        run_and_check(compiled, [HIT], 1, caplog, expect, a, b)

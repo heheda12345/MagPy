@@ -112,3 +112,7 @@ def set_cell(cell: CellType, value: Any) -> None:
 
 def set_local(frame: FrameType, idx: int, value: Any) -> None:
     pass
+
+
+def parse_type_obj(obj: Any) -> str:
+    pass

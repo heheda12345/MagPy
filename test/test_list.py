@@ -1,5 +1,5 @@
 from frontend.compile import compile, reset
-from common.checker import run_and_check, HIT, MISS, assert_equal
+from common.checker import run_and_check, HIT, MISS, ALL_MISS, assert_equal
 import torch
 import numpy as np
 
@@ -204,3 +204,20 @@ def test_list_inplace(caplog):
     expect = list_inplace()
     run_and_check(compiled, [MISS], 1, caplog, expect)
     run_and_check(compiled, [HIT], 1, caplog, expect)
+
+
+# def unpack_list(a, b):
+#     a, b = (y + 1 for y in [a,b])
+#     return a + b
+
+# def test_unpack_list(caplog):
+#     reset()
+#     compiled = compile(unpack_list)
+#     expect = unpack_list(1, 2)
+#     run_and_check(compiled, [ALL_MISS], 1, caplog, expect, 1,2)
+#     run_and_check(compiled, [HIT], 1, caplog, expect, 1, 2)
+#     a = torch.rand((2,2))
+#     b = torch.rand((2,2))
+#     expect = unpack_list(a, b)
+#     run_and_check(compiled, [ALL_MISS], 2, caplog, expect, a, b)
+#     run_and_check(compiled, [HIT], 2, caplog, expect, a, b)
