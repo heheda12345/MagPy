@@ -18,6 +18,7 @@ class FnCodegen:
     imports: set[str]
     key: int
     objs: dict[str, Any]  # name -> obj
+    statements: set[str]
 
     def __init__(self, key: int) -> None:
         self.key = key
@@ -25,6 +26,7 @@ class FnCodegen:
         self.writer = PyCodeWriter()
         self.imports = set()
         self.objs = {}
+        self.statements = set()
 
     def add_obj(self, obj: Any, name: str = "", force: bool = False) -> str:
         if force:
@@ -55,6 +57,9 @@ class FnCodegen:
             self.prepare_var_writer.wl(stmt)
         else:
             self.writer.wl(stmt)
+
+    def add_statements(self, stmt: str) -> None:
+        self.statements.add(stmt)
 
 
 class GraphFnCodegen(FnCodegen):
@@ -88,6 +93,8 @@ class GraphFnCodegen(FnCodegen):
         gen_imports(writer, self.imports)
         writer.wl(f"def fn(locals):")
         writer.block_start()
+        for stmt in self.statements:
+            writer.wl(stmt)
         if get_config('debug'):
             writer.wl(
                 f"print('running graph_fn (key = {self.key})', locals.keys())")
@@ -157,6 +164,8 @@ class GuardFnCodegen(FnCodegen):
         writer.block_start()
         writer.write(f"try:")
         writer.block_start()
+        for stmt in self.statements:
+            writer.write(stmt)
         if get_config('debug'):
             writer.wl(
                 f"print('running guard_fn (key = {self.key})', locals.keys())")

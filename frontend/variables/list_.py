@@ -13,6 +13,8 @@ class ListVar(Variable):
     vars: list[Variable]
     obj_ids: list[int]
     length: int
+    helper_functions: HelperFunctions
+    graph: Optional[FxGraph]
 
     def __init__(self, value: list[Any], need_guard_check: bool,
                  helper_functions: HelperFunctions, fx_graph: Optional[FxGraph],
@@ -22,6 +24,8 @@ class ListVar(Variable):
         self.length = len(value)
         self.vars = []
         self.obj_ids = []
+        self.helper_functions = helper_functions
+        self.graph = fx_graph
         for i, obj in enumerate(value):
             new_extract: list[StorePos] = [
                 StoreInIndex(pos, id(obj), i)
@@ -43,6 +47,19 @@ class ListVar(Variable):
                           codegen: "GraphFnCodegen", in_return: bool,
                           idx: int) -> None:
         oldest = self.get_oldest_var()
+        if len(self.obj) != len(self.vars):
+            # updated list
+            self.vars.clear()
+            self.obj_ids.clear()
+            for i, obj in enumerate(self.obj):
+                new_extract: list[StorePos] = [
+                    StoreInIndex(pos, id(obj), i)
+                    for pos in self.extract_code_at_start
+                ]
+                var = self.helper_functions.get_or_make_var(
+                    obj, self.need_guard_check, self.graph, new_extract)
+                self.vars.append(var)
+                self.obj_ids.append(id(obj))
         for j, (idx_j, var) in enumerate(zip(self.obj_ids, self.vars)):
             var.make_output(f"{name_in_graph_fn}_{j}", store_pos, codegen,
                             False, idx_j)

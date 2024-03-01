@@ -48,6 +48,7 @@ class TorchModuleVar(Variable):
                        in_return, idx)
 
     def as_fx_node(self) -> NodeArgs:
+        return self.obj
         raise ValueError("Cannot convert a module to a node")
 
 

@@ -432,3 +432,97 @@ def test_empty_cell(caplog):
     expect = f(x)
     run_and_check(compiled, [MISS, MISS], 2, caplog, expect, x)
     run_and_check(compiled, [HIT], 2, caplog, expect, x)
+
+
+class parent_func_call(torch.nn.Sequential):
+
+    def forward(self):
+        return self.parameters()
+
+
+def test_parent_func_call(caplog):
+    reset()
+    instance = parent_func_call()
+    expect = instance()
+    compiled = compile(instance)
+    run_and_check(compiled, [MISS], 1, caplog, expect)
+    run_and_check(compiled, [HIT], 1, caplog, expect)
+
+
+def para_with_star(a, *b):
+    out = []
+    for i in b:
+        out.append(i)
+    return out
+
+
+def call_with_star(a):
+    intput1 = 3
+    b = a
+    out = para_with_star(intput1, b, 6.2)
+    return out
+
+
+def para_with_tuple(a, input2):
+    out = []
+    for i in input2:
+        out.append(i)
+    return out
+
+
+def call_with_tuple(a):
+    intput1 = 3
+    out = para_with_tuple(intput1, (a, 5))
+    return out
+
+
+def test_call_parameter(caplog):
+    reset()
+    compiled1 = compile(call_with_star)
+    compiled2 = compile(call_with_tuple)
+    input = torch.randn([2, 2])
+    expect = call_with_star(input)
+    run_and_check(compiled1, [ALL_MISS], 1, caplog, expect, input)
+    run_and_check(compiled1, [HIT], 1, caplog, expect, input)
+    expect = call_with_tuple(input)
+    run_and_check(compiled2, [ALL_MISS], 2, caplog, expect, input)
+    run_and_check(compiled2, [HIT], 2, caplog, expect, input)
+
+
+class modifiedAttr(torch.nn.Module):
+
+    def __init__(self, kernel, factor=2):
+        super(modifiedAttr, self).__init__()
+        self.factor = factor
+        self.kernel = kernel
+
+    def forward(self, x):
+        self.kernel = x
+        self.factor = x + 1
+        out = self.kernel + x
+        return out
+
+
+class modifyAttr(torch.nn.Module):
+
+    def __init__(self, in_size, out_size, is_deconv, n_concat=2):
+        super(modifyAttr, self).__init__()
+        self.in_size = in_size
+        self.out_size = out_size
+        self.is_deconv = is_deconv
+        self.call = modifiedAttr(torch.rand([2, 2]))
+
+    def forward(self, high_feature):
+        out = self.call(high_feature)
+        return out
+
+
+def test_modify_attr(caplog):
+    reset()
+    with torch.no_grad():
+        model = modifyAttr(1, 2, True)
+        compiled = compile(model)
+        input = torch.randn([2, 2, 2])
+        expect = model(input)
+        run_and_check(compiled, [ALL_MISS], 1, caplog, expect, input)
+        run_and_check(compiled, [HIT], 1, caplog, expect, input)

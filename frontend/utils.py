@@ -134,16 +134,18 @@ torch_inplace_funcs = {
 
 
 def get_root_module(func: Callable[..., Any]) -> str:
+    import numpy as np
     if hasattr(func, '__objclass__'):
         if func.__objclass__ == torch._C._TensorBase:
             return 'torch'
         elif func.__objclass__ in (list, tuple, set, dict, str):
             return 'builtins'
+        elif func.__objclass__ == np.ndarray:
+            return 'numpy'
 
     if hasattr(func, '__self__') and isinstance(func.__self__, torch.Tensor):
         return 'torch'
 
-    import numpy as np
     if hasattr(func, '__class__') and func.__class__ == np.ufunc:
         return 'numpy'
 
@@ -151,8 +153,7 @@ def get_root_module(func: Callable[..., Any]) -> str:
     module_str = ""
     if module is not None:
         module_str = str(module).split('\'')[1]
-    if module is None or module_str in ('torch.distributions.bernoulli',
-                                        'torch.distributions.distribution'):
+    if module is None or 'torch.distributions' in module_str:
         return ""
     root_module = module_str.split('.')[0]
     return root_module
@@ -178,11 +179,14 @@ def get_method_defined_class(cls: type[Any],
 
 def is_user_defined_func(func: Callable[..., Any]) -> bool:
     # print([(x, getattr(func, x)) for x in dir(func)])
+    import numpy
     if hasattr(func, '__objclass__') and func.__objclass__ in (
-            torch._C._TensorBase, dict, list, str, collections.OrderedDict):
+            torch._C._TensorBase, dict, list, str, collections.OrderedDict,
+            numpy.ndarray):
         return False
     if hasattr(func, '__class__') and func.__class__ in (
-            torch._C._TensorBase, dict, list, str, collections.OrderedDict):
+            torch._C._TensorBase, dict, list, str, collections.OrderedDict,
+            numpy.ndarray):
         return False
 
     # NOTE: random should be called as a UDF, not handled
@@ -194,11 +198,13 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
         elif isinstance(func.__self__, torch.nn.Sequential):
             return True
 
-    if hasattr(func, '__name__') and func.__name__ == '<genexpr>':
+    if hasattr(func, '__name__') and func.__name__ in ('<genexpr>', 'numel'):
         return False
     if hasattr(func, '__name__') and func.__name__ == '_conv_forward':
         return True
 
+    if hasattr(func, '__name__') and func.__name__ == 'forward':
+        return True
     if hasattr(func, '__name__') and func.__name__ == 'apply':
         assert hasattr(func, '__self__')
         return is_user_defined_func(func.__self__)
@@ -213,8 +219,12 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
         return False
 
     root_module = get_root_module(func)
+    if root_module == 'torch' and hasattr(
+            func, '__name__') and func.__name__ == '_call_impl':
+        return True
     if root_module in ('math', 'builtins', 'torch', 'numpy', '_operator',
-                       'inspect', 'collections'):
+                       'inspect', 'collections', 'itertools', 'functools',
+                       'copy'):
         #NOTE:self.function should be recursive-checked to find out where it's defined, but not implemented
         if hasattr(func, '__self__'
                   ) and func.__self__ is not None and is_user_defined_func(

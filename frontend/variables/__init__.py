@@ -5,13 +5,13 @@ import numpy as np
 from collections import OrderedDict
 from .base import Variable, HelperFunctions
 from .scalar import ScalarVar, NumpyScalarVar
-from .tensor import TensorVar, TorchParamVar, TorchSizeVar, TorchDtypeVar, TorchDeviceVar
+from .tensor import TensorVar, TorchParamVar, TorchSizeVar, TorchDtypeVar, TorchDeviceVar, TorchLayoutVar
 from .torch_module import TorchModuleVar, TorchSequentialVar, TorchModuleListVar
 from .any_ import AnyVar
 from .const import NullVar, NoneVar, SliceVar, ModuleVar, FunctionVar, RangeVar, CodeVar, EllipsisVar
 from .iterator import IteratorVar, RangeIterVar
 from .tuple_ import TupleVar
-from .set_ import SetVar
+from .set_ import SetVar, FrozensetVar
 from .list_ import ListVar, NdarrayVar
 from .dict_ import DictVar, OrderedDictVar
 from .builtin_types import CellVar, MappingProxyVar
@@ -32,9 +32,11 @@ ty2var: dict[type[Any], type[Variable]] = {
     tuple: TupleVar,
     list: ListVar,
     set: SetVar,
+    frozenset: FrozensetVar,
     torch.Size: TorchSizeVar,
     torch.dtype: TorchDtypeVar,
     torch.device: TorchDeviceVar,
+    torch.layout: TorchLayoutVar,
     dict: DictVar,
     CodeType: CodeVar,
     OrderedDict: OrderedDictVar,
