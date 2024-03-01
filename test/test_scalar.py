@@ -225,3 +225,18 @@ def test_dynamic_scalar_from_tensor(caplog):
     bb = torch.tensor(5.0)
     expect = dynamic_scalar_from_tensor(aa, bb, c)
     run_and_check(compiled, [HIT], 1, caplog, expect, aa, bb, c)
+
+
+def itertools_product(a, b):
+    import itertools
+    return list(itertools.product(a, b))
+
+
+def test_itertools_product(caplog):
+    reset()
+    a = [1, 2]
+    b = [3, 4]
+    expect = itertools_product(a, b)
+    compiled = compile(itertools_product)
+    run_and_check(compiled, [MISS], 1, caplog, expect, a, b)
+    run_and_check(compiled, [HIT], 1, caplog, expect, a, b)
