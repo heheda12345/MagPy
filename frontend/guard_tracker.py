@@ -249,6 +249,8 @@ class State:
                 target_state = False
             elif func.__name__ == '__exit__':
                 target_state = func.__self__.prev
+            elif func.__name__ == 'clone':
+                target_state = False
             else:
                 raise ValueError(func)
             args = [
@@ -1380,6 +1382,11 @@ class GuardTracker:
                             partial.extract_code_at_start)
                         self.state.objects.add(new_scalar_var, value)
                         dyn.mark_dynamic(value, dyn.ScalarWithUnknownValue())
+                    elif value is None:
+                        new_none_var = vs.NoneVar.from_value(
+                            None, False, self.state.objects.helper_functions,
+                            None, partial.extract_code_at_start)
+                        self.state.objects.add(new_none_var, None)
                     elif isinstance(value, (tuple, list)):
                         for i, sub_value in enumerate(value):
                             sub_node = self.state.fx_graph.create_node(
@@ -1726,7 +1733,7 @@ class GuardTracker:
                 return
             if hasattr(func,
                        "__name__") and func.__name__ in ("flatten_parameters",
-                                                         "numel"):
+                                                         "numel", "children"):
                 return
             print("record function in graph", func)
             self.state.record_function(
