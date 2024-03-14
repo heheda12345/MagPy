@@ -173,7 +173,13 @@ class State:
 
         def as_fx_node(arg: Any) -> NodeArgs:
             if isinstance(arg, (tuple, list)):
-                return fx_immutable.immutable_list([as_fx_node(x) for x in arg])
+                if isinstance(arg, list):
+                    return fx_immutable.immutable_list(
+                        [as_fx_node(x) for x in arg])
+                else:
+                    return tuple(
+                        fx_immutable.immutable_list(
+                            [as_fx_node(x) for x in arg]))
             if isinstance(arg, slice):
                 return slice(as_fx_node(arg.start), as_fx_node(arg.stop),
                              as_fx_node(arg.step))
@@ -196,9 +202,10 @@ class State:
                     if common_device is not None and common_device != torch.device(
                             'cpu'):
                         cpu_node = var.as_fx_node()
-                        return self.fx_graph.create_node(
-                            "call_method", "to", (cpu_node,),
-                            {"device": common_device})
+                        # return self.fx_graph.create_node(
+                        #     "call_method", "to", (cpu_node,),
+                        #     {"device": common_device})
+                        return cpu_node
                 else:
                     # TODO: record all operation in SymInt or SymFloat
                     pass
@@ -346,6 +353,8 @@ class State:
 
             fx_node = self.fx_graph.create_node("call_method", func.__name__,
                                                 pargs, pkwargs)
+            if func.__name__ == 'tolist':
+                add_partial_var = False
             if add_partial_var:
                 self.partial_var = {
                     -1: [
@@ -1731,9 +1740,17 @@ class GuardTracker:
                     ]
                 })
                 return
-            if hasattr(func,
-                       "__name__") and func.__name__ in ("flatten_parameters",
-                                                         "numel", "children"):
+            if hasattr(func, "__name__") and func.__name__ in (
+                    "flatten_parameters", "numel", "children",
+                    "named_parameters", "_weights_have_changed",
+                    "check_forward_args", "permute_hidden", "_check_input_dim",
+                    "parameters"):
+                return
+            if hasattr(func, "__module__"
+                      ) and func.__module__ == 'torch.autograd.profiler':
+                return
+            elif hasattr(func, "__self__") and isinstance(
+                    func.__self__, torch.autograd.profiler.record_function):
                 return
             print("record function in graph", func)
             self.state.record_function(
