@@ -238,8 +238,8 @@ class TorchDeviceVar(Variable):
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,
                           idx: int) -> None:
-        codegen.output(name_in_graph_fn, store_pos, f"{self.device}", in_return,
-                       idx)
+        codegen.output(name_in_graph_fn, store_pos, f"'{self.device}'",
+                       in_return, idx)
 
     def as_fx_node(self) -> "NodeArgs":
         return self.device
