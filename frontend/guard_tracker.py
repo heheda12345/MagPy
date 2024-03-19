@@ -1744,7 +1744,7 @@ class GuardTracker:
                     "flatten_parameters", "numel", "children",
                     "named_parameters", "_weights_have_changed",
                     "check_forward_args", "permute_hidden", "_check_input_dim",
-                    "parameters"):
+                    "parameters", "_has_torch_function_unary"):
                 return
             if hasattr(func, "__module__"
                       ) and func.__module__ == 'torch.autograd.profiler':
@@ -1890,6 +1890,13 @@ class GuardTracker:
             caller = caller.caller
         return False
 
+    def generic_jump_check(self) -> None:
+        top_value = get_value_stack_from_top(self.frame, 0)
+        if torch.is_tensor(top_value):
+            raise ValueError("generic_jump TensorVariable() by tensor")
+        if dyn.contains(top_value):
+            raise ValueError("generic_jump TensorVariable() by dyn scalar")
+
     def binary_operation(self, func: Callable[..., Any]) -> None:
         obj1 = get_value_stack_from_top(self.frame, 1)
         obj2 = get_value_stack_from_top(self.frame, 0)
@@ -1937,6 +1944,9 @@ class GuardTracker:
     def BINARY_SUBSCR(self, inst: Instruction) -> None:
         obj1 = get_value_stack_from_top(self.frame, 1)
         obj2 = get_value_stack_from_top(self.frame, 0)
+        if torch.is_tensor(obj1):
+            if torch.is_tensor(obj2) and obj2.dtype == torch.bool:
+                raise ValueError("dynamic shape in tensor")
         self.call_function(operator.getitem, [obj1, obj2], {})
 
     def unary_operation(self, func: Callable[..., Any]) -> None:
@@ -2470,16 +2480,16 @@ class GuardTracker:
         pass
 
     def POP_JUMP_IF_FALSE(self, _inst: Instruction) -> None:
-        pass
+        self.generic_jump_check()
 
     def POP_JUMP_IF_TRUE(self, _inst: Instruction) -> None:
-        pass
+        self.generic_jump_check()
 
     def JUMP_IF_TRUE_OR_POP(self, _inst: Instruction) -> None:
-        pass
+        self.generic_jump_check()
 
     def JUMP_IF_FALSE_OR_POP(self, _inst: Instruction) -> None:
-        pass
+        self.generic_jump_check()
 
     def JUMP_FORWARD(self, inst: Instruction) -> None:
         pass
