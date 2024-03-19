@@ -1550,7 +1550,8 @@ class GuardTracker:
     def is_builtin_func(self, func: Callable[..., Any]) -> bool:
         return func in (dict, tuple, set, list, hasattr, slice, range, len,
                         type, all, str.join, reversed, zip, iter, id, next,
-                        collections.OrderedDict, str.format, any)
+                        collections.OrderedDict, str.format, any, str,
+                        str.split)
 
     def is_numpy_constant_func(self, func: Callable[..., Any]) -> bool:
         print(dir(func))
