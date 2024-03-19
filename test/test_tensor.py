@@ -420,3 +420,20 @@ def test_no_grad(caplog):
         compiled = compile(run_no_grad)
         run_and_check(compiled, [MISS], 1, caplog, expect, inp)
         run_and_check(compiled, [HIT], 1, caplog, expect, inp)
+
+
+def tensor_set_item(x):
+    length = x.shape[0]
+    for i in range(length):
+        x[i, i, i] = 1.0
+    return x
+
+
+def test_tensor_set_item(caplog):
+    reset()
+    with torch.no_grad():
+        input = torch.rand([4, 4, 4, 4])
+        expect = tensor_set_item(input)
+        compiled = compile(tensor_set_item)
+        run_and_check(compiled, [MISS], 1, caplog, expect, input)
+        run_and_check(compiled, [HIT], 1, caplog, expect, input)
