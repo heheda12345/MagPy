@@ -1744,7 +1744,7 @@ class GuardTracker:
                     "flatten_parameters", "numel", "children",
                     "named_parameters", "_weights_have_changed",
                     "check_forward_args", "permute_hidden", "_check_input_dim",
-                    "parameters"):
+                    "parameters", "_has_torch_function_unary"):
                 return
             if hasattr(func, "__module__"
                       ) and func.__module__ == 'torch.autograd.profiler':
@@ -1945,10 +1945,8 @@ class GuardTracker:
         obj1 = get_value_stack_from_top(self.frame, 1)
         obj2 = get_value_stack_from_top(self.frame, 0)
         if torch.is_tensor(obj1):
-            if torch.is_tensor(obj2):
+            if torch.is_tensor(obj2) and obj2.dtype == torch.bool:
                 raise ValueError("dynamic shape in tensor")
-            if dyn.contains(obj2):
-                raise ValueError("dynamic shape in dyn scalar")
         self.call_function(operator.getitem, [obj1, obj2], {})
 
     def unary_operation(self, func: Callable[..., Any]) -> None:
