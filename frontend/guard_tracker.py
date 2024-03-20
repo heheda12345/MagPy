@@ -286,7 +286,8 @@ class State:
         if func in (min, max):
             scalar = None
             node = None
-            assert len(pargs) == 2
+            # NOTE: when pargs < 2, it should be a dynamic operation
+            assert len(pargs) <= 2
             for i, obj in enumerate(pargs):
                 if isinstance(obj, (int, float)) and not dyn.contains(obj):
                     scalar = obj
@@ -1548,7 +1549,9 @@ class GuardTracker:
 
     def is_builtin_func(self, func: Callable[..., Any]) -> bool:
         return func in (dict, tuple, set, list, hasattr, slice, range, len,
-                        type, all, str.join, reversed, zip, iter, id, next)
+                        type, all, str.join, reversed, zip, iter, id, next,
+                        collections.OrderedDict, str.format, any, str,
+                        str.split)
 
     def is_numpy_constant_func(self, func: Callable[..., Any]) -> bool:
         print(dir(func))

@@ -54,6 +54,10 @@ def make_var_from_value(
         extract_code_at_start: Optional[list[StorePos]] = None) -> Variable:
     if extract_code_at_start is None:
         extract_code_at_start = []
+    if type(value) == np.ndarray and value.size == 1:
+        return NumpyScalarVar.from_value(np.int64(value.tolist()),
+                                         need_guard_check, helper_functions,
+                                         fx_graph, extract_code_at_start)
     if type(value) in ty2var:
         return ty2var[type(value)].from_value(value, need_guard_check,
                                               helper_functions, fx_graph,

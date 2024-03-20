@@ -76,7 +76,11 @@ class DictVar(Variable):
             items = []
             for key, j in zip(self.value.keys(), range(len(self.vars))):
                 if isinstance(key, str):
-                    key_part = f"'{key}'"
+                    if "\n" not in key:
+                        key_part = f"'{key}'"
+                    else:
+                        key_part = f"'{repr(key)}'"
+                        key_part = key_part.strip("'")
                 else:
                     key_part = key
                 item = f'{key_part}: {name_in_graph_fn}_{j}'
