@@ -1747,7 +1747,9 @@ class GuardTracker:
                     "flatten_parameters", "numel", "children",
                     "named_parameters", "_weights_have_changed",
                     "check_forward_args", "permute_hidden", "_check_input_dim",
-                    "parameters", "_has_torch_function_unary"):
+                    "parameters", "_has_torch_function_unary", "_is_tracing",
+                    "is_tracing", "is_scripting", "get_autocast_gpu_dtype",
+                    "is_autocast_enabled", "ndimension"):
                 return
             if hasattr(func, "__module__"
                       ) and func.__module__ == 'torch.autograd.profiler':
