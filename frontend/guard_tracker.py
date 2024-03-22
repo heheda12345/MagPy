@@ -144,7 +144,7 @@ class State:
             self.subparam_paths[param] = get_name(prefix, name)
 
     def add_submodule(self, module: torch.nn.Module) -> None:
-        new_module_name = "__external_module__" + str(len(self.submodule_paths))
+        new_module_name = "external_module__" + str(len(self.submodule_paths))
         self.root.add_module(new_module_name, module)
         self.update_subpath(module, new_module_name)
         # self.written = True # not mark as written as graph break may happen
@@ -1238,6 +1238,15 @@ class GuardTracker:
                     (name, x) for x, name in self.state.fx_graph.example_inputs
                 ])
                 print("graph", self.state.fx_graph.result_graph)
+                from .control_flow import CondModule
+                for node in self.state.fx_graph.result_graph.nodes:
+                    if node.op == 'call_module' and '.' not in node.target:
+                        mod = getattr(self.state.root, node.target)
+                        if isinstance(mod, CondModule):
+                            print("CondModule:", node.target)
+                            print("true_body:", mod.true_body.graph)
+                            print("false_body:", mod.false_body.graph)
+
                 graph_code = graph_codegen.get_code()
                 compiled_graph = self.state.fx_graph.compile()
 
@@ -1760,7 +1769,9 @@ class GuardTracker:
                 inplace_ref=inplace_ref,
                 force_new_value=(func in (float, int, min, max) or
                                  (hasattr(func, '__name__') and
-                                  func.__name__ == 'contiguous')))
+                                  func.__name__ == 'contiguous') or
+                                 (isinstance(func, torch.nn.Module) and
+                                  hasattr(func, 'inplace') and func.inplace)))
             return
         elif self.all_scalar_arg(args, kwargs) and self.all_static_arg(
                 args, kwargs):

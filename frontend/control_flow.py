@@ -296,6 +296,3 @@ def if_stmt(cond: bool, if_true: Callable[..., Any],
         break_at_callsite()
     recover()
     return if_run_branch()
-
-
-torch.Tensor.__iter__
