@@ -311,7 +311,9 @@ class State:
             func = math2torch[func]
         if func == torch.from_numpy:
             func = torch.tensor
-
+        if hasattr(func, '__name__') and func.__name__ == 'numpy':
+            if torch.is_tensor(args[0]) or dyn.contains(args[0]):
+                raise ValueError("numpy can't have dynamic args")
         self.written = True
         scalar2tensor: dict[Callable[..., Any], Callable[..., Any]] = {
             float: torch.Tensor.float,
@@ -350,6 +352,9 @@ class State:
                 func = torch.Tensor.new_empty
             elif func == torch.Tensor.item:
                 assert args[0].numel() == 1
+                if args[0].dtype == torch.bool:
+                    raise ValueError(
+                        "The .item() method was applied to a boolean tensor.")
                 func = torch.Tensor.clone
 
             fx_node = self.fx_graph.create_node("call_method", func.__name__,
@@ -840,6 +845,7 @@ class GuardTracker:
     caller: Optional['GuardTracker']
     cf_info: Optional[ControlFlowInfo]
     num_breaks: int
+    layout_sensitive: bool
 
     def __init__(self,
                  frame: FrameType,
@@ -877,6 +883,7 @@ class GuardTracker:
             read_stack=read_stack, frame_cf_info=cf_info
         )  # stack pointer is not initialized at the creation of a stack frame
         self.num_breaks = 0
+        self.layout_sensitive = False
 
     def init_state(self,
                    read_stack: bool = True,
@@ -905,6 +912,9 @@ class GuardTracker:
                 restart_caller=False)
             if self.code.get_inst(self.frame.f_lasti).opname == 'RETURN_VALUE':
                 if trackers[-1] == self:
+                    if self.layout_sensitive == True:
+                        if self.caller is not None:
+                            self.caller.layout_sensitive = True
                     pop_tracker(self.frame_id)
                 set_eval_frame(None)
             return
@@ -957,6 +967,8 @@ class GuardTracker:
     def commit_loop_subgraph(self) -> None:
         key = new_random_key()
         guard_codegen = GuardFnCodegen(key=key)
+        if self.layout_sensitive == True:
+            guard_codegen.layout_sensitive = True
         for var in self.state.objects.get_all():
             while var.prev is not None:
                 var = var.prev
@@ -1177,6 +1189,8 @@ class GuardTracker:
             if self.state.can_guard:
                 key = new_random_key()
                 guard_codegen = GuardFnCodegen(key=key)
+                if self.layout_sensitive == True:
+                    guard_codegen.layout_sensitive = True
                 for var in self.state.objects.get_all():
                     while var.prev is not None:
                         var = var.prev
@@ -1609,11 +1623,22 @@ class GuardTracker:
                         self.state.fx_graph, [pos])
                     self.state.add_object(var, obj)
             return
+        if hasattr(func,
+                   '__name__') and func.__name__ == 'format' and isinstance(
+                       func, type(str.format)):
+            for arg in args:
+                if torch.is_tensor(arg) or dyn.contains(arg):
+                    raise ValueError("format can't have dynamic args")
+        if hasattr(func, '__name__') and (func.__name__ == 'is_contiguous' or
+                                          func.__name__ == 'stride'):
+            self.layout_sensitive = True
         if hasattr(func, '__name__') and func.__name__ == '__init__':
             return
         # a series of classes and functions defined by warnings
         if get_root_module(func) in ('_warnings', 'warnings'):
             return
+        if get_root_module(func) == 'random':
+            raise ValueError("random scalar")
         is_high_order_udf = is_high_order_func_with_udf(func, args, kwargs)
         if is_user_defined_func(func) or isinstance(
                 func, nn.Sequential) or is_high_order_udf:
@@ -1749,7 +1774,9 @@ class GuardTracker:
                     "check_forward_args", "permute_hidden", "_check_input_dim",
                     "parameters", "_has_torch_function_unary", "_is_tracing",
                     "is_tracing", "is_scripting", "get_autocast_gpu_dtype",
-                    "is_autocast_enabled", "ndimension"):
+                    "is_autocast_enabled", "ndimension", "get_enum",
+                    "is_tensor", "is_complex", "is_contiguous", "stride",
+                    "get_device"):
                 return
             if hasattr(func, "__module__"
                       ) and func.__module__ == 'torch.autograd.profiler':
