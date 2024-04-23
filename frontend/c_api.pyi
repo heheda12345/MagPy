@@ -11,6 +11,12 @@ def set_eval_frame(
     pass
 
 
+def set_fallback(
+    new_callback: Optional[Tuple[Callable[..., Any], Callable[..., Any]]]
+) -> Optional[Tuple[Callable[..., Any], Callable[..., Any]]]:
+    pass
+
+
 def set_skip_files(skip_file: set[str], end_file: set[str]) -> None:
     pass
 

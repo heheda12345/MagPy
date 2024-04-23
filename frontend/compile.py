@@ -93,3 +93,5 @@ def reset() -> None:
     fx_graph.reset()
     from . import dynamic
     dynamic.reset()
+    from . import tracer
+    tracer.reset()

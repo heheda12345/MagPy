@@ -31,6 +31,7 @@ from .bytecode_analysis import livevars_analysis, end_of_control_flow
 from .variables.const import ClsByNamedTupleVar
 from .variables.base import Variable
 from .control_flow import ControlFlowInfo, LoopModule, ForLoopInfo, LoopPosMap, if_stmt, IfStmtInfo
+from .config import get_config
 
 MAKE_VAR_FN_TYPE = Callable[[
     Any, bool, vs.HelperFunctions, Optional[FxGraph], Optional[list[StorePos]]
@@ -1551,7 +1552,7 @@ class GuardTracker:
         return func in (dict, tuple, set, list, hasattr, slice, range, len,
                         type, all, str.join, reversed, zip, iter, id, next,
                         collections.OrderedDict, str.format, any, str,
-                        str.split)
+                        str.split, sorted)
 
     def is_numpy_constant_func(self, func: Callable[..., Any]) -> bool:
         print(dir(func))
@@ -2427,11 +2428,6 @@ class GuardTracker:
             #     ]
             # })
             # pass
-            print("check data", seq, type(seq))
-            if self.state.objects.contains(seq):
-                print("jjjjjj")
-            for i in seq:
-                print(i)
             raise NotImplementedError
 
     def UNPACK_EX(self, inst: Instruction) -> None:
@@ -2705,8 +2701,9 @@ def pop_tracker(frame_id: int) -> None:
     print("before pop_tracker", [t.frame_id for t in trackers], "frame_id",
           frame_id)
     to_pop = trackers.pop()
-    assert to_pop.frame_id == frame_id
-    assert to_pop.state.is_empty
+    if not get_config("enable_fallback"):
+        assert to_pop.frame_id == frame_id
+        assert to_pop.state.is_empty
 
 
 def record(frame: FrameType, frame_id: int) -> None:
