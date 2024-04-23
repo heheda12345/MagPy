@@ -19,7 +19,7 @@ from .code import ProcessedCode
 from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method, get_from_freevars, set_value_stack_from_top, parse_cell, set_local
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
-from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromNew, UnknownPosInCaller
+from .store_pos import StoreConstant, StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromNew, UnknownPosInCaller
 from . import variables as vs
 from . import dynamic as dyn
 from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs, print_bytecode, get_method_defined_class, is_math_func, is_high_order_func_with_udf, is_high_order_func, math2torch
@@ -471,6 +471,8 @@ class State:
             raise ValueError("cannot store in stack in callee")
         elif isinstance(pos, (StoreInGlobal, StoreInBuiltin, StoreInFreeVar)):
             return pos
+        elif isinstance(pos, StoreConstant):
+            return pos
         elif isinstance(pos, StoreInAttr):
             # print("in callee", pos, self.frame_id)
             parent_pos = self.store_pos_in_caller(pos.self_pos, pos.self_id)
@@ -492,7 +494,12 @@ class State:
             for p, i in zip(pos.var_pos, pos.var_id):
                 new_pos = self.store_pos_in_caller(p, i)
                 if new_pos is None:
-                    return None
+                    if isinstance(
+                            p,
+                            StoreConstant):  # allow constant function parameter
+                        new_pos = p
+                    else:
+                        return None
                 parent_poses.append(new_pos)
             return ExtractFromFunction(parent_poses, pos.var_id, pos.func_name,
                                        pos.func_obj, pos.need_add_to_fn)
@@ -1638,7 +1645,31 @@ class GuardTracker:
         if get_root_module(func) in ('_warnings', 'warnings'):
             return
         if get_root_module(func) == 'random':
-            raise ValueError("random scalar")
+            for arg in args:
+                if torch.is_tensor(arg) or dyn.contains(arg):
+                    raise ValueError("random func can't have dynamic args")
+            if func.__name__ not in {
+                    'random', 'randint', 'randrange', 'uniform'
+            }:
+                raise ValueError("Not implement random func")
+
+            name = new_name('random')
+            fx_node = self.state.fx_graph.create_input(torch.tensor([0]), name,
+                                                       (), {}, name)
+            self.state.set_partial_var({
+                -1: [
+                    PartialVar(
+                        node=fx_node,
+                        need_guard_check=False,
+                        extract_code_at_start=[
+                            ExtractFromFunction(
+                                [StoreConstant(arg, id(arg)) for arg in args],
+                                [id(arg) for arg in args], func.__name__, func,
+                                True)
+                        ])
+                ]
+            })
+            return
         is_high_order_udf = is_high_order_func_with_udf(func, args, kwargs)
         if is_user_defined_func(func) or isinstance(
                 func, nn.Sequential) or is_high_order_udf:

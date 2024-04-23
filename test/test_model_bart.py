@@ -1392,9 +1392,7 @@ def get_input(batch_size):
     return (input_ids, attention_mask), {}
 
 
-# @pytest.mark.model
-@pytest.mark.skipif(os.getenv('FORCE_RUN_SKIPPED_TEST') != '1',
-                    reason="can't pass due to the handling of module random")
+@pytest.mark.model
 def test_model_bart(caplog):
     reset()
     with torch.no_grad():
