@@ -141,12 +141,14 @@ class GuardFnCodegen(FnCodegen):
     checks: set[tuple[str, StorePos]]
     imports: set[str]
     object_refs: list[Any]  # the reference to objects for id check
+    layout_sensitive: bool
 
     def __init__(self, key: int) -> None:
         super().__init__(key)
         self.checks = set()
         self.imports = set()
         self.object_refs = []
+        self.layout_sensitive = False
 
     def add_check(self, check: tuple[str, StorePos]) -> None:
         self.checks.add(check)

@@ -19,7 +19,7 @@ from .code import ProcessedCode
 from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method, get_from_freevars, set_value_stack_from_top, parse_cell, set_local
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
-from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromNew, UnknownPosInCaller
+from .store_pos import StoreConstant, StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromNew, UnknownPosInCaller
 from . import variables as vs
 from . import dynamic as dyn
 from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs, print_bytecode, get_method_defined_class, is_math_func, is_high_order_func_with_udf, is_high_order_func, math2torch
@@ -312,7 +312,9 @@ class State:
             func = math2torch[func]
         if func == torch.from_numpy:
             func = torch.tensor
-
+        if hasattr(func, '__name__') and func.__name__ == 'numpy':
+            if torch.is_tensor(args[0]) or dyn.contains(args[0]):
+                raise ValueError("numpy can't have dynamic args")
         self.written = True
         scalar2tensor: dict[Callable[..., Any], Callable[..., Any]] = {
             float: torch.Tensor.float,
@@ -351,6 +353,9 @@ class State:
                 func = torch.Tensor.new_empty
             elif func == torch.Tensor.item:
                 assert args[0].numel() == 1
+                if args[0].dtype == torch.bool:
+                    raise ValueError(
+                        "The .item() method was applied to a boolean tensor.")
                 func = torch.Tensor.clone
 
             fx_node = self.fx_graph.create_node("call_method", func.__name__,
@@ -467,6 +472,8 @@ class State:
             raise ValueError("cannot store in stack in callee")
         elif isinstance(pos, (StoreInGlobal, StoreInBuiltin, StoreInFreeVar)):
             return pos
+        elif isinstance(pos, StoreConstant):
+            return pos
         elif isinstance(pos, StoreInAttr):
             # print("in callee", pos, self.frame_id)
             parent_pos = self.store_pos_in_caller(pos.self_pos, pos.self_id)
@@ -488,7 +495,12 @@ class State:
             for p, i in zip(pos.var_pos, pos.var_id):
                 new_pos = self.store_pos_in_caller(p, i)
                 if new_pos is None:
-                    return None
+                    if isinstance(
+                            p,
+                            StoreConstant):  # allow constant function parameter
+                        new_pos = p
+                    else:
+                        return None
                 parent_poses.append(new_pos)
             return ExtractFromFunction(parent_poses, pos.var_id, pos.func_name,
                                        pos.func_obj, pos.need_add_to_fn)
@@ -841,6 +853,7 @@ class GuardTracker:
     caller: Optional['GuardTracker']
     cf_info: Optional[ControlFlowInfo]
     num_breaks: int
+    layout_sensitive: bool
 
     def __init__(self,
                  frame: FrameType,
@@ -878,6 +891,7 @@ class GuardTracker:
             read_stack=read_stack, frame_cf_info=cf_info
         )  # stack pointer is not initialized at the creation of a stack frame
         self.num_breaks = 0
+        self.layout_sensitive = False
 
     def init_state(self,
                    read_stack: bool = True,
@@ -906,6 +920,9 @@ class GuardTracker:
                 restart_caller=False)
             if self.code.get_inst(self.frame.f_lasti).opname == 'RETURN_VALUE':
                 if trackers[-1] == self:
+                    if self.layout_sensitive == True:
+                        if self.caller is not None:
+                            self.caller.layout_sensitive = True
                     pop_tracker(self.frame_id)
                 set_eval_frame(None)
             return
@@ -958,6 +975,8 @@ class GuardTracker:
     def commit_loop_subgraph(self) -> None:
         key = new_random_key()
         guard_codegen = GuardFnCodegen(key=key)
+        if self.layout_sensitive == True:
+            guard_codegen.layout_sensitive = True
         for var in self.state.objects.get_all():
             while var.prev is not None:
                 var = var.prev
@@ -1178,6 +1197,8 @@ class GuardTracker:
             if self.state.can_guard:
                 key = new_random_key()
                 guard_codegen = GuardFnCodegen(key=key)
+                if self.layout_sensitive == True:
+                    guard_codegen.layout_sensitive = True
                 for var in self.state.objects.get_all():
                     while var.prev is not None:
                         var = var.prev
@@ -1610,10 +1631,45 @@ class GuardTracker:
                         self.state.fx_graph, [pos])
                     self.state.add_object(var, obj)
             return
+        if hasattr(func,
+                   '__name__') and func.__name__ == 'format' and isinstance(
+                       func, type(str.format)):
+            for arg in args:
+                if torch.is_tensor(arg) or dyn.contains(arg):
+                    raise ValueError("format can't have dynamic args")
+        if hasattr(func, '__name__') and (func.__name__ == 'is_contiguous' or
+                                          func.__name__ == 'stride'):
+            self.layout_sensitive = True
         if hasattr(func, '__name__') and func.__name__ == '__init__':
             return
         # a series of classes and functions defined by warnings
         if get_root_module(func) in ('_warnings', 'warnings'):
+            return
+        if get_root_module(func) == 'random':
+            for arg in args:
+                if torch.is_tensor(arg) or dyn.contains(arg):
+                    raise ValueError("random func can't have dynamic args")
+            if func.__name__ not in {
+                    'random', 'randint', 'randrange', 'uniform'
+            }:
+                raise ValueError("Not implement random func")
+
+            name = new_name('random')
+            fx_node = self.state.fx_graph.create_input(torch.tensor([0]), name,
+                                                       (), {}, name)
+            self.state.set_partial_var({
+                -1: [
+                    PartialVar(
+                        node=fx_node,
+                        need_guard_check=False,
+                        extract_code_at_start=[
+                            ExtractFromFunction(
+                                [StoreConstant(arg, id(arg)) for arg in args],
+                                [id(arg) for arg in args], func.__name__, func,
+                                True)
+                        ])
+                ]
+            })
             return
         is_high_order_udf = is_high_order_func_with_udf(func, args, kwargs)
         if is_user_defined_func(func) or isinstance(
@@ -1750,7 +1806,9 @@ class GuardTracker:
                     "check_forward_args", "permute_hidden", "_check_input_dim",
                     "parameters", "_has_torch_function_unary", "_is_tracing",
                     "is_tracing", "is_scripting", "get_autocast_gpu_dtype",
-                    "is_autocast_enabled", "ndimension"):
+                    "is_autocast_enabled", "ndimension", "get_enum",
+                    "is_tensor", "is_complex", "is_contiguous", "stride",
+                    "get_device"):
                 return
             if hasattr(func, "__module__"
                       ) and func.__module__ == 'torch.autograd.profiler':

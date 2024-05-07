@@ -115,6 +115,10 @@ class TensorVar(Variable):
         # hasattr(value, 'stride') and self.stride == value.stride() and \
         # hasattr(value, 'is_contiguous') and self.is_contiguous == value.is_contiguous()
 
+    def tensor_strict_guard_check(self, value: torch.Tensor) -> bool:
+        return hasattr(value, 'stride') and self.stride == value.stride() and \
+            hasattr(value, 'is_contiguous') and self.is_contiguous == value.is_contiguous()
+
     def make_guard_inner(self, codegen: "GuardFnCodegen",
                          pos: StorePos) -> None:
         name_in_codegen = codegen.add_obj(self)
@@ -124,6 +128,10 @@ class TensorVar(Variable):
         else:
             codegen.add_check(
                 (f"{name_in_codegen}.tensor_guard_check({pos})", pos))
+            if codegen.layout_sensitive == True:
+                codegen.add_check(
+                    (f"{name_in_codegen}.tensor_strict_guard_check({pos})",
+                     pos))
 
     def make_output_inner(self, name_in_graph_fn: str, store_pos: StorePos,
                           codegen: "GraphFnCodegen", in_return: bool,

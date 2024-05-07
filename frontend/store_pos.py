@@ -1,5 +1,7 @@
-from typing import Any, Optional, TYPE_CHECKING, Callable
+from typing import Any, Optional, TYPE_CHECKING, Callable, Union
 from types import FrameType
+
+from torch import Tensor
 
 from .c_api import get_value_stack_from_top
 if TYPE_CHECKING:
@@ -39,6 +41,21 @@ class StoreInLocal(StorePos):
 
     def get_value_from_frame(self, frame: FrameType) -> Any:
         return frame.f_locals[self.name]
+
+
+class StoreConstant(StorePos):
+    value: Union[int, float]
+    self_id: int
+
+    def __init__(self, value: Union[int, float], self_id: int) -> None:
+        self.value = value
+        self.self_id = self_id
+
+    def __repr__(self) -> str:
+        return str(self.value)
+
+    def get_value_from_frame(self, frame: FrameType) -> Any:
+        return self.value
 
 
 class StoreInGlobal(StorePos):
