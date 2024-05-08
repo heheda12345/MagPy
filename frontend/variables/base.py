@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from abc import abstractmethod
 from typing import Any, TYPE_CHECKING, Optional, Tuple, Iterable, Callable
 from copy import copy
-
+import torch
 from frontend.utils import add_force_graph_break
 
 from ..c_api import get_miss_locals
@@ -90,6 +90,9 @@ class Variable:
             self.make_output_inner(name_in_graph_fn, store_pos, codegen,
                                    in_return, idx)
             for attr, var in self.modified_attrs.items():
+                if isinstance(var.obj, torch.nn.Parameter) and len(
+                        var.extract_code_at_start) == 0:
+                    continue
                 var.make_output(f'{name_in_graph_fn}_dot_{attr}',
                                 StoreInAttr(store_pos, id(self.obj), attr),
                                 codegen, False, id(getattr(self.obj, attr)))

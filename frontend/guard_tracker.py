@@ -1896,6 +1896,18 @@ class GuardTracker:
             # TODO: add map and set correct partial var
             return
         elif is_graph_func(func):
+            if func is operator.getitem:
+                obj_var = self.state.objects.get(args[0])
+                assert obj_var.extract_code_at_start[0]
+                obj_pos = obj_var.extract_code_at_start[0]
+                item_pos = StoreInIndex(obj_pos, id(obj_pos), args[1])
+                self.state.set_partial_var({
+                    -1: [
+                        PartialVar(node=None,
+                                   need_guard_check=False,
+                                   extract_code_at_start=[item_pos])
+                    ]
+                })
             return
         elif len(args) > 0 and isinstance(args[0], torch.nn.ModuleList):
             return
