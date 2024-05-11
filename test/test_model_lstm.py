@@ -349,7 +349,7 @@ def test_lstm_loop(caplog):
                                  hidden_size,
                                  device='cuda')
             expect_result = model(inputs)
-            for_iter_pc = 193
+            for_iter_pc = 32
             mark_dynamic_pc(get_next_frame_id(), for_iter_pc,
                             DynamicControlFlow(for_iter_pc, "FOR_ITER"))
             compiled = compile(model)

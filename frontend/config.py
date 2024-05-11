@@ -5,6 +5,7 @@ CONFIG = {
     "debug": True,
     "miss_threshold": 3,
     "dynshape": False,
+    "model_name": "",
     "enable_fallback": False,
 }
 

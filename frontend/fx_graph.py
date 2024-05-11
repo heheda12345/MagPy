@@ -34,6 +34,41 @@ BaseArgumentTypes = Union[
 NodeArgs = Union[BaseArgumentTypes, torch.fx.Node]
 
 
+def fetch_attr(gm: torch.fx.GraphModule, target: str) -> Any:
+    target_atoms = target.split('.')
+    attr_itr = gm
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(attr_itr, atom):
+            raise RuntimeError(
+                f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}"
+            )
+        attr_itr = getattr(attr_itr, atom)
+    return attr_itr
+
+
+def generate_real_tensors(
+        fake_tensors: list[torch.Tensor]) -> list[torch.Tensor]:
+    real_tensors = []
+    for x in fake_tensors:
+        if x.dtype == torch.float32:
+            real_tensors.append(
+                torch.rand(*x.shape,
+                           dtype=x.dtype,
+                           layout=x.layout,
+                           device=x.device))
+        elif x.dtype == torch.int64:
+            real_tensors.append(
+                torch.randint(0,
+                              2,
+                              size=x.shape,
+                              dtype=x.dtype,
+                              layout=x.layout,
+                              device=x.device))
+        else:
+            raise NotImplementedError
+    return real_tensors
+
+
 def backend_compile(gm: torch.fx.GraphModule,
                     example_inputs: list[torch.Tensor]) -> Any:
     backend = config.get_config('backend')
@@ -42,17 +77,6 @@ def backend_compile(gm: torch.fx.GraphModule,
     elif backend == 'eager':
         return gm
     elif backend == 'inductor':
-
-        def fetch_attr(gm: torch.fx.GraphModule, target: str) -> Any:
-            target_atoms = target.split('.')
-            attr_itr = gm
-            for i, atom in enumerate(target_atoms):
-                if not hasattr(attr_itr, atom):
-                    raise RuntimeError(
-                        f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}"
-                    )
-                attr_itr = getattr(attr_itr, atom)
-            return attr_itr
 
         def eager_due_to_inductor_bug(node: torch.fx.Node) -> bool:
 
@@ -78,26 +102,9 @@ def backend_compile(gm: torch.fx.GraphModule,
 
         module = importlib.import_module('tmp.fx_module_' + random_number)
         model = module.FxModule().cuda().eval()
-        real_inputs = []
-        for x in example_inputs:
-            if x.dtype == torch.float32:
-                real_inputs.append(
-                    torch.rand(*x.shape,
-                               dtype=x.dtype,
-                               layout=x.layout,
-                               device=x.device))
-            elif x.dtype == torch.int64:
-                real_inputs.append(
-                    torch.randint(0,
-                                  2,
-                                  size=x.shape,
-                                  dtype=x.dtype,
-                                  layout=x.layout,
-                                  device=x.device))
-            else:
-                raise NotImplementedError
+        real_inputs = generate_real_tensors(example_inputs)
         with torch.no_grad():
-            script_model = torch.jit.trace(model, real_inputs)
+            script_model = torch.jit.script(model, real_inputs)
             return script_model
     else:
         raise RuntimeError(f"Unknown backend: {backend}")

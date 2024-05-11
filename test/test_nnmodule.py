@@ -127,6 +127,31 @@ def test_map_module(caplog):
     run_and_check(compiled, [HIT], 1, caplog, expect_result, x)
 
 
+class InplaceRelu(torch.nn.Module):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 3, 3)
+        self.bn = torch.nn.BatchNorm2d(3)
+        self.relu = torch.nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.relu(x)
+        return x + 1.0
+
+
+def test_inplace_relu(caplog):
+    reset()
+    model = InplaceRelu().eval()
+    compiled = compile(model)
+    x = torch.randn(1, 3, 3, 3)
+    expect_result = model(x)
+    run_and_check(compiled, [MISS], 1, caplog, expect_result, x)
+    run_and_check(compiled, [HIT], 1, caplog, expect_result, x)
+
+
 if __name__ == "__main__":
     caplog = logging.getLogger(__name__)
     test_call_method(caplog)
