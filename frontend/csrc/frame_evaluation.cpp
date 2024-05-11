@@ -242,9 +242,11 @@ inline static void enable_eval_frame_shim(PyThreadState *tstate) {
 inline static void enable_eval_frame_default(PyThreadState *tstate) {
     if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
         previous_eval_frame) {
-        _PyInterpreterState_SetEvalFrameFunc(tstate->interp,
-                                             previous_eval_frame);
-        previous_eval_frame = NULL;
+        if (previous_eval_frame != NULL) {
+            _PyInterpreterState_SetEvalFrameFunc(tstate->interp,
+                                                 previous_eval_frame);
+            previous_eval_frame = NULL;
+        }
     }
 }
 
@@ -288,6 +290,13 @@ static PyObject *set_eval_frame(PyObject *self, PyObject *args) {
 
     set_eval_frame_callback(new_callback);
     return old_callback;
+}
+
+static PyObject *set_fallback(PyObject *self, PyObject *args) {
+    PyThreadState *tstate = PyThreadState_GET();
+    fprintf(stderr, "Falling back\n");
+    decrese_working_threads(tstate);
+    Py_RETURN_NONE;
 }
 
 // TODO: in a more elegant way
@@ -659,6 +668,7 @@ static PyObject *mark_need_postprocess(PyObject *self, PyObject *args) {
 
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame, METH_VARARGS, NULL},
+    {"set_fallback", set_fallback, METH_VARARGS, NULL},
     {"set_skip_files", set_skip_files, METH_VARARGS, NULL},
     {"set_null_object", set_null_object, METH_VARARGS, NULL},
     {"set_miss_threshold", set_miss_threshold, METH_VARARGS, NULL},

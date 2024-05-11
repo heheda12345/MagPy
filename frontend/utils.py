@@ -156,6 +156,10 @@ def get_root_module(func: Callable[..., Any]) -> str:
     if module is None or 'torch.distributions' in module_str:
         return ""
     root_module = module_str.split('.')[0]
+    #NOTE: special cases in torchvision module, need to check whether this module is safe to record in graph
+    if hasattr(func, '__name__') and func.__name__ in (
+            'pad', 'resize') and root_module == 'torchvision':
+        return 'torch'
     return root_module
 
 

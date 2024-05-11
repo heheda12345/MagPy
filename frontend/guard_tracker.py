@@ -19,7 +19,7 @@ from .code import ProcessedCode
 from .c_api import get_value_stack_from_top, get_value_stack_size, set_eval_frame, stack_effect, get_code_map, is_bound_method, get_from_freevars, set_value_stack_from_top, parse_cell, set_local
 from .instruction import Instruction, ci
 from .cache import CachedGraph, get_frame_cache
-from .store_pos import StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromNew, UnknownPosInCaller
+from .store_pos import StoreConstant, StorePos, StoreInStack, StoreInLocal, StoreInGlobal, StoreInAttr, StoreInIndex, ExtractFromMethod, StoreInBuiltin, ExtractFromFunction, IterValue, StoreInFreeVar, ExtractFromNew, UnknownPosInCaller
 from . import variables as vs
 from . import dynamic as dyn
 from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject, is_call_bytecode, fx_graph_functions, fx_graph_inplace_functions, is_user_defined_func, UnknownTypeError, get_all_objects_in_stack, is_graph_func, get_root_module, torch_inplace_funcs, print_bytecode, get_method_defined_class, is_math_func, is_high_order_func_with_udf, is_high_order_func, math2torch
@@ -31,6 +31,7 @@ from .bytecode_analysis import livevars_analysis, end_of_control_flow
 from .variables.const import ClsByNamedTupleVar
 from .variables.base import Variable
 from .control_flow import ControlFlowInfo, LoopModule, ForLoopInfo, LoopPosMap, if_stmt, IfStmtInfo
+from .config import get_config
 
 MAKE_VAR_FN_TYPE = Callable[[
     Any, bool, vs.HelperFunctions, Optional[FxGraph], Optional[list[StorePos]]
@@ -286,7 +287,8 @@ class State:
         if func in (min, max):
             scalar = None
             node = None
-            assert len(pargs) == 2
+            # NOTE: when pargs < 2, it should be a dynamic operation
+            assert len(pargs) <= 2
             for i, obj in enumerate(pargs):
                 if isinstance(obj, (int, float)) and not dyn.contains(obj):
                     scalar = obj
@@ -310,7 +312,9 @@ class State:
             func = math2torch[func]
         if func == torch.from_numpy:
             func = torch.tensor
-
+        if hasattr(func, '__name__') and func.__name__ == 'numpy':
+            if torch.is_tensor(args[0]) or dyn.contains(args[0]):
+                raise ValueError("numpy can't have dynamic args")
         self.written = True
         scalar2tensor: dict[Callable[..., Any], Callable[..., Any]] = {
             float: torch.Tensor.float,
@@ -349,6 +353,9 @@ class State:
                 func = torch.Tensor.new_empty
             elif func == torch.Tensor.item:
                 assert args[0].numel() == 1
+                if args[0].dtype == torch.bool:
+                    raise ValueError(
+                        "The .item() method was applied to a boolean tensor.")
                 func = torch.Tensor.clone
 
             fx_node = self.fx_graph.create_node("call_method", func.__name__,
@@ -465,6 +472,8 @@ class State:
             raise ValueError("cannot store in stack in callee")
         elif isinstance(pos, (StoreInGlobal, StoreInBuiltin, StoreInFreeVar)):
             return pos
+        elif isinstance(pos, StoreConstant):
+            return pos
         elif isinstance(pos, StoreInAttr):
             # print("in callee", pos, self.frame_id)
             parent_pos = self.store_pos_in_caller(pos.self_pos, pos.self_id)
@@ -486,7 +495,12 @@ class State:
             for p, i in zip(pos.var_pos, pos.var_id):
                 new_pos = self.store_pos_in_caller(p, i)
                 if new_pos is None:
-                    return None
+                    if isinstance(
+                            p,
+                            StoreConstant):  # allow constant function parameter
+                        new_pos = p
+                    else:
+                        return None
                 parent_poses.append(new_pos)
             return ExtractFromFunction(parent_poses, pos.var_id, pos.func_name,
                                        pos.func_obj, pos.need_add_to_fn)
@@ -839,6 +853,7 @@ class GuardTracker:
     caller: Optional['GuardTracker']
     cf_info: Optional[ControlFlowInfo]
     num_breaks: int
+    layout_sensitive: bool
 
     def __init__(self,
                  frame: FrameType,
@@ -876,6 +891,7 @@ class GuardTracker:
             read_stack=read_stack, frame_cf_info=cf_info
         )  # stack pointer is not initialized at the creation of a stack frame
         self.num_breaks = 0
+        self.layout_sensitive = False
 
     def init_state(self,
                    read_stack: bool = True,
@@ -904,6 +920,9 @@ class GuardTracker:
                 restart_caller=False)
             if self.code.get_inst(self.frame.f_lasti).opname == 'RETURN_VALUE':
                 if trackers[-1] == self:
+                    if self.layout_sensitive == True:
+                        if self.caller is not None:
+                            self.caller.layout_sensitive = True
                     pop_tracker(self.frame_id)
                 set_eval_frame(None)
             return
@@ -956,6 +975,8 @@ class GuardTracker:
     def commit_loop_subgraph(self) -> None:
         key = new_random_key()
         guard_codegen = GuardFnCodegen(key=key)
+        if self.layout_sensitive == True:
+            guard_codegen.layout_sensitive = True
         for var in self.state.objects.get_all():
             while var.prev is not None:
                 var = var.prev
@@ -1176,6 +1197,8 @@ class GuardTracker:
             if self.state.can_guard:
                 key = new_random_key()
                 guard_codegen = GuardFnCodegen(key=key)
+                if self.layout_sensitive == True:
+                    guard_codegen.layout_sensitive = True
                 for var in self.state.objects.get_all():
                     while var.prev is not None:
                         var = var.prev
@@ -1557,7 +1580,9 @@ class GuardTracker:
 
     def is_builtin_func(self, func: Callable[..., Any]) -> bool:
         return func in (dict, tuple, set, list, hasattr, slice, range, len,
-                        type, all, str.join, reversed, zip, iter, id, next)
+                        type, all, str.join, reversed, zip, iter, id, next,
+                        collections.OrderedDict, str.format, any, str,
+                        str.split, sorted)
 
     def is_numpy_constant_func(self, func: Callable[..., Any]) -> bool:
         print(dir(func))
@@ -1615,10 +1640,45 @@ class GuardTracker:
                         self.state.fx_graph, [pos])
                     self.state.add_object(var, obj)
             return
+        if hasattr(func,
+                   '__name__') and func.__name__ == 'format' and isinstance(
+                       func, type(str.format)):
+            for arg in args:
+                if torch.is_tensor(arg) or dyn.contains(arg):
+                    raise ValueError("format can't have dynamic args")
+        if hasattr(func, '__name__') and (func.__name__ == 'is_contiguous' or
+                                          func.__name__ == 'stride'):
+            self.layout_sensitive = True
         if hasattr(func, '__name__') and func.__name__ == '__init__':
             return
         # a series of classes and functions defined by warnings
         if get_root_module(func) in ('_warnings', 'warnings'):
+            return
+        if get_root_module(func) == 'random':
+            for arg in args:
+                if torch.is_tensor(arg) or dyn.contains(arg):
+                    raise ValueError("random func can't have dynamic args")
+            if func.__name__ not in {
+                    'random', 'randint', 'randrange', 'uniform'
+            }:
+                raise ValueError("Not implement random func")
+
+            name = new_name('random')
+            fx_node = self.state.fx_graph.create_input(torch.tensor([0]), name,
+                                                       (), {}, name)
+            self.state.set_partial_var({
+                -1: [
+                    PartialVar(
+                        node=fx_node,
+                        need_guard_check=False,
+                        extract_code_at_start=[
+                            ExtractFromFunction(
+                                [StoreConstant(arg, id(arg)) for arg in args],
+                                [id(arg) for arg in args], func.__name__, func,
+                                True)
+                        ])
+                ]
+            })
             return
         is_high_order_udf = is_high_order_func_with_udf(func, args, kwargs)
         if is_user_defined_func(func) or isinstance(
@@ -1753,7 +1813,11 @@ class GuardTracker:
                     "flatten_parameters", "numel", "children",
                     "named_parameters", "_weights_have_changed",
                     "check_forward_args", "permute_hidden", "_check_input_dim",
-                    "parameters"):
+                    "parameters", "_has_torch_function_unary", "_is_tracing",
+                    "is_tracing", "is_scripting", "get_autocast_gpu_dtype",
+                    "is_autocast_enabled", "ndimension", "get_enum",
+                    "is_tensor", "is_complex", "is_contiguous", "stride",
+                    "get_device"):
                 return
             if hasattr(func, "__module__"
                       ) and func.__module__ == 'torch.autograd.profiler':
@@ -1843,6 +1907,18 @@ class GuardTracker:
             # TODO: add map and set correct partial var
             return
         elif is_graph_func(func):
+            if func is operator.getitem:
+                obj_var = self.state.objects.get(args[0])
+                assert obj_var.extract_code_at_start[0]
+                obj_pos = obj_var.extract_code_at_start[0]
+                item_pos = StoreInIndex(obj_pos, id(obj_pos), args[1])
+                self.state.set_partial_var({
+                    -1: [
+                        PartialVar(node=None,
+                                   need_guard_check=False,
+                                   extract_code_at_start=[item_pos])
+                    ]
+                })
             return
         elif len(args) > 0 and isinstance(args[0], torch.nn.ModuleList):
             return
@@ -1901,6 +1977,13 @@ class GuardTracker:
             caller = caller.caller
         return False
 
+    def generic_jump_check(self) -> None:
+        top_value = get_value_stack_from_top(self.frame, 0)
+        if torch.is_tensor(top_value):
+            raise ValueError("generic_jump TensorVariable() by tensor")
+        if dyn.contains(top_value):
+            raise ValueError("generic_jump TensorVariable() by dyn scalar")
+
     def binary_operation(self, func: Callable[..., Any]) -> None:
         obj1 = get_value_stack_from_top(self.frame, 1)
         obj2 = get_value_stack_from_top(self.frame, 0)
@@ -1948,6 +2031,9 @@ class GuardTracker:
     def BINARY_SUBSCR(self, inst: Instruction) -> None:
         obj1 = get_value_stack_from_top(self.frame, 1)
         obj2 = get_value_stack_from_top(self.frame, 0)
+        if torch.is_tensor(obj1):
+            if torch.is_tensor(obj2) and obj2.dtype == torch.bool:
+                raise ValueError("dynamic shape in tensor")
         self.call_function(operator.getitem, [obj1, obj2], {})
 
     def unary_operation(self, func: Callable[..., Any]) -> None:
@@ -2423,11 +2509,6 @@ class GuardTracker:
             #     ]
             # })
             # pass
-            print("check data", seq, type(seq))
-            if self.state.objects.contains(seq):
-                print("jjjjjj")
-            for i in seq:
-                print(i)
             raise NotImplementedError
 
     def UNPACK_EX(self, inst: Instruction) -> None:
@@ -2481,16 +2562,16 @@ class GuardTracker:
         pass
 
     def POP_JUMP_IF_FALSE(self, _inst: Instruction) -> None:
-        pass
+        self.generic_jump_check()
 
     def POP_JUMP_IF_TRUE(self, _inst: Instruction) -> None:
-        pass
+        self.generic_jump_check()
 
     def JUMP_IF_TRUE_OR_POP(self, _inst: Instruction) -> None:
-        pass
+        self.generic_jump_check()
 
     def JUMP_IF_FALSE_OR_POP(self, _inst: Instruction) -> None:
-        pass
+        self.generic_jump_check()
 
     def JUMP_FORWARD(self, inst: Instruction) -> None:
         pass
@@ -2701,8 +2782,9 @@ def pop_tracker(frame_id: int) -> None:
     print("before pop_tracker", [t.frame_id for t in trackers], "frame_id",
           frame_id)
     to_pop = trackers.pop()
-    assert to_pop.frame_id == frame_id
-    assert to_pop.state.is_empty
+    if not get_config("enable_fallback"):
+        assert to_pop.frame_id == frame_id
+        assert to_pop.state.is_empty
 
 
 def record(frame: FrameType, frame_id: int) -> None:

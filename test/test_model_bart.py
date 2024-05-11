@@ -1,3 +1,4 @@
+import os
 import pytest
 from frontend.compile import compile, reset
 from common.checker import assert_equal, run_and_check_cache, run_and_check, HIT, MISS, ALL_MISS

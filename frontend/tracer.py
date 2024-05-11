@@ -4,18 +4,24 @@ import traceback
 from types import FrameType, CodeType
 from typing import Any, Callable, Tuple
 import inspect
-from .guard_tracker import push_tracker, pop_tracker, record
+from .guard_tracker import push_tracker, pop_tracker, record, trackers
 from .cache import enable_cache, check_cache_updated, get_frame_cache
 from .fx_graph import set_frame_root
-from .c_api import set_eval_frame, mark_need_postprocess
+from .c_api import set_eval_frame, mark_need_postprocess, set_fallback
 from .code import ProcessedCode
 from .instruction import format_insts
 from .config import get_config
+
+run_trace_func: bool = True
+fall_back_frames: list[int] = []
 
 
 def get_trace_func(frame_id: int) -> Callable[[FrameType, str, Any], None]:
 
     def trace_func(frame: FrameType, event: str, arg: Any) -> None:
+        global run_trace_func
+        if not run_trace_func and frame_id in fall_back_frames:
+            return None
         try:
             if event == "opcode":
                 opcode = frame.f_code.co_code[frame.f_lasti]
@@ -33,7 +39,17 @@ def get_trace_func(frame_id: int) -> Callable[[FrameType, str, Any], None]:
         except Exception as e:
             print("exception in trace_func:", e, type(e))
             print(traceback.format_exc())
-            raise e
+            if get_config("enable_fallback"):
+                run_trace_func = False
+                for i in trackers:
+                    fall_back_frames.append(i.frame_id)
+                # if len(trackers) > 1:
+                #     disable_trace(frame_id)
+                print("fallback frames", fall_back_frames)
+                set_fallback(None)
+                return None
+            else:
+                raise e
         return None
 
     return trace_func
@@ -116,3 +132,8 @@ def get_process_frame(
         return
 
     return (preprocess_frame, postprocess_frame)
+
+
+def reset() -> None:
+    run_trace_func = True
+    fall_back_frames.clear()

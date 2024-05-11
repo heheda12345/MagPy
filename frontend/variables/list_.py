@@ -114,7 +114,7 @@ class NdarrayVar(Variable):
                  extract_code_at_start: list[StorePos]) -> None:
         super().__init__(need_guard_check, value, extract_code_at_start)
         self.value = value
-        self.length = len(value)
+        self.length = value.size
         self.vars = []
         self.obj_ids = []
         for i, obj in enumerate(value):
