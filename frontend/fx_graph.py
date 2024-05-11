@@ -106,11 +106,6 @@ def backend_compile(gm: torch.fx.GraphModule,
         with torch.no_grad():
             script_model = torch.jit.script(model, real_inputs)
             return script_model
-    elif backend == 'nnf':
-        model_name = config.get_config('model_name')
-        from fx2onnx import compile_with_nnf  # type: ignore[import]
-        real_inputs = generate_real_tensors(example_inputs)
-        return compile_with_nnf(model_name, gm, real_inputs)
     else:
         raise RuntimeError(f"Unknown backend: {backend}")
 
