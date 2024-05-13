@@ -109,9 +109,8 @@ def backend_compile(gm: torch.fx.GraphModule,
         # replace "device(type='cuda', index=0)" with "device('cuda:0')"
         with open(f"{folder_name}/module.py", "r") as f:
             content = f.read()
-        content = re.sub(
-            r"device\(type='cuda', index=([0-9]+)\)", r"device('cuda:\1')",
-            content)
+        content = re.sub(r"device\(type='cuda', index=([0-9]+)\)",
+                         r"device('cuda:\1')", content)
         with open(f"{folder_name}/module.py", "w") as f:
             f.write(content)
 

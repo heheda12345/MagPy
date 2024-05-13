@@ -18,6 +18,7 @@ fall_back_frames: list[int] = []
 
 def get_trace_func(frame_id: int) -> Callable[[FrameType, str, Any], None]:
     is_debug = get_config("debug")
+
     def trace_func(frame: FrameType, event: str, arg: Any) -> None:
         global run_trace_func
         if not run_trace_func and frame_id in fall_back_frames:

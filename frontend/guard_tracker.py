@@ -1172,7 +1172,7 @@ class GuardTracker:
             end_pc = self.code.get_next_orig_pc(lasti)
         if config.get_config('debug'):
             print("commiting", self.frame_id, self.state.start_pc, end_pc,
-                self.code.original_insts[end_pc], lasti)
+                  self.code.original_insts[end_pc], lasti)
         # TODO: can be optimized by only reproduce the modified variables
         if self.state.defer_restart is not None:
             stack_objs = self.state.defer_restart.stack_objs
@@ -1262,9 +1262,9 @@ class GuardTracker:
                 self.state.fx_graph.set_output_nodes(
                     graph_codegen.get_graph_outputs())
                 if config.get_config('debug'):
-                    print("graph input", [
-                        (name, x) for x, name in self.state.fx_graph.example_inputs
-                    ])
+                    print("graph input",
+                          [(name, x)
+                           for x, name in self.state.fx_graph.example_inputs])
                     print("graph", self.state.fx_graph.result_graph)
                     from .control_flow import CondModule
                     for node in self.state.fx_graph.result_graph.nodes:
@@ -1294,7 +1294,8 @@ class GuardTracker:
                 if config.get_config('debug'):
                     print("guard_fn:", guard_fn)
                     print("pc:", self.state.start_pc, end_pc)
-                    print("stack:", self.state.start_stack_size, len(stack_objs))
+                    print("stack:", self.state.start_stack_size,
+                          len(stack_objs))
 
                 get_frame_cache(self.frame_id).add(
                     CachedGraph(
@@ -2784,15 +2785,15 @@ def push_tracker(frame: FrameType,
     trackers.append(new_tracker)
     if config.get_config('debug'):
         print("push tracker", frame_id, "frame", hex(id(frame)),
-            "frame_id", frame_id, "read_stack", read_stack, "cf_info",
-            type(cf_info), "all", [t.frame_id for t in trackers])
+              "frame_id", frame_id, "read_stack", read_stack, "cf_info",
+              type(cf_info), "all", [t.frame_id for t in trackers])
     return new_tracker
 
 
 def pop_tracker(frame_id: int) -> None:
     if config.get_config('debug'):
         print("before pop_tracker", [t.frame_id for t in trackers], "frame_id",
-            frame_id)
+              frame_id)
     to_pop = trackers.pop()
     if not get_config("enable_fallback"):
         assert to_pop.frame_id == frame_id
