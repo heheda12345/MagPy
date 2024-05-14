@@ -30,5 +30,5 @@ LD_PRELOAD=build/ldlong.v3.9.12.so python test/example.py
 # Citation
 If you find DeepVisor useful in your research, please consider citing the following paper:
 
-> DeepVisor: Effective Operator Graph Instantiation for Deep Learning by Execution State Monitoring. Will be appeared in USENIX ATC'24.
+> DeepVisor: Effective Operator Graph Instantiation for Deep Learning by Execution State Monitoring; Chen Zhang, Rongchao Dong, Haojie Wang, Runxin Zhong, Jike Chen, and Jidong Zhai, Tsinghua University; will be appeared in USENIX ATC'24.
 
