@@ -96,11 +96,25 @@ def backend_compile(gm: torch.fx.GraphModule,
             gm, example_inputs)
     elif backend == 'script':
         import os, importlib, re, random
-        random_number = str(random.randint(0, 1000000))
-        os.makedirs('tmp/fx_module_' + random_number, exist_ok=True)
-        gm.to_folder('tmp/fx_module_' + random_number)
+        model_name = config.get_config('model_name')
+        if model_name != "":
+            folder_name = f'tmp/fx_module_{model_name}'
+        else:
+            random_number = str(random.randint(0, 1000000))
+            folder_name = f'tmp/fx_module_{random_number}'
 
-        module = importlib.import_module('tmp.fx_module_' + random_number)
+        os.makedirs(folder_name, exist_ok=True)
+        gm.to_folder(folder_name)
+
+        # replace "device(type='cuda', index=0)" with "device('cuda:0')"
+        with open(f"{folder_name}/module.py", "r") as f:
+            content = f.read()
+        content = re.sub(r"device\(type='cuda', index=([0-9]+)\)",
+                         r"device('cuda:\1')", content)
+        with open(f"{folder_name}/module.py", "w") as f:
+            f.write(content)
+
+        module = importlib.import_module(folder_name.replace('/', '.'))
         model = module.FxModule().cuda().eval()
         real_inputs = generate_real_tensors(example_inputs)
         with torch.no_grad():

@@ -77,7 +77,7 @@ class FrameCache:
             from .bytecode_writter import rewrite_bytecode
             for i in (False, True):
                 if i == is_callee or self.code[i] is not None:
-                    print("new_code for is_callee =", i)
+                    # print("new_code for is_callee =", i)
                     new_code, code_map = rewrite_bytecode(f_code, frame_id, i)
                     self.set_new_code(new_code, code_map, i)
         self.updated = False

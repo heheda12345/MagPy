@@ -17,6 +17,7 @@ fall_back_frames: list[int] = []
 
 
 def get_trace_func(frame_id: int) -> Callable[[FrameType, str, Any], None]:
+    is_debug = get_config("debug")
 
     def trace_func(frame: FrameType, event: str, arg: Any) -> None:
         global run_trace_func
@@ -26,16 +27,19 @@ def get_trace_func(frame_id: int) -> Callable[[FrameType, str, Any], None]:
             if event == "opcode":
                 opcode = frame.f_code.co_code[frame.f_lasti]
                 opname = dis.opname[opcode]
-                print(
-                    f"tracing {event} {opname} {arg} pc={frame.f_lasti} frame={frame_id}({hex(id(frame))})"
-                )
+                if is_debug:
+                    print(
+                        f"tracing {event} {opname} {arg} pc={frame.f_lasti} frame={frame_id}({hex(id(frame))})"
+                    )
                 record(frame, frame_id)
             elif event == "line":
-                print(
-                    f"tracing {event} {frame.f_code.co_filename}:{frame.f_lineno}"
-                )
+                if is_debug:
+                    print(
+                        f"tracing {event} {frame.f_code.co_filename}:{frame.f_lineno}"
+                    )
             else:
-                print(f"tracing {event} in {frame.f_code.co_filename}")
+                if is_debug:
+                    print(f"tracing {event} in {frame.f_code.co_filename}")
         except Exception as e:
             print("exception in trace_func:", e, type(e))
             print(traceback.format_exc())
@@ -61,7 +65,7 @@ def empty_trace_func(_frame: FrameType, _event: str, _arg: Any) -> None:
 
 def enable_trace(frame_id: int) -> None:
     try:
-        print("enable_trace")
+        # print("enable_trace")
         this_frame = inspect.currentframe()
         assert this_frame is not None
         caller_frame = this_frame.f_back
@@ -76,7 +80,7 @@ def enable_trace(frame_id: int) -> None:
 
 def disable_trace(frame_id: int) -> None:
     try:
-        print("disable_trace")
+        # print("disable_trace")
         pop_tracker(frame_id)
         sys.settrace(None)
     except Exception as e:

@@ -511,8 +511,9 @@ class State:
             raise NotImplementedError
 
     def merge_call(self, state: 'State', stack_objs: list[Any]) -> None:
-        print("to merge graph", state.fx_graph.result_graph)
-        print("to merge frameid", state.frame_id, self.frame_id)
+        if config.get_config('debug'):
+            print("to merge graph", state.fx_graph.result_graph)
+            print("to merge frameid", state.frame_id, self.frame_id)
         # self.written = True
         # self.defer_restart = None
         replacement_mapping: dict[torch.fx.Node, torch.fx.Node] = {}
@@ -562,9 +563,9 @@ class State:
                                       ExtractFromMethod, ExtractFromFunction)):
                             self_pos = self.store_pos_in_caller(pos, idx)
                             if self_pos is None:
-                                print(
-                                    "\033[34m[warning] cannot find store pos in caller, skip guard check\033[0m",
-                                    type(var), var.extract_code_at_start)
+                                # print(
+                                #     "\033[34m[warning] cannot find store pos in caller, skip guard check\033[0m",
+                                #     type(var), var.extract_code_at_start)
                                 new_var.need_guard_check = False
                             else:
                                 new_var.extract_code_at_start.append(self_pos)
@@ -1169,8 +1170,9 @@ class GuardTracker:
         end_pc = self.code.get_orig_pc(lasti)
         if end_pc == -1:
             end_pc = self.code.get_next_orig_pc(lasti)
-        print("commiting", self.frame_id, self.state.start_pc, end_pc,
-              self.code.original_insts[end_pc], lasti)
+        if config.get_config('debug'):
+            print("commiting", self.frame_id, self.state.start_pc, end_pc,
+                  self.code.original_insts[end_pc], lasti)
         # TODO: can be optimized by only reproduce the modified variables
         if self.state.defer_restart is not None:
             stack_objs = self.state.defer_restart.stack_objs
@@ -1180,14 +1182,16 @@ class GuardTracker:
 
         if self.state.start_pc == 0 and self.code.original_insts[
                 end_pc].opname == "RETURN_VALUE" and self.caller is not None:
-            print("callee is full graph, merge to caller")
+            if config.get_config('debug'):
+                print("callee is full graph, merge to caller")
             assert len(stack_objs) == 1
             caller = self.caller
             assert caller is not None
             caller.state.merge_call(self.state,
                                     [get_value_stack_from_top(self.frame, 0)])
         elif self.cf_info is not None and self.num_breaks == 1 and self.cf_info.end_pc == end_pc:
-            print("reach end of nested tracker, merge to caller")
+            if config.get_config('debug'):
+                print("reach end of nested tracker, merge to caller")
             self.rewrite_loop_graph()
             stack_objs = get_all_objects_in_stack(self.frame)
             nest_caller = self.caller
@@ -1257,18 +1261,19 @@ class GuardTracker:
 
                 self.state.fx_graph.set_output_nodes(
                     graph_codegen.get_graph_outputs())
-                print("graph input", [
-                    (name, x) for x, name in self.state.fx_graph.example_inputs
-                ])
-                print("graph", self.state.fx_graph.result_graph)
-                from .control_flow import CondModule
-                for node in self.state.fx_graph.result_graph.nodes:
-                    if node.op == 'call_module' and '.' not in node.target:
-                        mod = getattr(self.state.root, node.target)
-                        if isinstance(mod, CondModule):
-                            print("CondModule:", node.target)
-                            print("true_body:", mod.true_body.graph)
-                            print("false_body:", mod.false_body.graph)
+                if config.get_config('debug'):
+                    print("graph input",
+                          [(name, x)
+                           for x, name in self.state.fx_graph.example_inputs])
+                    print("graph", self.state.fx_graph.result_graph)
+                    from .control_flow import CondModule
+                    for node in self.state.fx_graph.result_graph.nodes:
+                        if node.op == 'call_module' and '.' not in node.target:
+                            mod = getattr(self.state.root, node.target)
+                            if isinstance(mod, CondModule):
+                                print("CondModule:", node.target)
+                                print("true_body:", mod.true_body.graph)
+                                print("false_body:", mod.false_body.graph)
 
                 graph_code = graph_codegen.get_code()
                 compiled_graph = self.state.fx_graph.compile()
@@ -1278,16 +1283,19 @@ class GuardTracker:
 {guard_code}
                 """
                 out: Dict[str, Any] = dict()
-                print("RUNNING PY CODE")
-                print(py_code)
+                if config.get_config('debug'):
+                    print("RUNNING PY CODE")
+                    print(py_code)
                 exec(py_code, self.frame.f_globals, out)
                 guard_fn = out["___make_guard_fn"](*guard_codegen.objs.values())
                 graph_fn = out["___make_graph_fn"](compiled_graph,
                                                    *graph_codegen.objs.values())
 
-                print("guard_fn:", guard_fn)
-                print("pc:", self.state.start_pc, end_pc)
-                print("stack:", self.state.start_stack_size, len(stack_objs))
+                if config.get_config('debug'):
+                    print("guard_fn:", guard_fn)
+                    print("pc:", self.state.start_pc, end_pc)
+                    print("stack:", self.state.start_stack_size,
+                          len(stack_objs))
 
                 get_frame_cache(self.frame_id).add(
                     CachedGraph(
@@ -1526,7 +1534,8 @@ class GuardTracker:
         self.state.defer_restart = None
 
     def restart(self, restart_reason: str, restart_caller: bool = True) -> None:
-        print(f"restart: {restart_reason}")
+        if config.get_config('debug'):
+            print(f"restart: {restart_reason}")
         self.have_error = True
         self.num_breaks += 1
         self.commit()
@@ -1585,7 +1594,7 @@ class GuardTracker:
                         str.split, sorted)
 
     def is_numpy_constant_func(self, func: Callable[..., Any]) -> bool:
-        print(dir(func))
+        # print(dir(func))
         if (hasattr(func, '__module__') and 'numpy' in func.__module__ and
                 'random' not in func.__module__):
             return True
@@ -1741,7 +1750,8 @@ class GuardTracker:
                     ]
                 })
                 return
-            print("run into user defined function", func)
+            if config.get_config('debug'):
+                print("run into user defined function", func)
             stack_objs = get_all_objects_in_stack(self.frame)
             self.state.mark_calling_func(func)
             self.state.mark_defer_restart(
@@ -1825,7 +1835,8 @@ class GuardTracker:
             elif hasattr(func, "__self__") and isinstance(
                     func.__self__, torch.autograd.profiler.record_function):
                 return
-            print("record function in graph", func)
+            if config.get_config("debug"):
+                print("record function in graph", func)
             self.state.record_function(
                 func,
                 args,
@@ -2772,15 +2783,17 @@ def push_tracker(frame: FrameType,
         caller = None
     new_tracker = GuardTracker(frame, frame_id, caller, read_stack, cf_info)
     trackers.append(new_tracker)
-    print("push tracker", frame_id, "frame", hex(id(frame)),
-          "frame_id", frame_id, "read_stack", read_stack, "cf_info",
-          type(cf_info), "all", [t.frame_id for t in trackers])
+    if config.get_config('debug'):
+        print("push tracker", frame_id, "frame", hex(id(frame)),
+              "frame_id", frame_id, "read_stack", read_stack, "cf_info",
+              type(cf_info), "all", [t.frame_id for t in trackers])
     return new_tracker
 
 
 def pop_tracker(frame_id: int) -> None:
-    print("before pop_tracker", [t.frame_id for t in trackers], "frame_id",
-          frame_id)
+    if config.get_config('debug'):
+        print("before pop_tracker", [t.frame_id for t in trackers], "frame_id",
+              frame_id)
     to_pop = trackers.pop()
     if not get_config("enable_fallback"):
         assert to_pop.frame_id == frame_id
@@ -2790,7 +2803,7 @@ def pop_tracker(frame_id: int) -> None:
 def record(frame: FrameType, frame_id: int) -> None:
     if id(frame) != id(trackers[-1].frame):
         if trackers[-1].state.calling_func is not None:
-            print("push tracker due to record")
+            # print("push tracker due to record")
             push_tracker(frame, frame_id)
     trackers[-1].record(frame, frame_id)
 
