@@ -319,8 +319,8 @@ class FxGraph:
                 for x in self.example_inputs
             ])
         assert callable(compiled_fn)
-        if self.fake_mode.shape_env is not None:
-            print("shape_env guards", self.fake_mode.shape_env.format_guards())
+        # if self.fake_mode.shape_env is not None:
+        #     print("shape_env guards", self.fake_mode.shape_env.format_guards())
         # TODO: add backend compiler
         return compiled_fn
 
@@ -402,9 +402,9 @@ class FxGraph:
             if self.fake_mode.shape_env._maybe_evaluate_static(g) is not None:
                 print("maybe static")
                 continue
-            print("before simplify", g)
+            # print("before simplify", g)
             g = self.fake_mode.shape_env.simplify(g)
-            print("after simplify", g)
+            # print("after simplify", g)
             try:
                 codegen.add_check(
                     (ShapeGuardPrinter(symbol_to_source).doprint(g), voidpos()))
