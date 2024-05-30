@@ -111,7 +111,7 @@ def backend_compile(gm: torch.fx.GraphModule,
                 new_dict['scale_factor'] = float(new_dict['scale_factor'])
                 node.kwargs = new_dict
                 print(node.kwargs)
-        
+
         gm.recompile()
         os.makedirs(folder_name, exist_ok=True)
         gm.to_folder(folder_name)

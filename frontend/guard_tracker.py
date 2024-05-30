@@ -26,7 +26,7 @@ from .utils import is_scalar, new_random_key, has_force_graph_break, NullObject,
 from .object_table import ObjectTable
 from .pycode_writer import new_name
 from .pycode_generator import GraphFnCodegen, GuardFnCodegen
-from .fx_graph import FxGraph, get_frame_root, is_leaf_module, NodeArgs
+from .fx_graph import FxGraph, get_frame_root, is_leaf_module, NodeArgs, BaseArgumentTypes
 from .bytecode_analysis import livevars_analysis, end_of_control_flow
 from .variables.const import ClsByNamedTupleVar
 from .variables.base import Variable
@@ -1458,7 +1458,6 @@ class GuardTracker:
                                   self.state.fx_graph,
                                   partial.extract_code_at_start)
             else:
-
                 var = make_var_fn(value, partial.need_guard_check,
                                   self.state.objects.helper_functions,
                                   self.state.fx_graph,
@@ -1593,10 +1592,12 @@ class GuardTracker:
                         collections.OrderedDict, str.format, any, str,
                         str.split, sorted)
 
-    def is_numpy_constant_func(self, func: Callable[..., Any]) -> bool:
-        # print(dir(func))
-        if (hasattr(func, '__module__') and 'numpy' in func.__module__ and
-                'random' not in func.__module__):
+    def is_numpy_func(self, func: Callable[..., Any]) -> bool:
+        if get_root_module(func) == 'numpy':
+            return True
+        if hasattr(
+                func, '__module__'
+        ) and func.__module__ is not None and 'numpy' in func.__module__:
             return True
         if type(func) == np.ufunc:
             return True
@@ -1623,13 +1624,24 @@ class GuardTracker:
         if func == operator.is_ and args[1] is None:  # is_none check
             return
         if func == enumerate:
-            assert len(args) == 1
             assert len(kwargs) == 0
-            var = self.state.objects.get_or_none(args[0])
-            assert var is not None
+            vars = [
+                self.state.objects.get(a, allow_unexist_const=True)
+                for a in args
+            ]
+            assert all(v is not None for v in vars)
+            poss: list[list[StorePos]] = []
+            for a, var in zip(args, vars):
+                if len(var.extract_code_at_start) > 0:
+                    poss.append(var.extract_code_at_start)
+                elif isinstance(a, (int, float)):
+                    poss.append([StoreConstant(a, id(a))])
+            pos_product: list[list[StorePos]] = list(
+                itertools.product(*poss))  # type: ignore
+            arg_ids = [id(a) for a in args]
             new_store_pos: list[StorePos] = [
-                ExtractFromFunction([pos], [id(args[0])], func.__name__, func)
-                for pos in var.extract_code_at_start
+                ExtractFromFunction(p, arg_ids, func.__name__, func)
+                for p in pos_product
             ]
             self.state.set_partial_var({
                 -1: [
@@ -1827,7 +1839,7 @@ class GuardTracker:
                     "is_tracing", "is_scripting", "get_autocast_gpu_dtype",
                     "is_autocast_enabled", "ndimension", "get_enum",
                     "is_tensor", "is_complex", "is_contiguous", "stride",
-                    "get_device"):
+                    "get_device", "Size", "_output_padding"):
                 return
             if hasattr(func, "__module__"
                       ) and func.__module__ == 'torch.autograd.profiler':
@@ -1859,13 +1871,10 @@ class GuardTracker:
                     ]
                 })
             return
-        elif get_root_module(func) == 'numpy' or has_ndarray_flag:
-            print("record numpy function in graph", func)
-            # self.state.record_function(func,
-            #                            args,
-            #                            kwargs,
-            #                            inplace_ref=inplace_ref,
-            #                            force_new_value=False)
+        elif self.is_numpy_func(func) or has_ndarray_flag:
+            if hasattr(func, '__self__') and isinstance(func.__self__,
+                                                        np.random.RandomState):
+                raise ValueError("numpy random function")
             self.state.set_partial_var({
                 -1: [
                     PartialVar(node=None,
@@ -1932,8 +1941,6 @@ class GuardTracker:
                 })
             return
         elif len(args) > 0 and isinstance(args[0], torch.nn.ModuleList):
-            return
-        elif self.is_numpy_constant_func(func):
             return
         elif self.has_unknown_arg(args, kwargs):
             print(

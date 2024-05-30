@@ -43,6 +43,8 @@ def get_trace_func(frame_id: int) -> Callable[[FrameType, str, Any], None]:
         except Exception as e:
             print("exception in trace_func:", e, type(e))
             print(traceback.format_exc())
+            print("code stack:")
+            traceback.print_stack(f=frame, file=sys.stdout)
             if get_config("enable_fallback"):
                 run_trace_func = False
                 for i in trackers:
