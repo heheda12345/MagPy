@@ -149,6 +149,10 @@ def get_root_module(func: Callable[..., Any]) -> str:
     if hasattr(func, '__class__') and func.__class__ == np.ufunc:
         return 'numpy'
 
+    if hasattr(func, '__self__') and isinstance(func.__self__,
+                                                np.random.RandomState):
+        return 'numpy'
+
     module = inspect.getmodule(func)
     module_str = ""
     if module is not None:
@@ -197,6 +201,8 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
     if hasattr(func, '__self__'):
         if isinstance(func.__self__, (torch.Tensor, random.Random)):
             return False
+        elif isinstance(func.__self__, numpy.random.RandomState):
+            return False
         elif isinstance(func.__self__, (list, tuple, set, dict, str)):
             return False
         elif isinstance(func.__self__, torch.nn.Sequential):
@@ -223,6 +229,7 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
         return False
 
     root_module = get_root_module(func)
+    print("root module", func, "===is==", root_module, type(root_module))
     if root_module == 'torch' and hasattr(
             func, '__name__') and func.__name__ == '_call_impl':
         return True
@@ -447,7 +454,9 @@ def is_high_order_func_with_udf(func: Callable[..., Any], args: List[Any],
         return len(args) >= 1 and call_user_defined_iterator(args[0])
     elif func == tuple:
         return len(args) >= 1 and call_user_defined_iterator(
-            args[0]) and not isinstance(args[0], Generator)
+            args[0]) and not isinstance(
+                args[0],
+                Generator)  # generator contains yield, which is not support yet
     elif func == iter:
         return len(args) >= 1 and is_user_defined_iter(args[0])
     elif func == enumerate:

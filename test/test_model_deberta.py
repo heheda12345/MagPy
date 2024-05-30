@@ -4,6 +4,7 @@ from frontend.utils import enable_dyn_shape
 from common.checker import assert_equal, run_and_check_cache, run_and_check, HIT, MISS, ALL_MISS
 from transformers import AutoTokenizer, AutoConfig, AutoModel
 import torch
+import os
 
 # dynamo compile error in torch 2.0.1: torch._dynamo.exc.BackendCompilerFailed: debug_wrapper raised ValueError: Cannot view a tensor with shape torch.Size([1, 512, 12, 64]) and strides (393216, 64, 32768, 1) as a tensor with shape (1, 512, 768)!
 # 10.4: dont know how to reproduce the bug
@@ -1160,13 +1161,12 @@ def get_model():
     return model
 
 
-def get_input(batch_size):
+def get_input(batch_size, seq_len=256):
     # tokenizer = AutoTokenizer.from_pretrained(model_name)
     # inputs = tokenizer("Hello world! Hello world! Hello world! Hello world! Hello world!", return_tensors="pt").to(device)
     # assert len(inputs) == 3
     # return (inputs['input_ids'], inputs['attention_mask'], inputs['token_type_ids']), {}
     vocab_size = 50265
-    seq_len = 256
     input_ids = torch.randint(0,
                               vocab_size, (batch_size, seq_len),
                               dtype=torch.int64).to(device)
@@ -1200,6 +1200,29 @@ def test_model_deberta_dyn(caplog):
             model = get_model().eval()
             input_args1, input_kwargs1 = get_input(batch_size=5)
             input_args2, input_kwargs2 = get_input(batch_size=7)
+            expect1 = model(*input_args1, **input_kwargs1)
+            expect2 = model(*input_args2, **input_kwargs2)
+            compiled = compile(model)
+            run_and_check(compiled, [ALL_MISS], 1, caplog, expect1,
+                          *input_args1, **input_kwargs1)
+            run_and_check(compiled, [HIT], 1, caplog, expect1, *input_args1,
+                          **input_kwargs1)
+            run_and_check(compiled, [HIT], 1, caplog, expect2, *input_args2,
+                          **input_kwargs2)
+
+
+# need this command before the unit test:
+# sed -i 's/py_all(a\.shape\[i\] for i in dims)/py_all(a.shape[i] > 0 for i in dims)/g' `python3 -c 'import torch; print(torch.__path__[0])'`/_refs/__init__.py
+@pytest.mark.skipif(os.getenv('FORCE_RUN_SKIPPED_TEST') != '1',
+                    reason="will affect other tests, run it solo")
+@pytest.mark.model
+def test_model_deberta_dynlen(caplog):
+    reset()
+    with enable_dyn_shape():
+        with torch.no_grad():
+            model = get_model().eval()
+            input_args1, input_kwargs1 = get_input(batch_size=2, seq_len=40)
+            input_args2, input_kwargs2 = get_input(batch_size=2, seq_len=48)
             expect1 = model(*input_args1, **input_kwargs1)
             expect2 = model(*input_args2, **input_kwargs2)
             compiled = compile(model)

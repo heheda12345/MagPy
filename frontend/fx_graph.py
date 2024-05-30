@@ -102,7 +102,17 @@ def backend_compile(gm: torch.fx.GraphModule,
         else:
             random_number = str(random.randint(0, 1000000))
             folder_name = f'tmp/fx_module_{random_number}'
+        for node in gm.graph.nodes:
+            # to avoid error like
+            # interpolate(Tensor input, int? size=None, float[]? scale_factor=None, str mode="nearest", bool? align_corners=None, bool? recompute_scale_factor=None, bool antialias=False) -> Tensor:
+            # Expected a value of type 'Optional[List[float]]' for argument 'scale_factor' but instead found type 'int'.
+            if node.target == torch.nn.functional.interpolate and 'scale_factor' in node.kwargs:
+                new_dict = {k: v for k, v in node.kwargs.items()}
+                new_dict['scale_factor'] = float(new_dict['scale_factor'])
+                node.kwargs = new_dict
+                print(node.kwargs)
 
+        gm.recompile()
         os.makedirs(folder_name, exist_ok=True)
         gm.to_folder(folder_name)
 
