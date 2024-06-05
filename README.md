@@ -1,15 +1,15 @@
-# DeepVisor
-DeepVisor is a JIT compiler for PyTorch programs. It can extract the operator graph from PyTorch programs and optimize the graph with a wide range of deep learning graph compilers.
+# MagPy
+MagPy is a JIT compiler for PyTorch programs. It can extract the operator graph from PyTorch programs and optimize the graph with a wide range of deep learning graph compilers.
 
 # Installation
-DeepVisor now supports Python 3.9. The support of other Python versions is working in progress.
+MagPy now supports Python 3.9. The support of other Python versions is working in progress.
 
 1. Install CUDA. CUDA 11.8 is recommended.
 2. Install dependencies:
     ```bash
     pip install -r requirements.txt -f https://download.pytorch.org/whl/torch_stable.html
     ```
-3. Install DeepVisor:
+3. Install MagPy:
     ```bash
     pip install -e .
     ```
@@ -21,14 +21,14 @@ DeepVisor now supports Python 3.9. The support of other Python versions is worki
 
 # Example Usage
 
-The following script compiles and runs a simple PyTorch program with DeepVisor.
+The following script compiles and runs a simple PyTorch program with MagPy.
 
 ```python
 LD_PRELOAD=build/ldlong.v3.9.12.so python test/example.py
 ```
 
 # Citation
-If you find DeepVisor useful in your research, please consider citing the following paper:
+If you find MagPy useful in your research, please consider citing the following paper:
 
-> DeepVisor: Effective Operator Graph Instantiation for Deep Learning by Execution State Monitoring; Chen Zhang, Rongchao Dong, Haojie Wang, Runxin Zhong, Jike Chen, and Jidong Zhai, Tsinghua University; will be appeared in USENIX ATC'24.
+> MagPy: Effective Operator Graph Instantiation for Deep Learning by Execution State Monitoring; Chen Zhang, Rongchao Dong, Haojie Wang, Runxin Zhong, Jike Chen, and Jidong Zhai, Tsinghua University; will be appeared in USENIX ATC'24.
 

@@ -229,7 +229,7 @@ def is_user_defined_func(func: Callable[..., Any]) -> bool:
         return False
 
     root_module = get_root_module(func)
-    print("root module", func, "===is==", root_module, type(root_module))
+    # print("root module", func, "===is==", root_module, type(root_module))
     if root_module == 'torch' and hasattr(
             func, '__name__') and func.__name__ == '_call_impl':
         return True
